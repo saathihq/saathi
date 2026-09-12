@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.DS_Store
+*.log
+
+# Local secrets and machine-specific config
+.env
+.env.local
+.dev.vars
+
+# Harness-created git worktrees
+.claude/worktrees/
