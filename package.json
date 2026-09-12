@@ -1,0 +1,22 @@
+{
+  "name": "saathi",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A companion for learning and playing with new things, approached from the accessibility side.",
+  "workspaces": [
+    "contract",
+    "backend"
+  ],
+  "scripts": {
+    "generate": "npm run generate -w contract",
+    "check:contract": "npm run check -w contract",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test:mac": "cd macos/Saathi && swift test",
+    "test:win": "cd windows && dotnet test Saathi.sln"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

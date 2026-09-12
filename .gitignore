@@ -1,6 +1,20 @@
+# Node
 node_modules/
 dist/
 build/
+
+# Swift / SwiftPM
+.build/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+
+# .NET
+bin/
+obj/
+*.user
+
+# macOS
 .DS_Store
 *.log
 
@@ -8,6 +22,9 @@ build/
 .env
 .env.local
 .dev.vars
+# `~/.saathi/shell.json` lives outside the repo, but never let a stray copy in: it holds a token.
+.saathi/
+*.local.json
 
 # Harness-created git worktrees
 .claude/worktrees/

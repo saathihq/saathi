@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    SaathiContract.cs in this directory is GENERATED from contract/schema/saathi.json.
+    Never edit it: `npm run generate -w contract` rewrites it, and CI fails any PR where what is
+    checked in here does not match what the schema produces.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Saathi.Contract</RootNamespace>
+  </PropertyGroup>
+</Project>

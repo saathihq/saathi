@@ -1,0 +1,12 @@
+{
+  "name": "@saathi/contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The single source of truth every Saathi client and the backend agree on. Swift, C# and TypeScript are generated from schema/saathi.json.",
+  "main": "generated/ts/contract.ts",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "check": "node generate.mjs --check"
+  }
+}

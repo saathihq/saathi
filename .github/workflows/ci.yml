@@ -1,0 +1,110 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Path-filtered on purpose. This is a monorepo because Swift and C# cannot share code, so the
+# contract is the only thing binding the two clients and nothing about it is checked by a compiler —
+# one CI run that builds both is the cheapest enforcement there is. The filter is what stops that
+# costing a macOS and a Windows runner on every backend typo: a client-only change builds only that
+# client, and a change to the contract or the backend builds everything.
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      mac: ${{ steps.filter.outputs.mac }}
+      win: ${{ steps.filter.outputs.win }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core:
+              - 'contract/**'
+              - 'backend/**'
+              - 'package.json'
+              - '.github/workflows/**'
+            mac:
+              - 'macos/**'
+            win:
+              - 'windows/**'
+
+  # The gate that makes drift structurally impossible rather than a discipline problem: regenerate
+  # from the schema and fail if what is checked in differs. Runs on every PR, because a hand-edited
+  # generated file is exactly the thing that would otherwise slip through a path filter.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generated contract is up to date with the schema
+        run: node contract/generate.mjs --check
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  macos-client:
+    needs: changes
+    if: needs.changes.outputs.mac == 'true' || needs.changes.outputs.core == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        working-directory: macos/Saathi
+        run: |
+          swift build
+          swift test
+
+  windows-client:
+    needs: changes
+    if: needs.changes.outputs.win == 'true' || needs.changes.outputs.core == 'true'
+    # ubuntu, not windows: every project under windows/ targets net8.0 rather than net8.0-windows
+    # precisely so the contract and its rules stay verifiable on a cheap runner (and on a
+    # maintainer's Mac). When the WPF shell lands it brings a windows-latest job of its own — it is
+    # the only part that needs one.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build and test
+        working-directory: windows
+        run: |
+          dotnet build Saathi.sln --configuration Release
+          dotnet test Saathi.sln --configuration Release --no-build
+
+  # Two independent implementations of one contract are only worth having if they actually agree.
+  # This runs both CLIs and diffs them: it is the test that no single-language suite can express.
+  parity:
+    needs: changes
+    if: needs.changes.outputs.core == 'true' || needs.changes.outputs.mac == 'true' || needs.changes.outputs.win == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build both clients
+        run: |
+          (cd macos/Saathi && swift build)
+          (cd windows && dotnet build Saathi.sln)
+      - name: The two clients must say the same things
+        run: bash scripts/check-parity.sh
