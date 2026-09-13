@@ -2,8 +2,10 @@
 //  api/index.ts
 //  The Vercel Function that serves api.saathi.dev.
 //
+//  This project serves api.saathi.dev only; the website is a separate repository.
+//
 //  ── Why the path arrives in a query parameter ────────────────────────────────
-//  A Vercel rewrite replaces the request path, so a function reached by rewrite cannot see where
+//  A Vercel rewrite replaces the request path, so a function reached by rewrite cannot see what
 //  the caller actually asked for. The obvious fix — Vercel's own catch-all, `api/[...route].ts` —
 //  does not work here: outside a framework, the `api/` directory compiles `[...route]` to
 //  `^/api/([^/]+)$`, a SINGLE path segment. `/api/health` reaches it and `/api/a/b` gets a platform
@@ -28,10 +30,6 @@ const app = createApp({ SAATHI_TOKENS: process.env.SAATHI_TOKENS });
 
 export default function handler(request: Request): Response | Promise<Response> {
   const incoming = new URL(request.url);
-
-  // Vercel also appends `host=<hostname>` to the host-rewrite route (but not to the /api/* one), so
-  // the same request reaches the app with a slightly different query depending on which hostname it
-  // came in on. Nothing reads query parameters today; if something starts to, strip `host` here.
 
   // Put the original path back, and take the marker out of the query so the app never sees it.
   const path = incoming.searchParams.get("__path") || "/";

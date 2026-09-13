@@ -1,0 +1,6 @@
+This directory is deliberately empty.
+
+vercel.json points `outputDirectory` here so that Vercel serves NOTHING statically. Pointed at the
+repository root instead, Vercel's filesystem handler runs before the rewrites and hands out source
+files over HTTP — `GET /api/index.ts` returned the function's own source, verified with `vercel dev`.
+An API project should have no static surface at all.

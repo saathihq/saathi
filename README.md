@@ -19,9 +19,8 @@ saathi/
 ├─ backend/       the key-holding side (Hono/Node), served at api.saathi.dev
 ├─ macos/Saathi/  the macOS client — Swift package (SaathiKit + a `saathi` CLI)
 ├─ windows/       the Windows client — .NET 8 (Saathi.Contract, Saathi.Core, a `saathi` CLI)
-├─ site/          the static site served at saathi.dev — plain HTML/CSS, no build step
 ├─ api/           the Vercel Function that serves api.saathi.dev (wraps backend/)
-└─ selfhost/      Docker + Caddy, for running the whole thing on your own box instead
+└─ selfhost/      Docker + Caddy, for running the backend on your own box instead
 ```
 
 One repository, not two, and the reason is specific: Swift and C# **cannot share a line of code**,
@@ -51,23 +50,26 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
 
 Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
 
-### Hosting — one Vercel project, both hostnames
+### Hosting — this repository serves `api.saathi.dev`
 
-`saathi.dev` is the static site in `site/`; `api.saathi.dev` is rewritten onto the
-Hono function in `api/`. One project, one deploy, no server to keep alive.
+Every path is rewritten onto the Hono function in `api/`. There is no static
+content: `outputDirectory` points at an empty `public/` on purpose.
 
 ```bash
 vercel            # preview deploy
 vercel --prod     # production
 ```
 
-Then attach both domains to the project in the Vercel dashboard. **Vercel prints
-the exact DNS records to add at Porkbun** (where `saathi.dev` is registered) —
-take them from there rather than from memory, because they differ per project:
-an existing project of ours uses `A 216.198.79.1` for its apex and a
-project-specific `CNAME …vercel-dns-017.com` for its subdomain.
+Then attach `api.saathi.dev` in the Vercel dashboard. **Take the DNS records
+Vercel prints** (Porkbun holds `saathi.dev`) rather than copying them from
+anywhere else — they are project-specific.
 
-Two things worth knowing about how this is wired:
+**The website is a separate, private repository** (`saathi-site`) with its own
+Vercel project on `saathi.dev`. Saathi is open source; the marketing page is not
+part of what people are invited to read, fork or run, and keeping them apart also
+means a copy change never rebuilds the API.
+
+Three things worth knowing about how this is wired:
 
 - **The function runs on the `edge` runtime.** `hono/vercel` returns a
   web-standard `(Request) => Response`, which is the edge signature; on the
@@ -78,16 +80,20 @@ Two things worth knowing about how this is wired:
   the path, and Vercel's own catch-all (`api/[...route].ts`) compiles to a
   *single* path segment outside a framework — `/api/a/b` never reaches the
   function at all. `vercel.json` carries the real path across instead.
+- **`outputDirectory` must not be the repository root.** Vercel's filesystem
+  handler runs *before* rewrites, so with the root as the static directory
+  `GET /api/index.ts` returns the function's own source over HTTP, and so does
+  every other file. It points at an empty `public/` instead.
 
-Both were found by running `vercel dev` and `vercel build` against this config,
-not by reading docs.
+All three were found by running `vercel dev` and `vercel build` against this
+config, not by reading docs.
 
 ### Self-hosting
 
 Because the backend holds provider keys, running your own is a first-class
 option — a hosted default only means something if the alternative actually
-works. `selfhost/` has a Dockerfile, a compose file, a Caddy site block for both
-hostnames, and a script that deploys them to a VPS:
+works. `selfhost/` has a Dockerfile, a compose file, a Caddy site block and a
+script that deploys the backend to a VPS:
 
 ```bash
 export SAATHI_SERVER=root@your-box      # no default target is baked into the repo
@@ -174,5 +180,6 @@ unanswered questions:
 - **Neither hostname resolves yet, and nothing has been deployed.** A Vercel project named `saathi`
   exists (created by `vercel build`) but has never been deployed, and the Porkbun DNS records do not
   exist. `saathi health` fails against the default backend until both are done.
-- **The site says the product does not exist**, because it does not. When that changes, `site/` needs
-  changing with it — it is deliberately not written as though there were something to sign up for.
+- **The website says the product does not exist**, because it does not. When that changes, the
+  `saathi-site` repository needs changing with it — it is deliberately not written as though there
+  were something to sign up for.
