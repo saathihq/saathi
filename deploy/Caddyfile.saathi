@@ -1,0 +1,47 @@
+# Both Saathi hostnames, appended once to /etc/caddy/Caddyfile by scripts/deploy.sh.
+# __SITE_HOST__ and __API_HOST__ are substituted at deploy time from $SAATHI_SITE_HOST and
+# $SAATHI_API_HOST — the file is a template so pointing the deploy at a staging host does not
+# silently write a site block for the production name.
+
+__SITE_HOST__ {
+	root * /var/www/saathi
+	encode gzip zstd
+	file_server
+
+	# The static site is fingerprint-free, so HTML must not be cached hard or a deploy takes an
+	# hour to show up. CSS/JS/SVG can be cached for a day without the same risk.
+	@html path *.html /
+	header @html Cache-Control "public, max-age=300, must-revalidate"
+
+	@assets path *.css *.js *.svg *.woff2
+	header @assets Cache-Control "public, max-age=86400"
+
+	header {
+		# The site loads Google Fonts and nothing else; no inline script, no third-party JS.
+		Content-Security-Policy "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; connect-src 'self' https://__API_HOST__; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	handle_errors {
+		@404 expression {err.status_code} == 404
+		rewrite @404 /404.html
+		file_server
+	}
+}
+
+__API_HOST__ {
+	encode gzip
+	reverse_proxy 127.0.0.1:8787 {
+		# The companion streams; buffering a stream defeats the point of streaming it.
+		flush_interval -1
+		transport http {
+			read_timeout 10m
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+	}
+}

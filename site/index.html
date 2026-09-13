@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saathi — someone to learn things with</title>
+<meta name="description" content="Saathi is a companion for learning and playing with new things, approached from the accessibility side. Open source, early, and honest about what is built.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://saathi.dev/">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://saathi.dev/">
+<meta property="og:title" content="Saathi — someone to learn things with">
+<meta property="og:description" content="A companion for learning and playing with new things, approached from the accessibility side.">
+<meta name="twitter:card" content="summary">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- N3 side-rail. It is the page's position indicator, and it is the same idea
+     the product is built on: you can always tell where you are and how much is
+     left, without going to look for it. -->
+<nav class="rail" aria-label="Sections">
+  <span class="rail__mark" aria-hidden="true"></span>
+
+  <ul class="rail__steps">
+    <li><a class="rail__step" href="#s1"><span class="visually-hidden">Section </span>1<span class="visually-hidden">: What it is</span></a></li>
+    <li><a class="rail__step" href="#s2"><span class="visually-hidden">Section </span>2<span class="visually-hidden">: How it behaves</span></a></li>
+    <li><a class="rail__step" href="#s3"><span class="visually-hidden">Section </span>3<span class="visually-hidden">: Where it runs</span></a></li>
+    <li><a class="rail__step" href="#s4"><span class="visually-hidden">Section </span>4<span class="visually-hidden">: What is built</span></a></li>
+    <li><a class="rail__step" href="#s5"><span class="visually-hidden">Section </span>5<span class="visually-hidden">: What is still open</span></a></li>
+  </ul>
+
+  <span class="rail__count" aria-hidden="true">5 steps</span>
+</nav>
+
+<div class="page">
+
+  <header class="wrap hero">
+    <span class="hero__mark" lang="hi">साथी</span>
+    <h1 class="hero__display">Someone to learn things with.</h1>
+    <p class="hero__lede">
+      Saathi is a companion that talks you through something new — one step at a
+      time, out loud, at whatever pace you want.
+    </p>
+
+    <div class="hero__actions">
+      <a class="btn" href="#s1">Read the premise <span class="btn__arrow" aria-hidden="true">→</span></a>
+      <a class="btn btn--quiet" href="https://github.com/saathihq/saathi">See the code</a>
+    </div>
+
+    <p class="hero__status">Early — the skeleton is built, the product is not</p>
+  </header>
+
+  <main id="main">
+
+    <section class="stage" id="s1" aria-labelledby="s1-title">
+      <div class="wrap">
+        <div class="stage__head">
+          <span class="stage__num">Step 1 of 5</span>
+          <h2 class="stage__title" id="s1-title">Accessibility is the way in, not a later pass.</h2>
+        </div>
+        <p class="stage__body">
+          <em>Saathi</em> (साथी) means companion. The premise is that the qualities
+          which make software usable for someone who needs them — patience, saying
+          what is happening out loud, never demanding a precise click, working
+          entirely by voice — are the same qualities that make a good companion for
+          <strong>anyone</strong> learning something new.
+        </p>
+        <p class="stage__body">
+          So the accessibility framing is not a compliance pass bolted on at the
+          end. It is the thing that makes the product good at all.
+        </p>
+      </div>
+    </section>
+
+    <section class="stage" id="s2" aria-labelledby="s2-title">
+      <div class="wrap">
+        <div class="stage__head">
+          <span class="stage__num">Step 2 of 5</span>
+          <h2 class="stage__title" id="s2-title">It always says where you are.</h2>
+        </div>
+        <p class="stage__body">
+          Someone who cannot see a progress bar still needs to know how much is
+          left. Someone who can see one is not harmed by hearing it. So every step
+          announces its own position, every time:
+        </p>
+
+        <div class="spoken">
+          <p class="visually-hidden">An example exchange.</p>
+          <div class="spoken__row">
+            <span class="spoken__who">You</span>
+            <p class="spoken__what">Teach me to make dal.</p>
+          </div>
+          <div class="spoken__row spoken__row--saathi">
+            <span class="spoken__who">Saathi</span>
+            <p class="spoken__what"><span class="spoken__pos">Step 1 of 4.</span> Rinse the lentils until the water runs clear. Takes about a minute.</p>
+          </div>
+          <div class="spoken__row">
+            <span class="spoken__who">You</span>
+            <p class="spoken__what">Slower.</p>
+          </div>
+          <div class="spoken__row spoken__row--saathi">
+            <span class="spoken__who">Saathi</span>
+            <p class="spoken__what">Of course. <span class="spoken__pos">Still step 1 of 4.</span> Put them in a bowl, cover with cold water, and swirl with your hand.</p>
+          </div>
+        </div>
+
+        <ul class="commits">
+          <li class="commit">
+            <p class="commit__title">It narrates</p>
+            <p class="commit__body">Saying what is happening is the primary output, not an accessibility affordance layered over a visual one.</p>
+          </li>
+          <li class="commit">
+            <p class="commit__title">It can be interrupted</p>
+            <p class="commit__body">“Slower”, “again”, “skip that” are first-class. A companion you cannot interrupt is a lecture.</p>
+          </li>
+          <li class="commit">
+            <p class="commit__title">It cannot be misheard into harm</p>
+            <p class="commit__body">Every choice a mishearing could land on is a closed set. A wrong word gives a wrong value, never a wrong command.</p>
+          </li>
+          <li class="commit">
+            <p class="commit__title">It refuses out loud</p>
+            <p class="commit__body">When Saathi will not do something, it says so and says why, rather than failing quietly.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="stage" id="s3" aria-labelledby="s3-title">
+      <div class="wrap">
+        <div class="stage__head">
+          <span class="stage__num">Step 3 of 5</span>
+          <h2 class="stage__title" id="s3-title">Mac and Windows, from one agreement.</h2>
+        </div>
+        <p class="stage__body">
+          Saathi has two native clients. They share no code — one is Swift, one is
+          C# — so the only thing holding them together is a written contract, and
+          nothing about a contract is checked by a compiler.
+        </p>
+        <p class="stage__body">
+          So it is <strong>generated</strong>. One schema produces the Swift, the
+          C# and the TypeScript, and the build fails if what is committed no
+          longer matches. A script runs both clients side by side and compares
+          what they say. Keeping the two honest is a build step, not a habit.
+        </p>
+      </div>
+    </section>
+
+    <section class="stage" id="s4" aria-labelledby="s4-title">
+      <div class="wrap">
+        <div class="stage__head">
+          <span class="stage__num">Step 4 of 5</span>
+          <h2 class="stage__title" id="s4-title">What actually exists today.</h2>
+        </div>
+        <p class="stage__body">
+          Honestly: the frame, and not the thing yet. This page would rather say so
+          than imply a product that is not there.
+        </p>
+
+        <ul class="status-list">
+          <li class="status-row">
+            <span class="status-row__what">The generated contract, and the check that keeps it honest</span>
+            <span class="status-row__state status-row__state--done">Built</span>
+          </li>
+          <li class="status-row">
+            <span class="status-row__what">Backend holding the provider keys</span>
+            <span class="status-row__state status-row__state--done">Built</span>
+          </li>
+          <li class="status-row">
+            <span class="status-row__what">macOS and Windows clients, agreeing command for command</span>
+            <span class="status-row__state status-row__state--done">Built</span>
+          </li>
+          <li class="status-row">
+            <span class="status-row__what">The companion itself — voice, listening, actually teaching anything</span>
+            <span class="status-row__state status-row__state--open">Not started</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="stage" id="s5" aria-labelledby="s5-title">
+      <div class="wrap">
+        <div class="stage__head">
+          <span class="stage__num">Step 5 of 5</span>
+          <h2 class="stage__title" id="s5-title">Four questions, still open.</h2>
+        </div>
+        <p class="stage__body">
+          These are genuinely undecided, and they are the reason there is no
+          product yet. If you have a view — especially a first-hand one — it is
+          worth more right now than any amount of code.
+        </p>
+
+        <ol class="questions">
+          <li class="question">
+            <p><strong>Who is it for first?</strong> Accessibility covers vision, motor, cognitive, hearing and situational needs, and they pull the design in different directions. Picking one to start is what makes the first version good at anything.</p>
+          </li>
+          <li class="question">
+            <p><strong>What does “learn and play” mean concretely?</strong> Learning an app, a skill, a subject, a device? Playing as exploration without consequence, or as games?</p>
+          </li>
+          <li class="question">
+            <p><strong>Where does it live?</strong> A desktop app, a phone, the web, a device. This follows from the first two and should not be picked before them.</p>
+          </li>
+          <li class="question">
+            <p><strong>What is the smallest thing that would already be useful to one real person?</strong></p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="wrap foot">
+    <p class="foot__line">Patience is a feature. So is saying where you are.</p>
+    <div class="foot__meta">
+      <ul class="foot__links">
+        <li><a href="https://github.com/saathihq/saathi">GitHub</a></li>
+        <li><a href="https://github.com/saathihq/saathi/issues">Open an issue</a></li>
+        <li><a href="https://api.saathi.dev/health">API status</a></li>
+      </ul>
+      <span>Saathi · साथी · open source</span>
+    </div>
+  </footer>
+
+</div>
+
+<script src="/js/site.js" defer></script>
+</body>
+</html>

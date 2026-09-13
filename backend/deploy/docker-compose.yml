@@ -1,0 +1,15 @@
+# Runs on the VPS in /opt/saathi (see scripts/deploy.sh). Binds to localhost only; Caddy terminates
+# TLS for the API hostname and proxies to 127.0.0.1:8787. Nothing here is reachable from the
+# internet except through Caddy.
+services:
+  backend:
+    image: saathi-backend:latest
+    container_name: saathi-backend
+    restart: unless-stopped
+    env_file: /opt/saathi/backend.env
+    ports:
+      - "127.0.0.1:8787:8787"
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
