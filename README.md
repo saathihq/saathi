@@ -189,6 +189,10 @@ Vercel project on `saathi.dev`. Saathi is open source; the marketing page is not
 part of what people are invited to read, fork or run, and keeping them apart also
 means a copy change never rebuilds the API.
 
+`vercel.json` **cannot carry comments** — Vercel's schema validation rejects unknown top-level
+properties outright, including a `"//"` key, and the deploy fails rather than ignoring it. The
+rationale lives in [docs/HOSTING.md](docs/HOSTING.md) instead.
+
 Three things worth knowing about how this is wired:
 
 - **The function runs on the `edge` runtime.** `hono/vercel` returns a
@@ -280,7 +284,7 @@ export SAATHI_SERVER=root@your-box      # no default target is baked into the re
 npm run deploy:selfhost -- --env
 ```
 
-Neither path is live yet — see the bottom of this file.
+`api.saathi.dev` is live. Self-hosting is not yet exercised end to end.
 
 ### The one rule worth knowing before changing anything
 
