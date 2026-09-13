@@ -1,0 +1,44 @@
+//
+//  api/index.ts
+//  The Vercel Function that serves api.saathi.dev.
+//
+//  ── Why the path arrives in a query parameter ────────────────────────────────
+//  A Vercel rewrite replaces the request path, so a function reached by rewrite cannot see where
+//  the caller actually asked for. The obvious fix — Vercel's own catch-all, `api/[...route].ts` —
+//  does not work here: outside a framework, the `api/` directory compiles `[...route]` to
+//  `^/api/([^/]+)$`, a SINGLE path segment. `/api/health` reaches it and `/api/a/b` gets a platform
+//  404 without ever touching the function. Verified with `vercel dev`, not assumed.
+//
+//  So vercel.json carries the real path across in `__path`, and this file puts it back before Hono
+//  sees the request. One mechanism, no dependence on how Vercel compiles bracket filenames.
+//
+//  ── Why the edge runtime ─────────────────────────────────────────────────────
+//  `hono/vercel`'s `handle()` returns a web-standard `(Request) => Response`, which is the edge
+//  signature. On the nodejs runtime Vercel expects `(req, res)` and the function simply hangs —
+//  "still running after 30s" — rather than failing loudly. The backend uses nothing outside web
+//  standards, so edge is a fit today. **If it ever needs a Node built-in, this is the line that has
+//  to change**, and the nodejs runtime will need a `(req, res)` adapter rather than `hono/vercel`.
+//
+
+import { createApp } from "../backend/src/app.js";
+
+export const config = { runtime: "edge" };
+
+const app = createApp({ SAATHI_TOKENS: process.env.SAATHI_TOKENS });
+
+export default function handler(request: Request): Response | Promise<Response> {
+  const incoming = new URL(request.url);
+
+  // Vercel also appends `host=<hostname>` to the host-rewrite route (but not to the /api/* one), so
+  // the same request reaches the app with a slightly different query depending on which hostname it
+  // came in on. Nothing reads query parameters today; if something starts to, strip `host` here.
+
+  // Put the original path back, and take the marker out of the query so the app never sees it.
+  const path = incoming.searchParams.get("__path") || "/";
+  incoming.searchParams.delete("__path");
+
+  const restored = new URL(path, incoming.origin);
+  restored.search = incoming.search;
+
+  return app.fetch(new Request(restored, request));
+}

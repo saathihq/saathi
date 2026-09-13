@@ -28,3 +28,4 @@ obj/
 
 # Harness-created git worktrees
 .claude/worktrees/
+.vercel

@@ -2,6 +2,7 @@
   "name": "saathi",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "description": "A companion for learning and playing with new things, approached from the accessibility side.",
   "workspaces": [
     "contract",
@@ -14,7 +15,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test:mac": "cd macos/Saathi && swift test",
-    "test:win": "cd windows && dotnet test Saathi.sln"
+    "test:win": "cd windows && dotnet test Saathi.sln",
+    "deploy:selfhost": "bash selfhost/deploy-vps.sh"
   },
   "engines": {
     "node": ">=22"

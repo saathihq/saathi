@@ -1,7 +1,7 @@
 # The Saathi backend as a container (the VPS runs Docker, not Node).
 # Build context is the repo root — the backend is an npm workspace and the contract it imports is
 # generated into backend/src by contract/generate.mjs:
-#   docker build -f backend/Dockerfile -t saathi-backend .
+#   docker build -f selfhost/Dockerfile -t saathi-backend .
 FROM node:22-alpine AS build
 WORKDIR /repo
 COPY package.json package-lock.json ./

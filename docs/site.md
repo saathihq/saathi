@@ -1,6 +1,6 @@
-# site
+# site — saathi.dev
 
-The static site served at **saathi.dev**. Plain HTML and CSS with one small
+The static site served at **saathi.dev** (source lives in `site/`). Plain HTML and CSS with one small
 progressive-enhancement script — no framework, no build step. `rsync` it and it
 is deployed.
 
@@ -24,8 +24,8 @@ cd site && python3 -m http.server 8899   # http://localhost:8899
 
 ## Deploying
 
-`scripts/deploy.sh` rsyncs this directory to `/var/www/saathi` and Caddy serves
-it. See the root README.
+`vercel --prod` deploys it; `selfhost/deploy-vps.sh` rsyncs it to `/var/www/saathi` for a
+self-hosted box instead. See the root README.
 
 ## The rules this page holds itself to
 

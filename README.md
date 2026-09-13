@@ -20,7 +20,8 @@ saathi/
 ├─ macos/Saathi/  the macOS client — Swift package (SaathiKit + a `saathi` CLI)
 ├─ windows/       the Windows client — .NET 8 (Saathi.Contract, Saathi.Core, a `saathi` CLI)
 ├─ site/          the static site served at saathi.dev — plain HTML/CSS, no build step
-└─ deploy/        the Caddy site blocks for both hostnames
+├─ api/           the Vercel Function that serves api.saathi.dev (wraps backend/)
+└─ selfhost/      Docker + Caddy, for running the whole thing on your own box instead
 ```
 
 One repository, not two, and the reason is specific: Swift and C# **cannot share a line of code**,
@@ -50,28 +51,50 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
 
 Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
 
-### Hosting
+### Hosting — one Vercel project, both hostnames
 
-Both hostnames are one VPS behind Caddy: the site is served from disk, the API is
-reverse-proxied to the backend container on `127.0.0.1:8787`.
+`saathi.dev` is the static site in `site/`; `api.saathi.dev` is rewritten onto the
+Hono function in `api/`. One project, one deploy, no server to keep alive.
 
 ```bash
-export SAATHI_SERVER=root@saathi.dev     # ssh target — no default is baked into the repo
-scripts/deploy.sh --env                  # site + API, uploading backend/.env the first time
-scripts/deploy.sh --site                 # just the site (fast)
+vercel            # preview deploy
+vercel --prod     # production
 ```
 
-DNS is at **Porkbun**, where `saathi.dev` is registered — two A records, both
-pointing at the same server:
+Then attach both domains to the project in the Vercel dashboard. **Vercel prints
+the exact DNS records to add at Porkbun** (where `saathi.dev` is registered) —
+take them from there rather than from memory, because they differ per project:
+an existing project of ours uses `A 216.198.79.1` for its apex and a
+project-specific `CNAME …vercel-dns-017.com` for its subdomain.
 
-| Record | Type | Value |
-|---|---|---|
-| `saathi.dev` | A | the server's address |
-| `api.saathi.dev` | A | the same address |
+Two things worth knowing about how this is wired:
 
-Caddy provisions certificates for both once those resolve. Until then
-`saathi health` fails against the default backend — point a client at a local one
-with `~/.saathi/shell.json` in the meantime.
+- **The function runs on the `edge` runtime.** `hono/vercel` returns a
+  web-standard `(Request) => Response`, which is the edge signature; on the
+  `nodejs` runtime Vercel expects `(req, res)` and the function simply *hangs*
+  rather than erroring. The backend uses nothing outside web standards today. If
+  it ever needs a Node built-in, `api/index.ts` is the file that has to change.
+- **The request path travels in a `__path` query parameter.** A rewrite replaces
+  the path, and Vercel's own catch-all (`api/[...route].ts`) compiles to a
+  *single* path segment outside a framework — `/api/a/b` never reaches the
+  function at all. `vercel.json` carries the real path across instead.
+
+Both were found by running `vercel dev` and `vercel build` against this config,
+not by reading docs.
+
+### Self-hosting
+
+Because the backend holds provider keys, running your own is a first-class
+option — a hosted default only means something if the alternative actually
+works. `selfhost/` has a Dockerfile, a compose file, a Caddy site block for both
+hostnames, and a script that deploys them to a VPS:
+
+```bash
+export SAATHI_SERVER=root@your-box      # no default target is baked into the repo
+npm run deploy:selfhost -- --env
+```
+
+Neither path is live yet — see the bottom of this file.
 
 ### The one rule worth knowing before changing anything
 
@@ -148,8 +171,8 @@ unanswered questions:
 - **`ConfigurationStore` on Windows does not yet restrict the config file.** On Unix it is chmod
   0600; the Windows equivalent is an ACL and is stubbed with a comment rather than silently
   no-op'd. It must land with whatever first writes a real token.
-- **Neither hostname resolves yet.** The site and the Caddy config are written and the deploy script
-  runs, but the two Porkbun A records above do not exist, so nothing is live. `saathi health` fails
-  against the default backend until then.
+- **Neither hostname resolves yet, and nothing has been deployed.** A Vercel project named `saathi`
+  exists (created by `vercel build`) but has never been deployed, and the Porkbun DNS records do not
+  exist. `saathi health` fails against the default backend until both are done.
 - **The site says the product does not exist**, because it does not. When that changes, `site/` needs
   changing with it — it is deliberately not written as though there were something to sign up for.

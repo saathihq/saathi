@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 #
-# Deploys both halves of Saathi to one VPS behind Caddy:
+# Deploys both halves of Saathi to one VPS behind Caddy.
+#
+# This is the SELF-HOSTING path, not how saathi.dev itself is deployed — that goes to Vercel
+# (see vercel.json and the root README). Kept because "run your own backend" is a first-class
+# option for an open-source companion that holds provider keys, and because the hosted default
+# only means something if running your own is genuinely possible.
+#
 #
 #   the site  ->  rsync site/ to /var/www/saathi, served statically
 #   the API   ->  build the backend image on the server, (re)start the container on 127.0.0.1:8787
@@ -88,8 +94,8 @@ if [[ $DO_API -eq 1 ]]; then
 set -euo pipefail
 cd /opt/saathi
 [[ -f backend.env ]] || { echo "missing /opt/saathi/backend.env (run once with --env)" >&2; exit 1; }
-cp src/backend/deploy/docker-compose.yml docker-compose.yml
-docker build -q -f src/backend/Dockerfile -t saathi-backend:latest src >/dev/null
+cp src/selfhost/docker-compose.yml docker-compose.yml
+docker build -q -f src/selfhost/Dockerfile -t saathi-backend:latest src >/dev/null
 docker compose up -d --remove-orphans
 sleep 2
 curl -sf http://127.0.0.1:8787/health && echo "  backend healthy on 127.0.0.1:8787"
@@ -101,7 +107,7 @@ echo "▸ ensuring the Caddy site blocks exist"
 # Copied straight across rather than read from the synced source tree: a --site-only run never
 # syncs src/, and the first such run would otherwise look for a template that is not there yet.
 ssh "$SERVER" "mkdir -p $REMOTE_DIR"
-scp -q "$REPO_DIR/deploy/Caddyfile.saathi" "$SERVER:$REMOTE_DIR/Caddyfile.saathi.template"
+scp -q "$REPO_DIR/selfhost/Caddyfile.saathi" "$SERVER:$REMOTE_DIR/Caddyfile.saathi.template"
 
 ssh "$SERVER" bash -s -- "$SITE_HOST" "$API_HOST" "$REMOTE_DIR" <<'REMOTE'
 set -euo pipefail

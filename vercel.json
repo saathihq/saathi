@@ -1,0 +1,62 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": [
+    "One Vercel project serving both hostnames: saathi.dev is the static site in site/,",
+    "api.saathi.dev is rewritten onto the Hono function in api/. Attach both domains to this",
+    "project in the Vercel dashboard; Vercel prints the exact DNS records to add at Porkbun.",
+    "",
+    "The build command is a gate, not a build: there is nothing to compile (the site is plain",
+    "HTML and Vercel compiles the function itself), but a deploy whose generated contract has",
+    "drifted from the schema would ship a backend whose route list disagrees with the clients.",
+    "",
+    "On the headers below: the CSP is scoped away from /api because it describes the page, not the",
+    "JSON API. HTML is cached for only 5 minutes because the static assets are not fingerprinted —",
+    "cache it hard and a deploy takes an hour to become visible."
+  ],
+
+  "buildCommand": "node contract/generate.mjs --check",
+  "outputDirectory": "site",
+  "cleanUrls": true,
+  "trailingSlash": false,
+
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "api.saathi.dev" }],
+      "destination": "/api?__path=/$1"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api?__path=/$1"
+    }
+  ],
+
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" }
+      ]
+    },
+    {
+      "source": "/((?!api).*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; connect-src 'self' https://api.saathi.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
+      "source": "/(.*).html",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=300, must-revalidate" }]
+    },
+    {
+      "source": "/(css|js)/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }]
+    }
+  ]
+}

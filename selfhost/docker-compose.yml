@@ -1,4 +1,4 @@
-# Runs on the VPS in /opt/saathi (see scripts/deploy.sh). Binds to localhost only; Caddy terminates
+# Runs on the VPS in /opt/saathi (see selfhost/deploy-vps.sh). Binds to localhost only; Caddy terminates
 # TLS for the API hostname and proxies to 127.0.0.1:8787. Nothing here is reachable from the
 # internet except through Caddy.
 services:
