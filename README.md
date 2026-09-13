@@ -153,8 +153,8 @@ remove it and replace it with a published package, a version bump, and someone r
 npm install
 npm run generate        # rewrite the generated contract for all three targets
 npm run check:contract  # fail if what is checked in is stale (CI runs this on every PR)
-npm test                # backend
-npm run test:mac        # swift test          (62 tests)
+npm test                # backend             (26 tests)
+npm run test:mac        # swift test          (68 tests)
 npm run test:win        # dotnet test         (66 tests)
 bash scripts/check-parity.sh   # run both clients and diff them
 ```
@@ -207,6 +207,66 @@ Three things worth knowing about how this is wired:
 
 All three were found by running `vercel dev` and `vercel build` against this
 config, not by reading docs.
+
+### Hosted voice: minted, never proxied
+
+`hosted` mode is the only part of Saathi that needs infrastructure, and the shape of that
+infrastructure comes from one decision.
+
+A hosted realtime turn could be carried two ways. The backend could hold both sockets and relay
+frames, which would give it full visibility — real token metering, the ability to cut a session off
+mid-turn. Or it can mint a short-lived client secret and let the client talk to the provider
+directly. **Saathi mints.**
+
+```
+client                     api.saathi.dev              provider
+  |  POST /realtime/session       |                        |
+  |  Authorization: <account>     |                        |
+  |------------------------------>|  the real key          |
+  |                               |----------------------->|
+  |   { value, url, expiresAt }   |<-----------------------|
+  |<------------------------------|                        |
+  |                                                        |
+  |   wss://…  with a ~60s secret                          |
+  |=======================================================>|
+             no audio ever crosses Saathi's servers
+```
+
+Two reasons, in that order:
+
+1. **It is the same shape as everything else here.** The provider-key boundary says the real key
+   lives in the backend and never reaches a client; minting honours that exactly. Proxying would
+   make Saathi's servers a permanent participant in every conversation a learner has — which is
+   precisely what `local` mode exists to avoid. A company that says "run it yourself, nothing has
+   to reach us" should not quietly route the audio of everyone who doesn't through its own box.
+2. **The arithmetic.** PCM16 mono at 24 kHz is 48 kB/s each way, so a proxied session pushes about
+   346 MB per session-hour through the backend and needs a stateful always-on server. The edge
+   runtime this deploys to cannot hold a websocket at all.
+
+**What it costs, stated plainly: the backend never sees the tokens a session spends**, so
+usage-based metering is impossible. What is enforceable is enforced when the credential is handed
+out — sessions per window, per caller. `SessionLedger` in `backend/src/realtime.ts` is that seam,
+and `/health` reports which implementation is running:
+
+```bash
+curl api.saathi.dev/health
+{"ok":true,"version":"0.5.0","auth":"tokens","voice":"hosted","limits":"none — every authorised caller may start a session"}
+```
+
+That `limits` line is not decoration. An in-memory ledger on a serverless deploy is per-isolate, so
+it would be one quota per warm instance rather than a limit — the field says which situation you
+are actually in instead of letting you assume you are covered. A real one needs a shared store and
+a `check` that is a single atomic conditional UPDATE; a read followed by a write is how the
+predecessor's parallel requests both saw the same balance and both spent it.
+
+A backend with no `SAATHI_REALTIME_KEY` answers 501 and says it offers no hosted voice — the normal
+posture for a self-hosted one, and deliberately distinguishable from a broken deploy.
+
+```bash
+SAATHI_TOKENS=…          # who may call at all
+SAATHI_REALTIME_KEY=…    # the provider key. The one real secret the process holds.
+SAATHI_REALTIME_MODEL=gpt-realtime
+```
 
 ### Self-hosting
 

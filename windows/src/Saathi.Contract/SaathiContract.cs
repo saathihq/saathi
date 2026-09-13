@@ -1,6 +1,6 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.4.0.
+// Contract version 0.5.0.
 
 #nullable enable
 using System.Linq;
@@ -13,7 +13,7 @@ namespace Saathi.Contract;
 public static class SaathiBackend
 {
     public const string DefaultBaseUrl = "https://api.saathi.dev";
-    public const string ContractVersion = "0.4.0";
+    public const string ContractVersion = "0.5.0";
 }
 
 /// <summary>One row per provider mode: where it runs, what it needs, and whether using it

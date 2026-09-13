@@ -12,6 +12,12 @@
 
 import { Hono } from "hono";
 import { ACTION_WIRE_NAMES, CONTRACT_VERSION } from "./contract.js";
+import {
+  mintRealtimeGrant,
+  RealtimeMintError,
+  unlimitedLedger,
+  type SessionLedger,
+} from "./realtime.js";
 
 export type AppEnv = {
   /** Comma-separated bearer tokens accepted by authenticated routes. */
@@ -25,6 +31,22 @@ export type AppEnv = {
    * So the permissive behaviour exists and has to be asked for by name.
    */
   SAATHI_ALLOW_ANONYMOUS?: string;
+  /**
+   * The provider key for hosted realtime voice. This is the one real secret this process holds:
+   * it is used to mint short-lived client secrets and is never serialised into any response.
+   * Unset simply means this deployment does not offer hosted voice, which is a normal posture for
+   * a self-hosted backend whose users bring their own keys.
+   */
+  SAATHI_REALTIME_KEY?: string;
+  SAATHI_REALTIME_BASE_URL?: string;
+  SAATHI_REALTIME_MODEL?: string;
+  SAATHI_REALTIME_VOICE?: string;
+};
+
+/** Injectable so the tests never open a socket or need a key. */
+export type AppDependencies = {
+  ledger?: SessionLedger;
+  fetchImpl?: typeof fetch;
 };
 
 /** What the backend will accept, decided once so both the route and /health can report it. */
@@ -47,10 +69,46 @@ export function authPosture(env: AppEnv): AuthPosture {
   return { mode: "closed" };
 }
 
-export function createApp(env: AppEnv = {}) {
+export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) {
   const app = new Hono();
 
   const posture = authPosture(env);
+  const ledger = dependencies.ledger ?? unlimitedLedger;
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+
+  /**
+   * The one authorisation rule, written once.
+   *
+   * It was inline in `/session` when there was one authenticated route. Copying it to a second
+   * route is how two routes end up disagreeing about what counts as authorised, and the one that
+   * drifts is never the one anybody tests — so it moved here the moment there was a second caller.
+   *
+   * Returns a Response to send, or null when the caller may proceed.
+   */
+  const rejectIfUnauthorised = (authorization: string): Response | null => {
+    if (posture.mode === "closed") {
+      return Response.json(
+        {
+          error: "this backend has no accounts configured",
+          hint: "set SAATHI_TOKENS, or SAATHI_ALLOW_ANONYMOUS=1 to run it open for self-hosting",
+        },
+        { status: 401 },
+      );
+    }
+
+    if (posture.mode === "tokens") {
+      const presented = authorization.toLowerCase().startsWith("bearer ")
+        ? authorization.slice("bearer ".length).trim()
+        : "";
+      // Compared against the configured list rather than a prefix or a pattern; an empty presented
+      // token must never match an empty configured one, which `authPosture` already filters out.
+      if (presented.length === 0 || !posture.accepted.includes(presented)) {
+        return Response.json({ error: "not authorised" }, { status: 401 });
+      }
+    }
+
+    return null;
+  };
 
   app.get("/health", (c) =>
     c.json({
@@ -59,30 +117,17 @@ export function createApp(env: AppEnv = {}) {
       // Said out loud so an operator can see, without reading the config, whether the thing they
       // just deployed is open to the world.
       auth: posture.mode,
+      // Whether hosted voice is on, and what is limiting it. An in-memory ledger on a serverless
+      // deployment is per-isolate and therefore not a real limit; it says so itself rather than
+      // letting an operator assume a quota they do not have.
+      voice: (env.SAATHI_REALTIME_KEY ?? "").trim().length > 0 ? "hosted" : "off",
+      limits: ledger.description,
     }),
   );
 
   app.post("/session", (c) => {
-    if (posture.mode === "closed") {
-      return c.json(
-        {
-          error: "this backend has no accounts configured",
-          hint: "set SAATHI_TOKENS, or SAATHI_ALLOW_ANONYMOUS=1 to run it open for self-hosting",
-        },
-        401,
-      );
-    }
-
-    if (posture.mode === "tokens") {
-      const authorization = c.req.header("authorization") ?? "";
-      const presented = authorization.toLowerCase().startsWith("bearer ")
-        ? authorization.slice("bearer ".length).trim()
-        : "";
-
-      if (presented.length === 0 || !posture.accepted.includes(presented)) {
-        return c.json({ error: "not authorised" }, 401);
-      }
-    }
+    const rejection = rejectIfUnauthorised(c.req.header("authorization") ?? "");
+    if (rejection) return rejection;
 
     return c.json({
       contractVersion: CONTRACT_VERSION,
@@ -90,6 +135,56 @@ export function createApp(env: AppEnv = {}) {
       // side — this list is the offer, not the enforcement.
       actions: ACTION_WIRE_NAMES,
     });
+  });
+
+  /**
+   * Mints a short-lived client secret for a realtime voice session.
+   *
+   * No audio passes through here — see realtime.ts for why that was chosen over proxying, and what
+   * it costs. The client takes the returned `url` and `value` and connects to the PROVIDER; this
+   * backend is out of the conversation from that point on.
+   */
+  app.post("/realtime/session", async (c) => {
+    const authorization = c.req.header("authorization") ?? "";
+    const rejection = rejectIfUnauthorised(authorization);
+    if (rejection) return rejection;
+
+    const key = (env.SAATHI_REALTIME_KEY ?? "").trim();
+    if (key.length === 0) {
+      // A deployment without a provider key is a normal, supported posture, not a broken one. Say
+      // which it is so nobody debugs a misconfiguration that is actually a deliberate choice.
+      return c.json(
+        {
+          error: "this backend does not offer hosted voice",
+          hint: "it holds no provider key. Use your own key with provider \"openai\", or run a backend with SAATHI_REALTIME_KEY set.",
+        },
+        501,
+      );
+    }
+
+    // The caller's own token, used only as a ledger key. It is never forwarded to the provider.
+    const presented = authorization.toLowerCase().startsWith("bearer ")
+      ? authorization.slice("bearer ".length).trim()
+      : "anonymous";
+
+    const refusal = await ledger.check(presented);
+    if (refusal) return c.json({ error: refusal }, 429);
+
+    try {
+      const grant = await mintRealtimeGrant(
+        {
+          baseUrl: env.SAATHI_REALTIME_BASE_URL ?? "https://api.openai.com/v1",
+          apiKey: key,
+          model: env.SAATHI_REALTIME_MODEL ?? "gpt-realtime",
+          voice: env.SAATHI_REALTIME_VOICE,
+        },
+        fetchImpl,
+      );
+      return c.json(grant);
+    } catch (error) {
+      if (error instanceof RealtimeMintError) return c.json({ error: error.message }, 502);
+      return c.json({ error: "could not open a realtime session" }, 502);
+    }
   });
 
   app.notFound((c) => c.json({ error: "no such route" }, 404));

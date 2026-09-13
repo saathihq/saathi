@@ -134,18 +134,15 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
 
     public func start(callbacks: VoiceSessionCallbacks) async throws {
         state.callbacks = callbacks
-        let credential = try credentialForConnect()
-        let model = configuration.resolvedModel.isEmpty ? "gpt-realtime" : configuration.resolvedModel
 
-        guard let url = Self.socketURL(baseURL: configuration.resolvedProviderBaseURL, model: model) else {
-            throw VoiceError.transport("cannot build a realtime URL for model \"\(model)\"")
-        }
+        // Where to connect and what to present depends on who holds the key, and the two cases go
+        // to genuinely different hosts. Getting this wrong is not a small bug: pointing the socket
+        // at Saathi's backend would mean every learner's audio crossing our infrastructure, which
+        // is exactly what minting a short-lived secret exists to avoid.
+        let connection = try await resolveConnection()
 
-        var request = URLRequest(url: url)
-        let row = configuration.providerRow
-        if let header = row.authorizationHeader(credential: credential) {
-            request.setValue(header.value, forHTTPHeaderField: header.name)
-        }
+        var request = URLRequest(url: connection.url)
+        request.setValue("Bearer \(connection.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
 
         let socket = urlSession.webSocketTask(with: request)
@@ -163,26 +160,81 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
 
         try send(sessionUpdate())
         state.connected = true
-        state.callbacks.onStatus?("connected (\(model)) — \(audioDescription)")
+        state.callbacks.onStatus?("connected to \(connection.host) (\(connection.model)) — \(audioDescription)")
         receiveLoop(socket)
     }
 
-    /// In hosted mode the backend mints a short-lived client secret and the real provider key never
-    /// reaches this process. In `openai` mode the user's own key is used directly, because it is
-    /// already on this machine and routing it through someone else's server would be worse.
-    private func credentialForConnect() throws -> String {
+    struct Connection {
+        let url: URL
+        let credential: String
+        let model: String
+        /// For the status line, so a person can see where their audio actually went.
+        let host: String
+    }
+
+    /// Two paths, and the difference is who holds the provider key.
+    ///
+    /// **Own key (`openai`).** The key is already on this machine; routing the audio through
+    /// someone else's server to use it would be strictly worse for the user. Connect directly.
+    ///
+    /// **Hosted.** The key lives in Saathi's backend and must never reach this process. The backend
+    /// mints a client secret that expires in about a minute, and this connects to the PROVIDER with
+    /// it. Saathi's servers are out of the conversation from that point on — they never carry a
+    /// frame of audio. `VoiceLaneReport` says "leaves this machine as audio" either way, because it
+    /// does; what it does not do is leave via us.
+    func resolveConnection() async throws -> Connection {
         let row = configuration.providerRow
-        if row.requiresToken {
-            guard let token = configuration.token?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !token.isEmpty else {
-                throw VoiceError.notConfigured("hosted mode needs an account token in ~/.saathi/shell.json")
+
+        if !row.requiresToken {
+            guard let key = configuration.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !key.isEmpty else {
+                throw VoiceError.notConfigured("\(row.kind.rawValue) mode needs an API key in ~/.saathi/shell.json")
             }
-            return token
+            let model = configuration.resolvedModel.isEmpty ? "gpt-realtime" : configuration.resolvedModel
+            guard let url = Self.socketURL(baseURL: configuration.resolvedProviderBaseURL, model: model) else {
+                throw VoiceError.transport("cannot build a realtime URL for model \"\(model)\"")
+            }
+            return Connection(url: url, credential: key, model: model, host: url.host ?? "the provider")
         }
-        guard let key = configuration.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
-            throw VoiceError.notConfigured("\(row.kind.rawValue) mode needs an API key in ~/.saathi/shell.json")
+
+        guard let token = configuration.token?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            throw VoiceError.notConfigured("hosted mode needs an account token in ~/.saathi/shell.json")
         }
-        return key
+
+        let backend = configuration.resolvedBaseURL
+        guard let grantURL = URL(string: "\(backend.hasSuffix("/") ? String(backend.dropLast()) : backend)/realtime/session") else {
+            throw VoiceError.transport("\(backend) is not a usable backend URL")
+        }
+        var grantRequest = URLRequest(url: grantURL)
+        grantRequest.httpMethod = "POST"
+        grantRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        grantRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await urlSession.data(for: grantRequest)
+        guard let http = response as? HTTPURLResponse else {
+            throw VoiceError.transport("no answer from \(backend)")
+        }
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard (200...299).contains(http.statusCode) else {
+            // The backend's own wording is the useful one here — it distinguishes "this deployment
+            // offers no hosted voice" from "you are over your limit", and a person can act on both.
+            let message = (body?["error"] as? String) ?? "the backend refused (\(http.statusCode))"
+            throw VoiceError.transport(message)
+        }
+        guard let grant = body,
+              let secret = grant["value"] as? String, !secret.isEmpty,
+              let urlString = grant["url"] as? String else {
+            throw VoiceError.transport("the backend returned no realtime credential")
+        }
+        // `url` arrives verbatim from a response, so it is parsed rather than trusted, and it must
+        // be a websocket URL — a backend answering with an https URL would mean connecting to
+        // something that is not a realtime socket at all.
+        guard let url = URL(string: urlString), url.scheme == "wss" || url.scheme == "ws" else {
+            throw VoiceError.transport("the backend returned \"\(urlString)\", which is not a websocket URL")
+        }
+        let model = (grant["model"] as? String) ?? configuration.resolvedModel
+        return Connection(url: url, credential: secret, model: model, host: url.host ?? "the provider")
     }
 
     public func beginTurn() async throws {

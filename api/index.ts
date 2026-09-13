@@ -24,11 +24,25 @@
 
 import { createApp } from "../backend/src/app.js";
 
+//  ── Why no session ledger is wired here ──────────────────────────────────────
+//  Grant-time limits need a counter shared across callers. On this runtime each isolate has its
+//  own memory, so an in-memory ledger would not be a limit at all — it would be one quota per warm
+//  isolate, silently multiplying whatever number was configured. Rather than ship a control that
+//  looks like it works, this deploys with no ledger and `/health` says so ("limits: none").
+//
+//  A real one needs a shared store. When it arrives, it belongs here as a `SessionLedger` whose
+//  `check` is a single atomic conditional UPDATE — never a read followed by a write, which is the
+//  shape that let the predecessor's parallel requests both see the same balance and both spend it.
+
 export const config = { runtime: "edge" };
 
 const app = createApp({
   SAATHI_TOKENS: process.env.SAATHI_TOKENS,
   SAATHI_ALLOW_ANONYMOUS: process.env.SAATHI_ALLOW_ANONYMOUS,
+  SAATHI_REALTIME_KEY: process.env.SAATHI_REALTIME_KEY,
+  SAATHI_REALTIME_BASE_URL: process.env.SAATHI_REALTIME_BASE_URL,
+  SAATHI_REALTIME_MODEL: process.env.SAATHI_REALTIME_MODEL,
+  SAATHI_REALTIME_VOICE: process.env.SAATHI_REALTIME_VOICE,
 });
 
 export default function handler(request: Request): Response | Promise<Response> {

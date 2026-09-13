@@ -6,7 +6,15 @@ describe("health", () => {
   it("is reachable without a token and reports the contract version", async () => {
     const response = await createApp().request("/health");
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, version: CONTRACT_VERSION, auth: "closed" });
+    // Exact rather than partial on purpose: /health is what an operator reads to see what they
+    // just deployed, so a field appearing or vanishing should fail here and be looked at.
+    expect(await response.json()).toEqual({
+      ok: true,
+      version: CONTRACT_VERSION,
+      auth: "closed",
+      voice: "off",
+      limits: "none — every authorised caller may start a session",
+    });
   });
 });
 

@@ -267,3 +267,121 @@ final class VoiceAudioEngineConcurrencyTests: XCTestCase {
         XCTAssertTrue(summary.contains("frames out 0"), "nothing should have been converted: \(summary)")
     }
 }
+
+// MARK: - Where the audio actually goes
+
+/// The hosted path was the one loose end of the port: `resolvedProviderBaseURL` for `hosted` is
+/// `https://api.saathi.dev`, so a socket built from it points the learner's audio at Saathi's own
+/// backend. That is the proxy design, and it was chosen against — the backend mints a short-lived
+/// secret and the client connects to the provider, so no audio crosses Saathi's infrastructure.
+///
+/// These pin the distinction, because getting it wrong is invisible: it would work perfectly and
+/// quietly route every conversation through a server that promised not to be in the path.
+final class RealtimeConnectionTests: XCTestCase {
+
+    func testOwnKeyModeConnectsStraightToTheProviderWithTheUsersOwnKey() async throws {
+        let session = RealtimeVoiceSession(
+            configuration: SaathiConfiguration(provider: .openai, model: "gpt-realtime", apiKey: "sk-mine"))
+        let connection = try await session.resolveConnection()
+        XCTAssertEqual(connection.url.host, "api.openai.com")
+        XCTAssertEqual(connection.credential, "sk-mine")
+        XCTAssertEqual(connection.url.scheme, "wss")
+    }
+
+    /// The regression this whole exercise exists to prevent.
+    func testHostedModeNeverBuildsASocketToSaathisOwnBackend() async {
+        let hosted = SaathiConfiguration(provider: .hosted, token: "account-token")
+        // Without a backend to answer, resolving must FAIL rather than fall back to a URL built
+        // from the hosted provider row — which would be wss://api.saathi.dev/realtime.
+        let session = RealtimeVoiceSession(configuration: hosted)
+        do {
+            let connection = try await session.resolveConnection()
+            XCTFail("hosted resolved to \(connection.url) with no backend answering")
+        } catch {
+            XCTAssertFalse("\(error)".contains("wss://api.saathi.dev"))
+        }
+    }
+
+    /// A `url` from a response is data, not a promise. A backend answering with an https URL would
+    /// mean opening something that is not a realtime socket at all.
+    func testAGrantWithANonWebsocketUrlIsRefused() async {
+        let session = RealtimeVoiceSession(
+            configuration: SaathiConfiguration(provider: .hosted, backendUrl: "https://example.invalid", token: "t"),
+            urlSession: .stubbed(status: 200, json: [
+                "value": "ek_test", "url": "https://evil.example.com/collect", "model": "m",
+            ]))
+        do {
+            _ = try await session.resolveConnection()
+            XCTFail("an https grant URL should be refused")
+        } catch {
+            XCTAssertTrue("\(error)".contains("not a websocket URL"), "got: \(error)")
+        }
+    }
+
+    func testAGrantIsUsedToConnectToTheProviderNotTheBackend() async throws {
+        let session = RealtimeVoiceSession(
+            configuration: SaathiConfiguration(provider: .hosted, backendUrl: "https://api.saathi.dev", token: "t"),
+            urlSession: .stubbed(status: 200, json: [
+                "value": "ek_ephemeral",
+                "url": "wss://api.openai.com/v1/realtime?model=gpt-realtime",
+                "model": "gpt-realtime",
+            ]))
+        let connection = try await session.resolveConnection()
+        XCTAssertEqual(connection.url.host, "api.openai.com")
+        XCTAssertEqual(connection.credential, "ek_ephemeral")
+        XCTAssertNotEqual(connection.url.host, "api.saathi.dev")
+    }
+
+    /// The backend's own wording distinguishes "this deployment offers no hosted voice" from "you
+    /// are over your limit", and a person can act on both. Replacing it with a status code cannot.
+    func testTheBackendsRefusalReachesTheUserInItsOwnWords() async {
+        let session = RealtimeVoiceSession(
+            configuration: SaathiConfiguration(provider: .hosted, backendUrl: "https://api.saathi.dev", token: "t"),
+            urlSession: .stubbed(status: 501, json: ["error": "this backend does not offer hosted voice"]))
+        do {
+            _ = try await session.resolveConnection()
+            XCTFail("should have thrown")
+        } catch {
+            XCTAssertTrue("\(error)".contains("does not offer hosted voice"), "got: \(error)")
+        }
+    }
+
+    func testHostedWithoutATokenSaysSoRatherThanCallingTheBackend() async {
+        let session = RealtimeVoiceSession(configuration: SaathiConfiguration(provider: .hosted))
+        do {
+            _ = try await session.resolveConnection()
+            XCTFail("should have thrown")
+        } catch {
+            XCTAssertTrue("\(error)".contains("account token"), "got: \(error)")
+        }
+    }
+}
+
+// MARK: - A URLSession that answers without a network
+
+private final class StubProtocol: URLProtocol {
+    nonisolated(unsafe) static var status = 200
+    nonisolated(unsafe) static var body = Data()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: Self.status, httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private extension URLSession {
+    static func stubbed(status: Int, json: [String: Any]) -> URLSession {
+        StubProtocol.status = status
+        StubProtocol.body = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+}
