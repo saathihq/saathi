@@ -6,6 +6,7 @@
 //  client and the actions are all real and shared with whatever shell comes later.
 //
 //    saathi provider           which mode this is in, and whether anything leaves the machine
+//    saathi voice              which voice lane that gives you, and where your voice goes
 //    saathi actions            what this build can be asked to do
 //    saathi health             is the backend up
 //    saathi say "..."          say one line out loud
@@ -45,6 +46,39 @@ case "provider":
     if arguments.contains("--probe") {
         let status = await ProviderReport.reachability(of: configuration)
         print("  status     \(status)")
+    }
+
+case "voice":
+    // Deliberately the same shape as `provider`: the pure, contract-derived report by default, and
+    // anything that touches this particular machine behind a flag. `check-parity.sh` diffs the
+    // bare command against the Windows client, so nothing machine-specific may leak into it.
+    let voiceConfiguration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
+    print(VoiceLaneReport.describe(voiceConfiguration))
+
+    if arguments.contains("--listen") {
+        let session = try VoiceSessionFactory.make(configuration: voiceConfiguration, speaker: speaker)
+        let callbacks = VoiceSessionCallbacks(
+            onUserTranscript: { print("\nyou:    \($0)") },
+            onSaathiTranscript: { print("saathi: \($0)") },
+            onAction: { action in
+                // The join that makes a voice turn and a typed command the same product: both end
+                // at the same performer, with the same contract validation in front of them.
+                Task { try? await performer.perform(action) }
+            },
+            onStatus: { FileHandle.standardError.write(Data("  [\($0)]\n".utf8)) }
+        )
+        do {
+            try await session.start(callbacks: callbacks)
+        } catch {
+            fail("\(error.localizedDescription)")
+        }
+        print("\npress return to talk, return again to stop, or ctrl-c to quit")
+        while true {
+            _ = readLine()
+            try await session.beginTurn()
+            _ = readLine()
+            try await session.endTurn()
+        }
     }
 
 case "actions":
@@ -90,6 +124,7 @@ case "help", "--help", "-h":
     saathi — a companion for learning and playing with new things
 
       saathi provider             which mode this is in  (--probe to check it is reachable)
+      saathi voice                which voice lane, and where your voice goes  (--listen to talk)
       saathi actions              list what this build can be asked to do
       saathi health               check the backend
       saathi say "..."            say one line  (--tone=calm|encouraging|neutral)

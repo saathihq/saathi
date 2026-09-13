@@ -1,6 +1,6 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.3.0.
+// Contract version 0.4.0.
 
 #nullable enable
 using System.Linq;
@@ -13,7 +13,7 @@ namespace Saathi.Contract;
 public static class SaathiBackend
 {
     public const string DefaultBaseUrl = "https://api.saathi.dev";
-    public const string ContractVersion = "0.3.0";
+    public const string ContractVersion = "0.4.0";
 }
 
 /// <summary>One row per provider mode: where it runs, what it needs, and whether using it
@@ -27,15 +27,16 @@ public sealed record SaathiProvider(
     bool SendsDataOffMachine,
     string KeyHeader,
     string KeyPrefix,
+    VoiceLane Voice,
     string Summary)
 {
     public static readonly IReadOnlyList<SaathiProvider> All =
     [
-        new(global::Saathi.Contract.ProviderKind.Local, "http://localhost:11434", "llama3.2", false, false, false, "", "", "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
-        new(global::Saathi.Contract.ProviderKind.Openai, "https://api.openai.com/v1", "gpt-4o-mini", true, false, true, "Authorization", "Bearer ", "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
-        new(global::Saathi.Contract.ProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-5", true, false, true, "x-api-key", "", "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
-        new(global::Saathi.Contract.ProviderKind.Sarvam, "https://api.sarvam.ai/v1", "sarvam-105b", true, false, true, "Authorization", "Bearer ", "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
-        new(global::Saathi.Contract.ProviderKind.Hosted, "https://api.saathi.dev", "", false, true, true, "Authorization", "Bearer ", "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+        new(global::Saathi.Contract.ProviderKind.Local, "http://localhost:11434", "llama3.2", false, false, false, "", "", global::Saathi.Contract.VoiceLane.Chain, "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        new(global::Saathi.Contract.ProviderKind.Openai, "https://api.openai.com/v1", "gpt-4o-mini", true, false, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Realtime, "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        new(global::Saathi.Contract.ProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-5", true, false, true, "x-api-key", "", global::Saathi.Contract.VoiceLane.Chain, "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        new(global::Saathi.Contract.ProviderKind.Sarvam, "https://api.sarvam.ai/v1", "sarvam-105b", true, false, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Chain, "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
+        new(global::Saathi.Contract.ProviderKind.Hosted, "https://api.saathi.dev", "", false, true, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Realtime, "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
     ];
 
     /// <summary>The one header this provider needs, ready to set — or null when it needs none.
@@ -52,6 +53,98 @@ public sealed record SaathiProvider(
     public static SaathiProvider Of(ProviderKind kind) =>
         All.FirstOrDefault(p => p.Kind == kind)
         ?? throw new InvalidOperationException($"no provider row for {kind} — the contract is out of sync");
+}
+
+/// <summary>The action list as JSON-Schema function tools — the exact bytes a model is shown.
+/// Identical on macOS, Windows and the backend; see contract/generate.mjs for why that matters.</summary>
+public static class SaathiTools
+{
+    public const string Json = """
+[
+  {
+    "type": "function",
+    "name": "say",
+    "description": "Speak a line to the learner. The companion narrates; this is the primary action.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "What to say. One or two sentences."
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "calm",
+            "encouraging",
+            "neutral"
+          ],
+          "description": "How it should sound. Defaults to \"neutral\"."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "type": "function",
+    "name": "show_step",
+    "description": "Put one step of something being learned in front of the learner, with its place in the whole.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The step itself, in a few words."
+        },
+        "detail": {
+          "type": "string",
+          "description": "One sentence of elaboration, if it helps."
+        },
+        "index": {
+          "type": "integer",
+          "description": "1-based position of this step."
+        },
+        "total": {
+          "type": "integer",
+          "description": "How many steps there are, so progress is always audible."
+        },
+        "pace": {
+          "type": "string",
+          "enum": [
+            "slow",
+            "normal"
+          ],
+          "description": "How fast to move on. Defaults to \"normal\"."
+        }
+      },
+      "required": [
+        "title",
+        "index",
+        "total"
+      ]
+    }
+  },
+  {
+    "type": "function",
+    "name": "open_url",
+    "description": "Open a resource in the learner's browser. http(s) only — clients MUST reject every other scheme rather than pass it to the OS.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "An absolute http or https URL."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }
+]
+""";
 }
 
 /// <summary><c>~/.saathi/shell.json</c>.</summary>
@@ -170,6 +263,27 @@ public sealed class PaceWireConverter : JsonConverter<Pace>
         });
 }
 
+/// <summary>VoiceLane on the wire. Accepts the contract's spelling only — the C# member
+/// name is not an alias, because the Swift client would not accept it either.</summary>
+public sealed class VoiceLaneWireConverter : JsonConverter<VoiceLane>
+{
+    public override VoiceLane Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.GetString() switch
+        {
+            "realtime" => VoiceLane.Realtime,
+            "chain" => VoiceLane.Chain,
+            var other => throw new JsonException($"{other} is not a valid VoiceLane — expected one of: realtime, chain"),
+        };
+
+    public override void Write(Utf8JsonWriter writer, VoiceLane value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value switch
+        {
+            VoiceLane.Realtime => "realtime",
+            VoiceLane.Chain => "chain",
+            _ => throw new JsonException($"no wire spelling for {value} — the contract is out of sync"),
+        });
+}
+
 /// <summary>Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine.</summary>
 [JsonConverter(typeof(ProviderKindWireConverter))]
 public enum ProviderKind
@@ -196,6 +310,14 @@ public enum Pace
 {
     Slow,
     Normal,
+}
+
+/// <summary>How a provider carries a spoken turn. Not a quality setting — a statement of what the provider can actually do, which is why it is a column in the provider table rather than a preference.</summary>
+[JsonConverter(typeof(VoiceLaneWireConverter))]
+public enum VoiceLane
+{
+    Realtime,
+    Chain,
 }
 
 /// <summary>Speak a line to the learner. The companion narrates; this is the primary action.</summary>

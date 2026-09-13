@@ -1,13 +1,13 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.3.0.
+// Contract version 0.4.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.3.0"
+    public static let contractVersion = "0.4.0"
 }
 
 /// One row per provider mode: where it runs, what it needs, and whether using it means
@@ -26,14 +26,17 @@ public struct SaathiProvider: Sendable, Equatable {
     public let keyHeader: String
     /// What precedes the credential in that header ("Bearer ", or empty).
     public let keyPrefix: String
+    /// How this provider carries a spoken turn. A capability, not a preference — see the
+    /// schema's providers comment for why only some providers have a realtime socket.
+    public let voice: VoiceLane
     public let summary: String
 
     public static let all: [SaathiProvider] = [
-        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, keyHeader: "", keyPrefix: "", summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
-        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
-        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "x-api-key", keyPrefix: "", summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
-        SaathiProvider(kind: .sarvam, defaultBaseURL: "https://api.sarvam.ai/v1", defaultModel: "sarvam-105b", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
-        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, keyHeader: "", keyPrefix: "", voice: .chain, summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .realtime, summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "x-api-key", keyPrefix: "", voice: .chain, summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        SaathiProvider(kind: .sarvam, defaultBaseURL: "https://api.sarvam.ai/v1", defaultModel: "sarvam-105b", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .chain, summary: "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
+        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .realtime, summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
     ]
 
     /// The one header this provider needs, ready to set — or nil when it needs none.
@@ -52,6 +55,97 @@ public struct SaathiProvider: Sendable, Equatable {
         }
         return row
     }
+}
+
+/// The action list as JSON-Schema function tools — the exact bytes a model is shown.
+/// Identical on macOS, Windows and the backend; see contract/generate.mjs for why that matters.
+public enum SaathiTools {
+    public static let json = #"""
+[
+  {
+    "type": "function",
+    "name": "say",
+    "description": "Speak a line to the learner. The companion narrates; this is the primary action.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "What to say. One or two sentences."
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "calm",
+            "encouraging",
+            "neutral"
+          ],
+          "description": "How it should sound. Defaults to \"neutral\"."
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "type": "function",
+    "name": "show_step",
+    "description": "Put one step of something being learned in front of the learner, with its place in the whole.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The step itself, in a few words."
+        },
+        "detail": {
+          "type": "string",
+          "description": "One sentence of elaboration, if it helps."
+        },
+        "index": {
+          "type": "integer",
+          "description": "1-based position of this step."
+        },
+        "total": {
+          "type": "integer",
+          "description": "How many steps there are, so progress is always audible."
+        },
+        "pace": {
+          "type": "string",
+          "enum": [
+            "slow",
+            "normal"
+          ],
+          "description": "How fast to move on. Defaults to \"normal\"."
+        }
+      },
+      "required": [
+        "title",
+        "index",
+        "total"
+      ]
+    }
+  },
+  {
+    "type": "function",
+    "name": "open_url",
+    "description": "Open a resource in the learner's browser. http(s) only — clients MUST reject every other scheme rather than pass it to the OS.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "An absolute http or https URL."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }
+]
+"""#
 }
 
 /// `~/.saathi/shell.json`.
@@ -122,6 +216,12 @@ public enum Tone: String, Codable, CaseIterable, Sendable {
 public enum Pace: String, Codable, CaseIterable, Sendable {
     case slow
     case normal
+}
+
+/// How a provider carries a spoken turn. Not a quality setting — a statement of what the provider can actually do, which is why it is a column in the provider table rather than a preference.
+public enum VoiceLane: String, Codable, CaseIterable, Sendable {
+    case realtime
+    case chain
 }
 
 /// Speak a line to the learner. The companion narrates; this is the primary action.

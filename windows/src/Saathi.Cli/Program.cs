@@ -5,6 +5,7 @@
 //  The basic Windows client, command for command the same as the macOS one:
 //
 //    saathi provider           which mode this is in, and whether anything leaves the machine
+//    saathi voice              which voice lane that gives you, and where your voice goes
 //    saathi actions            what this build can be asked to do
 //    saathi health             is the backend up
 //    saathi say "..."          say one line
@@ -49,6 +50,17 @@ switch (command)
         {
             Console.WriteLine($"  status     {await ProviderReport.ReachabilityAsync(configuration)}");
         }
+        return 0;
+    }
+
+    case "voice":
+    {
+        // The lane this configuration gets. Windows has no voice implementation yet — the WPF shell
+        // will add one behind the same contract — but the lane is a property of the provider, not of
+        // the platform, so it is reportable today and check-parity.sh diffs it against the macOS
+        // client. A lane reported but not yet implemented is a visible gap; a lane omitted is not.
+        var configuration = ConfigurationStore.Load(ConfigurationStore.DefaultPath());
+        Console.WriteLine(VoiceLaneReport.Describe(configuration));
         return 0;
     }
 
@@ -115,6 +127,7 @@ switch (command)
             saathi — a companion for learning and playing with new things
 
               saathi provider             which mode this is in  (--probe to check it is reachable)
+              saathi voice                which voice lane, and where your voice goes
               saathi actions              list what this build can be asked to do
               saathi health               check the backend
               saathi say "..."            say one line  (--tone=calm|encouraging|neutral)

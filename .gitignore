@@ -29,3 +29,6 @@ obj/
 # Harness-created git worktrees
 .claude/worktrees/
 .vercel
+
+# Shallow clones of the Windows reference projects (see reference/windows/README.md for the list)
+reference/windows/*/

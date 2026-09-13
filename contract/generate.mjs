@@ -49,6 +49,63 @@ const orderedParameters = (action) =>
   [...action.parameters].sort((a, b) => Number(isOptional(a)) - Number(isOptional(b)));
 const isOptional = (p) => Boolean(p.optional) || p.default !== undefined;
 
+// ---------------------------------------------------------------------------- tool schema
+
+/**
+ * The action list as JSON-Schema function tools — what a model is actually shown.
+ *
+ * Emitted as one JSON string constant rather than as native literals in each language, so all three
+ * clients hand a model byte-identical bytes. That matters more than it looks: a tool list that
+ * drifts between platforms means the same sentence produces different behaviour on Windows and on
+ * macOS, and nothing would catch it — the types would still compile on both sides.
+ *
+ * Every enum parameter becomes a JSON-Schema `enum`. That is the whole reason the contract's enums
+ * are closed: a speech pipeline mishears, and a misheard word that can only land inside a known set
+ * produces a wrong VALUE, never a wrong COMMAND.
+ */
+function toolSchema() {
+  return schema.actions.map((a) => {
+    const properties = {};
+    const required = [];
+    for (const p of a.parameters) {
+      const property = {};
+      if (enumNames.has(p.type)) {
+        property.type = "string";
+        property.enum = schema.enums.find((e) => e.name === p.type).cases;
+      } else {
+        property.type = p.type === "int" ? "integer" : "string";
+      }
+      property.description = p.doc;
+      if (p.default !== undefined) property.description += ` Defaults to "${p.default}".`;
+      properties[p.name] = property;
+      if (!isOptional(p)) required.push(p.name);
+    }
+    return {
+      type: "function",
+      name: wireOf(a),
+      description: a.doc,
+      parameters: { type: "object", properties, required },
+    };
+  });
+}
+
+/** Pretty-printed so a human can read a diff of it; every language embeds these exact bytes. */
+const TOOL_SCHEMA_JSON = JSON.stringify(toolSchema(), null, 2);
+
+/** Embeds TOOL_SCHEMA_JSON as a source literal, per language. */
+function toolSchemaLiteral(lang) {
+  if (lang === "swift") {
+    // A Swift multi-line string literal with `#` delimiters needs no escaping of quotes or
+    // backslashes, and JSON contains both.
+    return '#"""\n' + TOOL_SCHEMA_JSON + '\n"""#';
+  }
+  if (lang === "csharp") {
+    // C# raw string literal. JSON never contains three consecutive double quotes.
+    return '"""\n' + TOOL_SCHEMA_JSON + '\n"""';
+  }
+  return JSON.stringify(TOOL_SCHEMA_JSON); // TypeScript: an ordinary escaped string.
+}
+
 // ---------------------------------------------------------------------------- Swift
 
 /** Config fields are always optional; only their base type varies. */
@@ -88,10 +145,13 @@ function swift() {
   out.push("    public let keyHeader: String");
   out.push("    /// What precedes the credential in that header (\"Bearer \", or empty).");
   out.push("    public let keyPrefix: String");
+  out.push("    /// How this provider carries a spoken turn. A capability, not a preference — see the");
+  out.push("    /// schema's providers comment for why only some providers have a realtime socket.");
+  out.push("    public let voice: VoiceLane");
   out.push("    public let summary: String\n");
   out.push("    public static let all: [SaathiProvider] = [");
   for (const r of providerRows) {
-    out.push(`        SaathiProvider(kind: .${r.kind}, defaultBaseURL: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, keyHeader: "${r.keyHeader}", keyPrefix: "${r.keyPrefix}", summary: ${JSON.stringify(r.doc)}),`);
+    out.push(`        SaathiProvider(kind: .${r.kind}, defaultBaseURL: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, keyHeader: "${r.keyHeader}", keyPrefix: "${r.keyPrefix}", voice: .${r.voice}, summary: ${JSON.stringify(r.doc)}),`);
   }
   out.push("    ]\n");
   out.push("    /// The one header this provider needs, ready to set — or nil when it needs none.");
@@ -109,6 +169,12 @@ function swift() {
   out.push("        }");
   out.push("        return row");
   out.push("    }");
+  out.push("}\n");
+
+  out.push("/// The action list as JSON-Schema function tools \u2014 the exact bytes a model is shown.");
+  out.push("/// Identical on macOS, Windows and the backend; see contract/generate.mjs for why that matters.");
+  out.push("public enum SaathiTools {");
+  out.push("    public static let json = " + toolSchemaLiteral("swift"));
   out.push("}\n");
 
   out.push(`/// \`~/${schema.config.directoryName}/${schema.config.fileName}\`.`);
@@ -220,12 +286,13 @@ function csharp() {
   out.push("    bool SendsDataOffMachine,");
   out.push("    string KeyHeader,");
   out.push("    string KeyPrefix,");
+  out.push("    VoiceLane Voice,");
   out.push("    string Summary)");
   out.push("{");
   out.push("    public static readonly IReadOnlyList<SaathiProvider> All =");
   out.push("    [");
   for (const r of providerRows) {
-    out.push(`        new(global::Saathi.Contract.ProviderKind.${pascal(r.kind)}, "${r.defaultBaseUrl}", "${r.defaultModel}", ${r.requiresKey}, ${r.requiresToken}, ${r.sendsDataOffMachine}, "${r.keyHeader}", "${r.keyPrefix}", ${JSON.stringify(r.doc)}),`);
+    out.push(`        new(global::Saathi.Contract.ProviderKind.${pascal(r.kind)}, "${r.defaultBaseUrl}", "${r.defaultModel}", ${r.requiresKey}, ${r.requiresToken}, ${r.sendsDataOffMachine}, "${r.keyHeader}", "${r.keyPrefix}", global::Saathi.Contract.VoiceLane.${pascal(r.voice)}, ${JSON.stringify(r.doc)}),`);
   }
   out.push("    ];\n");
   out.push("    /// <summary>The one header this provider needs, ready to set — or null when it needs none.");
@@ -241,6 +308,13 @@ function csharp() {
   out.push("    public static SaathiProvider Of(ProviderKind kind) =>");
   out.push("        All.FirstOrDefault(p => p.Kind == kind)");
   out.push("        ?? throw new InvalidOperationException($\"no provider row for {kind} — the contract is out of sync\");");
+  out.push("}\n");
+
+  out.push("/// <summary>The action list as JSON-Schema function tools \u2014 the exact bytes a model is shown.");
+  out.push("/// Identical on macOS, Windows and the backend; see contract/generate.mjs for why that matters.</summary>");
+  out.push("public static class SaathiTools");
+  out.push("{");
+  out.push("    public const string Json = " + toolSchemaLiteral("csharp") + ";");
   out.push("}\n");
 
   out.push(`/// <summary><c>~/${schema.config.directoryName}/${schema.config.fileName}</c>.</summary>`);
@@ -375,12 +449,13 @@ function typescript() {
   out.push("  sendsDataOffMachine: boolean;");
   out.push("  keyHeader: string;");
   out.push("  keyPrefix: string;");
+  out.push("  voice: VoiceLane;");
   out.push("  summary: string;");
   out.push("};\n");
   out.push(`export const DEFAULT_PROVIDER: ProviderKind = "${providerDefault}";`);
   out.push("export const PROVIDERS: readonly SaathiProvider[] = [");
   for (const r of providerRows) {
-    out.push(`  { kind: "${r.kind}", defaultBaseUrl: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, keyHeader: "${r.keyHeader}", keyPrefix: "${r.keyPrefix}", summary: ${JSON.stringify(r.doc)} },`);
+    out.push(`  { kind: "${r.kind}", defaultBaseUrl: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, keyHeader: "${r.keyHeader}", keyPrefix: "${r.keyPrefix}", voice: "${r.voice}", summary: ${JSON.stringify(r.doc)} },`);
   }
   out.push("] as const;\n");
 
@@ -405,6 +480,10 @@ function typescript() {
   out.push(`export type SaathiAction =\n${schema.actions.map((a) => `  | ${pascal(a.name)}Action`).join("\n")};\n`);
   out.push("/** The wire names, in schema order — for building a tool list or a smoke test. */");
   out.push(`export const ACTION_WIRE_NAMES = [${schema.actions.map((a) => `"${wireOf(a)}"`).join(", ")}] as const;\n`);
+  out.push("/** The action list as JSON-Schema function tools — the exact bytes a model is shown.");
+  out.push(" *  Identical on macOS, Windows and the backend; see contract/generate.mjs for why that matters. */");
+  out.push("export const SAATHI_TOOLS_JSON = " + toolSchemaLiteral("typescript") + ";\n");
+
   out.push("export const BACKEND_ROUTES = [");
   for (const r of schema.backend.routes) {
     out.push(`  { method: "${r.method}", path: "${r.path}", auth: ${r.auth} },`);

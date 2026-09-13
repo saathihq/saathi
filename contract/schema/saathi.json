@@ -14,7 +14,7 @@
     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
     "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
   ],
-  "version": "0.3.0",
+  "version": "0.4.0",
   "backend": {
     "defaultBaseUrl": "https://api.saathi.dev",
     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
@@ -104,6 +104,14 @@
         "slow",
         "normal"
       ]
+    },
+    {
+      "name": "VoiceLane",
+      "doc": "How a provider carries a spoken turn. Not a quality setting — a statement of what the provider can actually do, which is why it is a column in the provider table rather than a preference.",
+      "cases": [
+        "realtime",
+        "chain"
+      ]
     }
   ],
   "actions": [
@@ -182,7 +190,17 @@
       "",
       "`local` is the default when nothing is configured, and that is deliberate: the one Windows",
       "port of the predecessor that survived was the one that needed no API key, and someone",
-      "narrating what they struggle to learn has a real reason to want it to stay on their machine."
+      "narrating what they struggle to learn has a real reason to want it to stay on their machine.",
+      "",
+      "`voice` is the same idea applied to speech. A duplex realtime socket — speech in, speech out,",
+      "one connection — is what makes a voice companion feel instant rather than operated, and the",
+      "predecessor measured it at roughly two seconds against twelve for the alternative. But only",
+      "OpenAI ships one today; Ollama has no duplex API, Anthropic has no audio API at all, and",
+      "Sarvam has excellent Indic STT and TTS without a socket to join them. So this is a capability",
+      "column, not a preference: `realtime` where the provider really has one, `chain` (speech in,",
+      "think, speech out as three steps) everywhere else. The chain lane is slower and says so out",
+      "loud. What it is not is absent — a companion whose default mode cannot be spoken to would",
+      "have the accessibility premise backwards."
     ],
     "default": "local",
     "rows": [
@@ -193,6 +211,7 @@
         "requiresKey": false,
         "requiresToken": false,
         "sendsDataOffMachine": false,
+        "voice": "chain",
         "doc": "An OpenAI-compatible server on this machine \u2014 Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device.",
         "keyHeader": "",
         "keyPrefix": ""
@@ -204,6 +223,7 @@
         "requiresKey": true,
         "requiresToken": false,
         "sendsDataOffMachine": true,
+        "voice": "realtime",
         "doc": "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved.",
         "keyHeader": "Authorization",
         "keyPrefix": "Bearer "
@@ -215,6 +235,7 @@
         "requiresKey": true,
         "requiresToken": false,
         "sendsDataOffMachine": true,
+        "voice": "chain",
         "doc": "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved.",
         "keyHeader": "x-api-key",
         "keyPrefix": ""
@@ -226,6 +247,7 @@
         "requiresKey": true,
         "requiresToken": false,
         "sendsDataOffMachine": true,
+        "voice": "chain",
         "doc": "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage \u2014 the reason this option exists, given where Saathi starts.",
         "keyHeader": "Authorization",
         "keyPrefix": "Bearer "
@@ -237,6 +259,7 @@
         "requiresKey": false,
         "requiresToken": true,
         "sendsDataOffMachine": true,
+        "voice": "realtime",
         "doc": "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything.",
         "keyHeader": "Authorization",
         "keyPrefix": "Bearer "

@@ -65,6 +65,43 @@ branch in Swift and another in C#.
 It never quietly upgrades to sending your words somewhere else, and both clients
 have tests pinning that.
 
+### Talking to it
+
+Voice is the point — this is a companion approached from the accessibility side, and being
+driveable entirely by voice is the whole premise. But only some providers can actually carry a
+spoken turn over one connection, so the lane is a **column in the provider table**, not a setting:
+
+| Mode | Lane | Speech in / out | Your voice |
+|---|---|---|---|
+| `local` *(default)* | `chain` | on-device | never leaves |
+| `anthropic`, `sarvam` | `chain` | on-device | never leaves — only the transcript is sent |
+| `openai`, `hosted` | `realtime` | over the connection | leaves as audio |
+
+```bash
+saathi voice            # which lane, and where your voice goes
+saathi voice --listen   # actually talk to it (macOS)
+```
+
+The `realtime` lane is one open socket carrying speech in and speech out, which is what makes a
+companion feel like it is listening rather than being operated — it can be interrupted
+mid-sentence. Only OpenAI ships that today: Ollama has no duplex API, Anthropic has no audio API at
+all, and Sarvam has excellent Indic speech models with no socket joining them.
+
+So the `chain` lane exists, and it is not a consolation prize. It is slower — three steps per turn,
+and it says so — but it is the only lane that works in the **default** mode, and a companion whose
+out-of-the-box configuration cannot be spoken to would have the accessibility premise backwards. It
+also makes a promise the realtime lane cannot: both ends run on-device, so with `sarvam` or
+`anthropic` doing the thinking, **your voice never leaves the machine — only the transcript does.**
+`saathi voice` states which of those you are getting, and both clients are tested to say the same
+thing about it.
+
+The audio engine and the realtime protocol handling were carried over from OpenClicky rather than
+rewritten, because they were the parts that had already been paid for: echo cancellation configured
+so the microphone can stay open while Saathi talks (without silencing the user's music), and a
+fixed CoreAudio render-thread data race that aborts under the Thread Sanitizer. Re-deriving those
+would have meant finding the same bug twice. `swift test --sanitize=thread --filter
+VoiceAudioEngineConcurrencyTests` is the command that checks the fix still holds.
+
 ### Running the backend yourself
 
 The backend only matters in `hosted` mode. If you run your own, it works with no
@@ -117,8 +154,8 @@ npm install
 npm run generate        # rewrite the generated contract for all three targets
 npm run check:contract  # fail if what is checked in is stale (CI runs this on every PR)
 npm test                # backend
-npm run test:mac        # swift test          (22 tests)
-npm run test:win        # dotnet test         (34 tests)
+npm run test:mac        # swift test          (62 tests)
+npm run test:win        # dotnet test         (66 tests)
 bash scripts/check-parity.sh   # run both clients and diff them
 ```
 

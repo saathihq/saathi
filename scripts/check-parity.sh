@@ -58,6 +58,11 @@ compare() {
 # whether anything they say leaves their machine, and two clients disagreeing about that would be
 # worse than either being wrong on its own.
 compare "provider" provider
+# The voice report is the same kind of promise as the provider one, and a finer-grained one: it is
+# where a learner reads whether their AUDIO leaves the machine or only a transcript does. Both
+# clients must say the same thing about that, including on Windows, where the lane is reported
+# before it is implemented.
+compare "voice"    voice
 compare "actions"  actions
 compare "demo"     demo
 compare "say"      say "hello there"
