@@ -14,31 +14,74 @@ import { Hono } from "hono";
 import { ACTION_WIRE_NAMES, CONTRACT_VERSION } from "./contract.js";
 
 export type AppEnv = {
-  /** Bearer tokens accepted by authenticated routes. Empty means "no accounts yet", not "allow all". */
+  /** Comma-separated bearer tokens accepted by authenticated routes. */
   SAATHI_TOKENS?: string;
+  /**
+   * Runs the backend with no accounts at all — every request is allowed.
+   *
+   * This is the self-hosting mode, and it is opt-in for a reason. An unset token list must never
+   * be read as "let everyone in", because that turns a half-finished deploy into an open one; but
+   * someone running Saathi on their own machine should not have to invent an account system first.
+   * So the permissive behaviour exists and has to be asked for by name.
+   */
+  SAATHI_ALLOW_ANONYMOUS?: string;
 };
+
+/** What the backend will accept, decided once so both the route and /health can report it. */
+export type AuthPosture =
+  | { mode: "tokens"; accepted: string[] }
+  | { mode: "anonymous" }
+  | { mode: "closed" };
+
+export function authPosture(env: AppEnv): AuthPosture {
+  const accepted = (env.SAATHI_TOKENS ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+
+  if (accepted.length > 0) return { mode: "tokens", accepted };
+
+  const anonymous = (env.SAATHI_ALLOW_ANONYMOUS ?? "").trim().toLowerCase();
+  if (anonymous === "1" || anonymous === "true" || anonymous === "yes") return { mode: "anonymous" };
+
+  return { mode: "closed" };
+}
 
 export function createApp(env: AppEnv = {}) {
   const app = new Hono();
 
-  app.get("/health", (c) => c.json({ ok: true, version: CONTRACT_VERSION }));
+  const posture = authPosture(env);
 
-  app.post("/session", async (c) => {
-    const authorization = c.req.header("authorization") ?? "";
-    const presented = authorization.toLowerCase().startsWith("bearer ")
-      ? authorization.slice("bearer ".length).trim()
-      : "";
+  app.get("/health", (c) =>
+    c.json({
+      ok: true,
+      version: CONTRACT_VERSION,
+      // Said out loud so an operator can see, without reading the config, whether the thing they
+      // just deployed is open to the world.
+      auth: posture.mode,
+    }),
+  );
 
-    // An unset token list denies rather than allows. A backend with no accounts configured is a
-    // backend nobody has an account on — reading it as "let everyone in" is how an unconfigured
-    // deploy becomes an open one.
-    const accepted = (env.SAATHI_TOKENS ?? "")
-      .split(",")
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0);
+  app.post("/session", (c) => {
+    if (posture.mode === "closed") {
+      return c.json(
+        {
+          error: "this backend has no accounts configured",
+          hint: "set SAATHI_TOKENS, or SAATHI_ALLOW_ANONYMOUS=1 to run it open for self-hosting",
+        },
+        401,
+      );
+    }
 
-    if (presented.length === 0 || !accepted.includes(presented)) {
-      return c.json({ error: "not authorised" }, 401);
+    if (posture.mode === "tokens") {
+      const authorization = c.req.header("authorization") ?? "";
+      const presented = authorization.toLowerCase().startsWith("bearer ")
+        ? authorization.slice("bearer ".length).trim()
+        : "";
+
+      if (presented.length === 0 || !posture.accepted.includes(presented)) {
+        return c.json({ error: "not authorised" }, 401);
+      }
     }
 
     return c.json({

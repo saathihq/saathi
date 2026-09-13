@@ -1,32 +1,100 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.1.0.
+// Contract version 0.2.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.1.0"
+    public static let contractVersion = "0.2.0"
+}
+
+/// One row per provider mode: where it runs, what it needs, and whether using it means
+/// anything the learner says leaves their machine.
+public struct SaathiProvider: Sendable, Equatable {
+    public let kind: ProviderKind
+    public let defaultBaseURL: String
+    public let defaultModel: String
+    /// Needs the user's own provider key, held on their machine.
+    public let requiresKey: Bool
+    /// Needs a Saathi account token.
+    public let requiresToken: Bool
+    /// False only for `local`. Worth surfacing to the user rather than burying.
+    public let sendsDataOffMachine: Bool
+    public let summary: String
+
+    public static let all: [SaathiProvider] = [
+        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+    ]
+
+    public static func of(_ kind: ProviderKind) -> SaathiProvider {
+        // `all` covers every case of a closed enum, so this cannot be nil in practice;
+        // trapping is better than inventing a fallback that would silently pick a mode.
+        guard let row = all.first(where: { $0.kind == kind }) else {
+            preconditionFailure("no provider row for \(kind) — the contract is out of sync")
+        }
+        return row
+    }
 }
 
 /// `~/.saathi/shell.json`.
 public struct SaathiConfiguration: Codable, Sendable {
-    /// Overrides the hosted default.
+    /// Which mode to run in. Unset means local — see providers.default.
+    public var provider: ProviderKind?
+    /// Overrides the provider's default base URL (another Ollama host, a proxy, a compatible server).
+    public var providerBaseUrl: String?
+    /// Overrides the provider's default model.
+    public var model: String?
+    /// Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers.
+    public var apiKey: String?
+    /// Overrides the hosted backend URL. Only used in hosted mode.
     public var backendUrl: String?
-    /// Bearer token for the backend.
+    /// Account token for the hosted backend. Only used in hosted mode.
     public var token: String?
 
-    public init(backendUrl: String? = nil, token: String? = nil) {
+    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, backendUrl: String? = nil, token: String? = nil) {
+        self.provider = provider
+        self.providerBaseUrl = providerBaseUrl
+        self.model = model
+        self.apiKey = apiKey
         self.backendUrl = backendUrl
         self.token = token
     }
 
-    /// The hosted backend unless the config names another one.
+    /// The mode in effect. Unset means `.local` — running against a model on this
+    /// machine, with no key and no account, is the default rather than a special case.
+    public var resolvedProvider: ProviderKind { provider ?? .local }
+
+    public var providerRow: SaathiProvider { SaathiProvider.of(resolvedProvider) }
+
+    /// The provider's base URL, or the override if one is configured.
+    public var resolvedProviderBaseURL: String {
+        let trimmed = providerBaseUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? providerRow.defaultBaseURL : trimmed
+    }
+
+    public var resolvedModel: String {
+        let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? providerRow.defaultModel : trimmed
+    }
+
+    /// The hosted backend unless the config names another one. Only meaningful in hosted mode.
     public var resolvedBaseURL: String {
         let trimmed = backendUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? SaathiBackend.defaultBaseURL : trimmed
     }
+}
+
+/// Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine.
+public enum ProviderKind: String, Codable, CaseIterable, Sendable {
+    case local
+    case openai
+    case anthropic
+    case hosted
 }
 
 /// How a spoken line should sound. Accessibility-first: the companion says what is happening, and how it says it is part of the message.

@@ -1,17 +1,49 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.1.0.
+// Contract version 0.2.0.
 
-export const CONTRACT_VERSION = "0.1.0";
+export const CONTRACT_VERSION = "0.2.0";
 export const DEFAULT_BASE_URL = "https://api.saathi.dev";
 
 /** `~/.saathi/shell.json`. */
 export type SaathiConfiguration = {
-  /** Overrides the hosted default. */
+  /** Which mode to run in. Unset means local — see providers.default. */
+  provider?: ProviderKind;
+  /** Overrides the provider's default base URL (another Ollama host, a proxy, a compatible server). */
+  providerBaseUrl?: string;
+  /** Overrides the provider's default model. */
+  model?: string;
+  /** Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers. */
+  apiKey?: string;
+  /** Overrides the hosted backend URL. Only used in hosted mode. */
   backendUrl?: string;
-  /** Bearer token for the backend. */
+  /** Account token for the hosted backend. Only used in hosted mode. */
   token?: string;
 };
+
+/** One row per provider mode: where it runs, what it needs, and whether using it means
+ *  anything the learner says leaves their machine. */
+export type SaathiProvider = {
+  kind: ProviderKind;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  requiresKey: boolean;
+  requiresToken: boolean;
+  sendsDataOffMachine: boolean;
+  summary: string;
+};
+
+export const DEFAULT_PROVIDER: ProviderKind = "local";
+export const PROVIDERS: readonly SaathiProvider[] = [
+  { kind: "local", defaultBaseUrl: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device." },
+  { kind: "openai", defaultBaseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved." },
+  { kind: "anthropic", defaultBaseUrl: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved." },
+  { kind: "hosted", defaultBaseUrl: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything." },
+] as const;
+
+/** Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine. */
+export type ProviderKind = "local" | "openai" | "anthropic" | "hosted";
+export const PROVIDERKIND_CASES: readonly ProviderKind[] = ["local", "openai", "anthropic", "hosted"] as const;
 
 /** How a spoken line should sound. Accessibility-first: the companion says what is happening, and how it says it is part of the message. */
 export type Tone = "calm" | "encouraging" | "neutral";

@@ -2,61 +2,125 @@
   "$comment": [
     "The single source of truth for everything a Saathi client and the backend must agree on.",
     "",
-    "Swift, C# and TypeScript are all GENERATED from this file into contract/generated/. Never edit",
-    "a generated file: `npm run generate -w contract` rewrites them, and CI fails any PR where the",
-    "checked-in output does not match what this schema produces.",
+    "Swift, C# and TypeScript are all GENERATED from this file into each client's source tree.",
+    "Never edit a generated file: `npm run generate -w contract` rewrites them, and CI fails any PR",
+    "where the checked-in output does not match what this schema produces.",
     "",
-    "The SHAPE of this file is the decided part. The CONTENTS are a seed: the product questions in",
-    "the root README (who it is for first, what learn-and-play means concretely) are still open, and",
-    "the action list below will change once they are answered. Changing it is meant to be cheap —",
-    "edit here, run the generator, and both clients fail to compile until they handle the change.",
+    "The SHAPE of this file is the decided part. The action list is still a seed \u2014 the product",
+    "questions in the root README are open. The PROVIDER section below is not a seed: running",
+    "Saathi against your own local model, with no key and no account, is the primary objective, and",
+    "the three modes here are what make that possible without a second implementation.",
     "",
     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
-    "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small.",
-    "This is the one thing OpenClicky got right that is worth carrying over verbatim."
+    "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
   ],
-
-  "version": "0.1.0",
-
+  "version": "0.2.0",
   "backend": {
     "defaultBaseUrl": "https://api.saathi.dev",
     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
     "routes": [
-      { "method": "GET", "path": "/health", "auth": false, "summary": "Liveness. Returns { ok, version }." },
-      { "method": "POST", "path": "/session", "auth": true, "summary": "Opens a companion session and returns the actions this client may perform." }
+      {
+        "method": "GET",
+        "path": "/health",
+        "auth": false,
+        "summary": "Liveness. Returns { ok, version }."
+      },
+      {
+        "method": "POST",
+        "path": "/session",
+        "auth": true,
+        "summary": "Opens a companion session and returns the actions this client may perform."
+      }
     ]
   },
-
   "config": {
-    "$comment": "~/.saathi/shell.json on every platform. Owner-readable only (0600) — it holds a token.",
+    "$comment": "~/.saathi/shell.json on every platform. Owner-readable only (0600) \u2014 it can hold a key.",
     "fileName": "shell.json",
     "directoryName": ".saathi",
     "fields": [
-      { "name": "backendUrl", "type": "string", "optional": true, "doc": "Overrides the hosted default." },
-      { "name": "token", "type": "string", "optional": true, "doc": "Bearer token for the backend." }
+      {
+        "name": "provider",
+        "type": "ProviderKind",
+        "optional": true,
+        "doc": "Which mode to run in. Unset means local \u2014 see providers.default."
+      },
+      {
+        "name": "providerBaseUrl",
+        "type": "string",
+        "optional": true,
+        "doc": "Overrides the provider's default base URL (another Ollama host, a proxy, a compatible server)."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "optional": true,
+        "doc": "Overrides the provider's default model."
+      },
+      {
+        "name": "apiKey",
+        "type": "string",
+        "optional": true,
+        "doc": "Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers."
+      },
+      {
+        "name": "backendUrl",
+        "type": "string",
+        "optional": true,
+        "doc": "Overrides the hosted backend URL. Only used in hosted mode."
+      },
+      {
+        "name": "token",
+        "type": "string",
+        "optional": true,
+        "doc": "Account token for the hosted backend. Only used in hosted mode."
+      }
     ]
   },
-
   "enums": [
+    {
+      "name": "ProviderKind",
+      "doc": "Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine.",
+      "cases": [
+        "local",
+        "openai",
+        "anthropic",
+        "hosted"
+      ]
+    },
     {
       "name": "Tone",
       "doc": "How a spoken line should sound. Accessibility-first: the companion says what is happening, and how it says it is part of the message.",
-      "cases": ["calm", "encouraging", "neutral"]
+      "cases": [
+        "calm",
+        "encouraging",
+        "neutral"
+      ]
     },
     {
       "name": "Pace",
       "doc": "How fast to move through a sequence of steps. The learner sets this, not the model.",
-      "cases": ["slow", "normal"]
+      "cases": [
+        "slow",
+        "normal"
+      ]
     }
   ],
-
   "actions": [
     {
       "name": "say",
       "doc": "Speak a line to the learner. The companion narrates; this is the primary action.",
       "parameters": [
-        { "name": "text", "type": "string", "doc": "What to say. One or two sentences." },
-        { "name": "tone", "type": "Tone", "default": "neutral", "doc": "How it should sound." }
+        {
+          "name": "text",
+          "type": "string",
+          "doc": "What to say. One or two sentences."
+        },
+        {
+          "name": "tone",
+          "type": "Tone",
+          "default": "neutral",
+          "doc": "How it should sound."
+        }
       ]
     },
     {
@@ -64,20 +128,95 @@
       "wireName": "show_step",
       "doc": "Put one step of something being learned in front of the learner, with its place in the whole.",
       "parameters": [
-        { "name": "title", "type": "string", "doc": "The step itself, in a few words." },
-        { "name": "detail", "type": "string", "optional": true, "doc": "One sentence of elaboration, if it helps." },
-        { "name": "index", "type": "int", "doc": "1-based position of this step." },
-        { "name": "total", "type": "int", "doc": "How many steps there are, so progress is always audible." },
-        { "name": "pace", "type": "Pace", "default": "normal", "doc": "How fast to move on." }
+        {
+          "name": "title",
+          "type": "string",
+          "doc": "The step itself, in a few words."
+        },
+        {
+          "name": "detail",
+          "type": "string",
+          "optional": true,
+          "doc": "One sentence of elaboration, if it helps."
+        },
+        {
+          "name": "index",
+          "type": "int",
+          "doc": "1-based position of this step."
+        },
+        {
+          "name": "total",
+          "type": "int",
+          "doc": "How many steps there are, so progress is always audible."
+        },
+        {
+          "name": "pace",
+          "type": "Pace",
+          "default": "normal",
+          "doc": "How fast to move on."
+        }
       ]
     },
     {
       "name": "openUrl",
       "wireName": "open_url",
-      "doc": "Open a resource in the learner's browser. http(s) only — clients MUST reject every other scheme rather than pass it to the OS.",
+      "doc": "Open a resource in the learner's browser. http(s) only \u2014 clients MUST reject every other scheme rather than pass it to the OS.",
       "parameters": [
-        { "name": "url", "type": "string", "doc": "An absolute http or https URL." }
+        {
+          "name": "url",
+          "type": "string",
+          "doc": "An absolute http or https URL."
+        }
       ]
     }
-  ]
+  ],
+  "providers": {
+    "$comment": [
+      "One row per ProviderKind. `defaultModel` is a starting point a user can change, not a",
+      "recommendation \u2014 model names churn faster than this file should.",
+      "",
+      "`local` is the default when nothing is configured, and that is deliberate: the one Windows",
+      "port of the predecessor that survived was the one that needed no API key, and someone",
+      "narrating what they struggle to learn has a real reason to want it to stay on their machine."
+    ],
+    "default": "local",
+    "rows": [
+      {
+        "kind": "local",
+        "defaultBaseUrl": "http://localhost:11434",
+        "defaultModel": "llama3.2",
+        "requiresKey": false,
+        "requiresToken": false,
+        "sendsDataOffMachine": false,
+        "doc": "An OpenAI-compatible server on this machine \u2014 Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."
+      },
+      {
+        "kind": "openai",
+        "defaultBaseUrl": "https://api.openai.com/v1",
+        "defaultModel": "gpt-4o-mini",
+        "requiresKey": true,
+        "requiresToken": false,
+        "sendsDataOffMachine": true,
+        "doc": "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."
+      },
+      {
+        "kind": "anthropic",
+        "defaultBaseUrl": "https://api.anthropic.com",
+        "defaultModel": "claude-sonnet-5",
+        "requiresKey": true,
+        "requiresToken": false,
+        "sendsDataOffMachine": true,
+        "doc": "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."
+      },
+      {
+        "kind": "hosted",
+        "defaultBaseUrl": "https://api.saathi.dev",
+        "defaultModel": "",
+        "requiresKey": false,
+        "requiresToken": true,
+        "sendsDataOffMachine": true,
+        "doc": "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."
+      }
+    ]
+  }
 }

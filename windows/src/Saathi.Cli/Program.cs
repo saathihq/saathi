@@ -4,6 +4,7 @@
 //
 //  The basic Windows client, command for command the same as the macOS one:
 //
+//    saathi provider           which mode this is in, and whether anything leaves the machine
 //    saathi actions            what this build can be asked to do
 //    saathi health             is the backend up
 //    saathi say "..."          say one line
@@ -40,6 +41,17 @@ int Fail(string message)
 
 switch (command)
 {
+    case "provider":
+    {
+        var configuration = ConfigurationStore.Load(ConfigurationStore.DefaultPath());
+        Console.WriteLine(ProviderReport.Describe(configuration));
+        if (arguments.Contains("--probe"))
+        {
+            Console.WriteLine($"  status     {await ProviderReport.ReachabilityAsync(configuration)}");
+        }
+        return 0;
+    }
+
     case "actions":
         Console.WriteLine($"contract {SaathiBackend.ContractVersion} — {SaathiActions.AllWireNames.Length} actions");
         foreach (var wireName in SaathiActions.AllWireNames) Console.WriteLine($"  {wireName}");
@@ -102,6 +114,7 @@ switch (command)
         Console.WriteLine("""
             saathi — a companion for learning and playing with new things
 
+              saathi provider             which mode this is in  (--probe to check it is reachable)
               saathi actions              list what this build can be asked to do
               saathi health               check the backend
               saathi say "..."            say one line  (--tone=calm|encouraging|neutral)

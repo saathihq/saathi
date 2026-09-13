@@ -5,6 +5,7 @@
 //  The basic macOS client. A CLI for now — the point is that the contract, the config, the backend
 //  client and the actions are all real and shared with whatever shell comes later.
 //
+//    saathi provider           which mode this is in, and whether anything leaves the machine
 //    saathi actions            what this build can be asked to do
 //    saathi health             is the backend up
 //    saathi say "..."          say one line out loud
@@ -38,6 +39,14 @@ func fail(_ message: String) -> Never {
 }
 
 switch command {
+case "provider":
+    let configuration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
+    print(ProviderReport.describe(configuration))
+    if arguments.contains("--probe") {
+        let status = await ProviderReport.reachability(of: configuration)
+        print("  status     \(status)")
+    }
+
 case "actions":
     print("contract \(SaathiBackend.contractVersion) — \(SaathiAction.allWireNames.count) actions")
     for wireName in SaathiAction.allWireNames { print("  \(wireName)") }
@@ -80,6 +89,7 @@ case "help", "--help", "-h":
     print("""
     saathi — a companion for learning and playing with new things
 
+      saathi provider             which mode this is in  (--probe to check it is reachable)
       saathi actions              list what this build can be asked to do
       saathi health               check the backend
       saathi say "..."            say one line  (--tone=calm|encouraging|neutral)

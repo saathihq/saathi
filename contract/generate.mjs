@@ -28,6 +28,8 @@ const BANNER = (comment) =>
   `${comment} Contract version ${schema.version}.\n`;
 
 const enumNames = new Set(schema.enums.map((e) => e.name));
+const providerRows = schema.providers.rows;
+const providerDefault = schema.providers.default;
 const pascal = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const wireOf = (action) => action.wireName ?? action.name;
 
@@ -37,6 +39,11 @@ const orderedParameters = (action) =>
 const isOptional = (p) => Boolean(p.optional) || p.default !== undefined;
 
 // ---------------------------------------------------------------------------- Swift
+
+/** Config fields are always optional; only their base type varies. */
+function swiftConfigType(f) {
+  return (f.type === "string" ? "String" : f.type) + "?";
+}
 
 function swift() {
   const type = (p) => {
@@ -53,17 +60,59 @@ function swift() {
   out.push(`    public static let contractVersion = "${schema.version}"`);
   out.push("}\n");
 
+  // Provider table, emitted before the config that resolves against it.
+  out.push("/// One row per provider mode: where it runs, what it needs, and whether using it means");
+  out.push("/// anything the learner says leaves their machine.");
+  out.push("public struct SaathiProvider: Sendable, Equatable {");
+  out.push("    public let kind: ProviderKind");
+  out.push("    public let defaultBaseURL: String");
+  out.push("    public let defaultModel: String");
+  out.push("    /// Needs the user's own provider key, held on their machine.");
+  out.push("    public let requiresKey: Bool");
+  out.push("    /// Needs a Saathi account token.");
+  out.push("    public let requiresToken: Bool");
+  out.push("    /// False only for `local`. Worth surfacing to the user rather than burying.");
+  out.push("    public let sendsDataOffMachine: Bool");
+  out.push("    public let summary: String\n");
+  out.push("    public static let all: [SaathiProvider] = [");
+  for (const r of providerRows) {
+    out.push(`        SaathiProvider(kind: .${r.kind}, defaultBaseURL: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, summary: ${JSON.stringify(r.doc)}),`);
+  }
+  out.push("    ]\n");
+  out.push("    public static func of(_ kind: ProviderKind) -> SaathiProvider {");
+  out.push("        // `all` covers every case of a closed enum, so this cannot be nil in practice;");
+  out.push("        // trapping is better than inventing a fallback that would silently pick a mode.");
+  out.push("        guard let row = all.first(where: { $0.kind == kind }) else {");
+  out.push("            preconditionFailure(\"no provider row for \\(kind) — the contract is out of sync\")");
+  out.push("        }");
+  out.push("        return row");
+  out.push("    }");
+  out.push("}\n");
+
   out.push(`/// \`~/${schema.config.directoryName}/${schema.config.fileName}\`.`);
   out.push("public struct SaathiConfiguration: Codable, Sendable {");
   for (const f of schema.config.fields) {
     out.push(`    /// ${f.doc}`);
-    out.push(`    public var ${f.name}: String?`);
+    out.push(`    public var ${f.name}: ${swiftConfigType(f)}`);
   }
   out.push("");
-  out.push(`    public init(${schema.config.fields.map((f) => `${f.name}: String? = nil`).join(", ")}) {`);
+  out.push(`    public init(${schema.config.fields.map((f) => `${f.name}: ${swiftConfigType(f)} = nil`).join(", ")}) {`);
   for (const f of schema.config.fields) out.push(`        self.${f.name} = ${f.name}`);
   out.push("    }\n");
-  out.push("    /// The hosted backend unless the config names another one.");
+  out.push(`    /// The mode in effect. Unset means \`.${providerDefault}\` — running against a model on this`);
+  out.push("    /// machine, with no key and no account, is the default rather than a special case.");
+  out.push(`    public var resolvedProvider: ProviderKind { provider ?? .${providerDefault} }\n`);
+  out.push("    public var providerRow: SaathiProvider { SaathiProvider.of(resolvedProvider) }\n");
+  out.push("    /// The provider's base URL, or the override if one is configured.");
+  out.push("    public var resolvedProviderBaseURL: String {");
+  out.push("        let trimmed = providerBaseUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
+  out.push("        return trimmed.isEmpty ? providerRow.defaultBaseURL : trimmed");
+  out.push("    }\n");
+  out.push("    public var resolvedModel: String {");
+  out.push("        let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
+  out.push("        return trimmed.isEmpty ? providerRow.defaultModel : trimmed");
+  out.push("    }\n");
+  out.push("    /// The hosted backend unless the config names another one. Only meaningful in hosted mode.");
   out.push("    public var resolvedBaseURL: String {");
   out.push("        let trimmed = backendUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
   out.push("        return trimmed.isEmpty ? SaathiBackend.defaultBaseURL : trimmed");
@@ -126,6 +175,7 @@ function csharp() {
   const out = [];
   out.push(BANNER("//"));
   out.push("#nullable enable");
+  out.push("using System.Linq;");
   out.push("using System.Text.Json.Serialization;\n");
   out.push("namespace Saathi.Contract;\n");
 
@@ -136,18 +186,51 @@ function csharp() {
   out.push(`    public const string ContractVersion = "${schema.version}";`);
   out.push("}\n");
 
+  out.push("/// <summary>One row per provider mode: where it runs, what it needs, and whether using it");
+  out.push("/// means anything the learner says leaves their machine.</summary>");
+  out.push("public sealed record SaathiProvider(");
+  out.push("    ProviderKind Kind,");
+  out.push("    string DefaultBaseUrl,");
+  out.push("    string DefaultModel,");
+  out.push("    bool RequiresKey,");
+  out.push("    bool RequiresToken,");
+  out.push("    bool SendsDataOffMachine,");
+  out.push("    string Summary)");
+  out.push("{");
+  out.push("    public static readonly IReadOnlyList<SaathiProvider> All =");
+  out.push("    [");
+  for (const r of providerRows) {
+    out.push(`        new(global::Saathi.Contract.ProviderKind.${pascal(r.kind)}, "${r.defaultBaseUrl}", "${r.defaultModel}", ${r.requiresKey}, ${r.requiresToken}, ${r.sendsDataOffMachine}, ${JSON.stringify(r.doc)}),`);
+  }
+  out.push("    ];\n");
+  out.push("    /// <summary>`All` covers every case of a closed enum, so this cannot miss in practice;");
+  out.push("    /// throwing is better than inventing a fallback that would silently pick a mode.</summary>");
+  out.push("    public static SaathiProvider Of(ProviderKind kind) =>");
+  out.push("        All.FirstOrDefault(p => p.Kind == kind)");
+  out.push("        ?? throw new InvalidOperationException($\"no provider row for {kind} — the contract is out of sync\");");
+  out.push("}\n");
+
   out.push(`/// <summary><c>~/${schema.config.directoryName}/${schema.config.fileName}</c>.</summary>`);
   out.push("public sealed class SaathiConfiguration");
   out.push("{");
   for (const f of schema.config.fields) {
     out.push(`    /// <summary>${f.doc}</summary>`);
     out.push(`    [JsonPropertyName("${f.name}")]`);
-    out.push(`    public string? ${pascal(f.name)} { get; set; }\n`);
+    out.push(`    public ${f.type === "string" ? "string" : f.type}? ${pascal(f.name)} { get; set; }\n`);
   }
   const baseUrlField = pascal(
     (schema.config.fields.find((f) => f.name === "backendUrl") ?? schema.config.fields[0]).name,
   );
-  out.push("    /// <summary>The hosted backend unless the config names another one.</summary>");
+  out.push(`    /// <summary>The mode in effect. Unset means <c>${providerDefault}</c> — running against a model`);
+  out.push("    /// on this machine, with no key and no account, is the default rather than a special case.</summary>");
+  out.push(`    public ProviderKind ResolvedProvider => Provider ?? global::Saathi.Contract.ProviderKind.${pascal(providerDefault)};\n`);
+  out.push("    public SaathiProvider ProviderRow => SaathiProvider.Of(ResolvedProvider);\n");
+  out.push("    /// <summary>The provider's base URL, or the override if one is configured.</summary>");
+  out.push("    public string ResolvedProviderBaseUrl =>");
+  out.push("        string.IsNullOrWhiteSpace(ProviderBaseUrl) ? ProviderRow.DefaultBaseUrl : ProviderBaseUrl!.Trim();\n");
+  out.push("    public string ResolvedModel =>");
+  out.push("        string.IsNullOrWhiteSpace(Model) ? ProviderRow.DefaultModel : Model!.Trim();\n");
+  out.push("    /// <summary>The hosted backend unless the config names another one. Only meaningful in hosted mode.</summary>");
   out.push("    public string ResolvedBaseUrl =>");
   out.push(`        string.IsNullOrWhiteSpace(${baseUrlField}) ? SaathiBackend.DefaultBaseUrl : ${baseUrlField}!.Trim();`);
   out.push("}\n");
@@ -216,8 +299,28 @@ function typescript() {
 
   out.push(`/** \`~/${schema.config.directoryName}/${schema.config.fileName}\`. */`);
   out.push("export type SaathiConfiguration = {");
-  for (const f of schema.config.fields) out.push(`  /** ${f.doc} */\n  ${f.name}?: string;`);
+  for (const f of schema.config.fields) {
+    out.push(`  /** ${f.doc} */\n  ${f.name}?: ${f.type === "string" ? "string" : f.type};`);
+  }
   out.push("};\n");
+
+  out.push("/** One row per provider mode: where it runs, what it needs, and whether using it means");
+  out.push(" *  anything the learner says leaves their machine. */");
+  out.push("export type SaathiProvider = {");
+  out.push("  kind: ProviderKind;");
+  out.push("  defaultBaseUrl: string;");
+  out.push("  defaultModel: string;");
+  out.push("  requiresKey: boolean;");
+  out.push("  requiresToken: boolean;");
+  out.push("  sendsDataOffMachine: boolean;");
+  out.push("  summary: string;");
+  out.push("};\n");
+  out.push(`export const DEFAULT_PROVIDER: ProviderKind = "${providerDefault}";`);
+  out.push("export const PROVIDERS: readonly SaathiProvider[] = [");
+  for (const r of providerRows) {
+    out.push(`  { kind: "${r.kind}", defaultBaseUrl: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, summary: ${JSON.stringify(r.doc)} },`);
+  }
+  out.push("] as const;\n");
 
   for (const e of schema.enums) {
     out.push(`/** ${e.doc} */`);

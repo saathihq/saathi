@@ -18,6 +18,14 @@ for binary in "$MAC" "$WIN"; do
   [[ -x "$binary" ]] || { echo "not built: $binary" >&2; exit 1; }
 done
 
+# A .NET apphost finds its runtime through DOTNET_ROOT, not PATH. When the SDK was installed with
+# dotnet-install.sh (which puts it in ~/.dotnet) rather than system-wide, running the built binary
+# fails with "You must install .NET to run this application" even though `dotnet build` just
+# succeeded. CI's setup-dotnet installs system-wide and needs none of this.
+if [[ -z "${DOTNET_ROOT:-}" && -x "$HOME/.dotnet/dotnet" ]]; then
+  export DOTNET_ROOT="$HOME/.dotnet"
+fi
+
 failures=0
 
 # The macOS client speaks by default and prints with --quiet; the Windows one only prints so far.
@@ -37,6 +45,10 @@ compare() {
   fi
 }
 
+# The provider report is the most important one to keep identical: it is how a person checks
+# whether anything they say leaves their machine, and two clients disagreeing about that would be
+# worse than either being wrong on its own.
+compare "provider" provider
 compare "actions"  actions
 compare "demo"     demo
 compare "say"      say "hello there"

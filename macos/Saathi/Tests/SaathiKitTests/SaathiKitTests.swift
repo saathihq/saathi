@@ -226,3 +226,86 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(ShowStepAction(title: "x", index: 1, total: 1).pace, .normal)
     }
 }
+
+/// Running against your own model, on your own machine, with no key and no account is the primary
+/// objective. These pin the behaviour that makes that true by default rather than by instruction.
+final class ProviderTests: XCTestCase {
+
+    func testNothingConfiguredMeansLocal() {
+        let configuration = SaathiConfiguration()
+        XCTAssertEqual(configuration.resolvedProvider, .local)
+        XCTAssertEqual(configuration.resolvedProviderBaseURL, "http://localhost:11434")
+        XCTAssertFalse(configuration.providerRow.requiresKey)
+        XCTAssertFalse(configuration.providerRow.requiresToken)
+    }
+
+    /// The one that matters most: the default mode must not send anything anywhere.
+    func testTheDefaultModeKeepsEverythingOnTheMachine() {
+        XCTAssertFalse(SaathiConfiguration().providerRow.sendsDataOffMachine)
+    }
+
+    /// There is no silent fallback from local to a network provider. An unreachable local model is
+    /// an error the user sees, never a quiet upgrade to sending their words to someone else.
+    func testOnlyTheHostedModeIsEverReachedByAskingForIt() {
+        for kind in ProviderKind.allCases where kind != .local {
+            XCTAssertTrue(
+                SaathiProvider.of(kind).sendsDataOffMachine,
+                "\(kind) should be marked as leaving the machine"
+            )
+        }
+        XCTAssertEqual(SaathiConfiguration(provider: .hosted).resolvedProvider, .hosted)
+    }
+
+    func testEveryProviderKindHasARow() {
+        for kind in ProviderKind.allCases {
+            XCTAssertEqual(SaathiProvider.of(kind).kind, kind)
+        }
+        XCTAssertEqual(SaathiProvider.all.count, ProviderKind.allCases.count)
+    }
+
+    func testOverridesWinOverTheProviderDefaults() {
+        let configuration = SaathiConfiguration(
+            provider: .local,
+            providerBaseUrl: "http://192.168.1.9:11434",
+            model: "qwen2.5"
+        )
+        XCTAssertEqual(configuration.resolvedProviderBaseURL, "http://192.168.1.9:11434")
+        XCTAssertEqual(configuration.resolvedModel, "qwen2.5")
+    }
+
+    func testBlankOverridesFallBackToTheDefaults() {
+        let configuration = SaathiConfiguration(provider: .local, providerBaseUrl: "  ", model: "")
+        XCTAssertEqual(configuration.resolvedProviderBaseURL, "http://localhost:11434")
+        XCTAssertEqual(configuration.resolvedModel, "llama3.2")
+    }
+
+    func testTheKeyRequiringModesSaySoRatherThanFailingLater() {
+        XCTAssertTrue(SaathiProvider.of(.openai).requiresKey)
+        XCTAssertTrue(SaathiProvider.of(.anthropic).requiresKey)
+        XCTAssertTrue(SaathiProvider.of(.hosted).requiresToken)
+    }
+
+    // MARK: the report
+
+    func testTheReportNamesTheDefaultAsADefault() {
+        let report = ProviderReport.describe(SaathiConfiguration())
+        XCTAssertTrue(report.contains("provider: local"))
+        XCTAssertTrue(report.contains("(default — nothing configured)"))
+        XCTAssertTrue(report.contains("stays on this machine"))
+    }
+
+    func testTheReportFlagsAMissingKeyLoudly() {
+        let report = ProviderReport.describe(SaathiConfiguration(provider: .openai))
+        XCTAssertTrue(report.contains("MISSING"), "a mode that cannot run should say so")
+        XCTAssertTrue(report.contains("leaves this machine"))
+    }
+
+    /// The key must never appear in the report — not in full, and not as a prefix.
+    func testTheReportNeverPrintsTheKey() {
+        let secret = "sk-live-abcdef0123456789"
+        let report = ProviderReport.describe(SaathiConfiguration(provider: .openai, apiKey: secret))
+        XCTAssertFalse(report.contains(secret))
+        XCTAssertFalse(report.contains("sk-"))
+        XCTAssertTrue(report.contains("set"))
+    }
+}

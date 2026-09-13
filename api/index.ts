@@ -26,7 +26,10 @@ import { createApp } from "../backend/src/app.js";
 
 export const config = { runtime: "edge" };
 
-const app = createApp({ SAATHI_TOKENS: process.env.SAATHI_TOKENS });
+const app = createApp({
+  SAATHI_TOKENS: process.env.SAATHI_TOKENS,
+  SAATHI_ALLOW_ANONYMOUS: process.env.SAATHI_ALLOW_ANONYMOUS,
+});
 
 export default function handler(request: Request): Response | Promise<Response> {
   const incoming = new URL(request.url);

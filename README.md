@@ -11,6 +11,79 @@ what make a good companion for anyone learning something new.
 and a Windows client that both run — enough to prove the structure holds and to have something to
 put a real idea into. The product shape itself is deliberately still open — see below.
 
+## Run it yourself
+
+Saathi is open source (Apache-2.0) and **running it yourself is the point**, not a
+consolation prize. There are three modes, and the default is the one that needs
+nothing from anybody:
+
+| Mode | Keys | Account | Does anything leave your machine? |
+|---|---|---|---|
+| **`local`** *(default)* | none | none | **no** |
+| `openai` / `anthropic` | your own, on your machine | none | yes, straight to that provider |
+| `hosted` | none — we hold them | yes | yes, to Saathi's backend |
+
+`local` talks to an OpenAI-compatible server on your own machine — Ollama, LM
+Studio, llama.cpp. With nothing configured at all, that is what you get:
+
+```bash
+saathi provider           # what mode am I in, and does anything leave this machine?
+saathi provider --probe   # ...and is it actually running?
+```
+
+```
+provider: local  (default — nothing configured)
+  An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp.
+  No key, no account, nothing leaves the device.
+
+  base url   http://localhost:11434
+  model      llama3.2
+  your key   not needed
+  account    not needed
+  privacy    stays on this machine
+```
+
+To use your own cloud key instead, put it in `~/.saathi/shell.json` — it stays on
+your machine and goes straight to that provider; Saathi's servers are not in the
+path:
+
+```json
+{ "provider": "anthropic", "apiKey": "sk-ant-…" }
+```
+
+**There is no silent fallback.** If a local model is not reachable, Saathi says so.
+It never quietly upgrades to sending your words somewhere else, and both clients
+have tests pinning that.
+
+### Running the backend yourself
+
+The backend only matters in `hosted` mode. If you run your own, it works with no
+accounts at all — but you have to ask for that by name, so an unconfigured deploy
+is never accidentally an open one:
+
+```bash
+SAATHI_ALLOW_ANONYMOUS=1 npm run dev -w backend
+curl localhost:8787/health     # {"ok":true,"version":"0.2.0","auth":"anonymous"}
+```
+
+`/health` reports its own posture — `closed`, `anonymous` or `tokens` — so you can
+see what you just deployed without reading the config.
+
+`selfhost/` has a Dockerfile, a compose file and a Caddy block for putting that on
+your own box.
+
+## The hosted service
+
+For people who would rather not run or configure anything, there is a hosted
+backend at `api.saathi.dev` that holds the provider keys. **It runs the code in
+this repository**, with accounts and metering switched on by configuration rather
+than by a private fork. What it sells is not having to run anything — not access
+to something withheld here.
+
+Billing is not built. India is the first market and UPI is how India pays, so the
+payment rail is an open decision rather than a Stripe integration waiting to be
+switched on.
+
 ## Layout
 
 ```
@@ -114,6 +187,9 @@ two builds tell you what needs updating — see [contract/README.md](contract/RE
 - The name, and `saathi.dev`.
 - The premise: a companion that helps people *learn* and *play*, not a tool that does work for them.
 - Accessibility is the starting lens, not a later compliance pass.
+- **Apache-2.0**, and self-hosting against your own model is the primary objective — see
+  [NOTICE](NOTICE) for why the licence is permissive rather than defensive.
+- **`local` is the default mode.** Nothing configured means nothing leaves the machine.
 
 ## What is not decided
 
