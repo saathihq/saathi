@@ -36,7 +36,7 @@ public class ProviderTests
     /// an error the user sees, never a quiet upgrade to sending their words to someone else.
     /// </summary>
     [Fact]
-    public void OnlyTheHostedModeIsEverReachedByAskingForIt()
+    public void EveryNetworkModeIsMarkedAsLeavingTheMachine()
     {
         foreach (var kind in Enum.GetValues<ProviderKind>())
         {
@@ -120,5 +120,56 @@ public class ProviderTests
         Assert.DoesNotContain(secret, report, StringComparison.Ordinal);
         Assert.DoesNotContain("sk-", report, StringComparison.Ordinal);
         Assert.Contains("set", report, StringComparison.Ordinal);
+    }
+}
+
+/// <summary>
+/// Adding a provider should be a row in the schema, not a branch in Swift and another in C#.
+/// Mirrors ProviderCredentialTests in the macOS package.
+/// </summary>
+public class ProviderCredentialTests
+{
+    [Fact]
+    public void SarvamIsPresentAndShapedLikeOpenAI()
+    {
+        var row = SaathiProvider.Of(ProviderKind.Sarvam);
+        Assert.Equal("https://api.sarvam.ai/v1", row.DefaultBaseUrl);
+        Assert.True(row.RequiresKey);
+        Assert.False(row.RequiresToken);
+        Assert.True(row.SendsDataOffMachine);
+    }
+
+    [Theory]
+    [InlineData(ProviderKind.Openai, "Authorization", "Bearer k")]
+    [InlineData(ProviderKind.Sarvam, "Authorization", "Bearer k")]
+    [InlineData(ProviderKind.Anthropic, "x-api-key", "k")]
+    [InlineData(ProviderKind.Hosted, "Authorization", "Bearer k")]
+    public void EachProviderPresentsItsCredentialItsOwnWay(ProviderKind kind, string name, string value)
+    {
+        var header = SaathiProvider.Of(kind).AuthorizationHeader("k");
+        Assert.NotNull(header);
+        Assert.Equal(name, header!.Value.Name);
+        Assert.Equal(value, header.Value.Value);
+    }
+
+    [Fact]
+    public void TheLocalModeAsksForNoHeaderAtAll()
+    {
+        Assert.Null(SaathiProvider.Of(ProviderKind.Local).AuthorizationHeader("anything"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AnEmptyCredentialProducesNoHeaderRatherThanABareBearer(string blank)
+    {
+        Assert.Null(SaathiProvider.Of(ProviderKind.Openai).AuthorizationHeader(blank));
+    }
+
+    [Fact]
+    public void TheCredentialIsTrimmedBeforeItIsSent()
+    {
+        var header = SaathiProvider.Of(ProviderKind.Openai).AuthorizationHeader("  k  ");
+        Assert.Equal("Bearer k", header!.Value.Value);
     }
 }

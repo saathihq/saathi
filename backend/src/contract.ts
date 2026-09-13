@@ -1,8 +1,8 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.2.0.
+// Contract version 0.3.0.
 
-export const CONTRACT_VERSION = "0.2.0";
+export const CONTRACT_VERSION = "0.3.0";
 export const DEFAULT_BASE_URL = "https://api.saathi.dev";
 
 /** `~/.saathi/shell.json`. */
@@ -30,20 +30,23 @@ export type SaathiProvider = {
   requiresKey: boolean;
   requiresToken: boolean;
   sendsDataOffMachine: boolean;
+  keyHeader: string;
+  keyPrefix: string;
   summary: string;
 };
 
 export const DEFAULT_PROVIDER: ProviderKind = "local";
 export const PROVIDERS: readonly SaathiProvider[] = [
-  { kind: "local", defaultBaseUrl: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device." },
-  { kind: "openai", defaultBaseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved." },
-  { kind: "anthropic", defaultBaseUrl: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved." },
-  { kind: "hosted", defaultBaseUrl: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything." },
+  { kind: "local", defaultBaseUrl: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, keyHeader: "", keyPrefix: "", summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device." },
+  { kind: "openai", defaultBaseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved." },
+  { kind: "anthropic", defaultBaseUrl: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "x-api-key", keyPrefix: "", summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved." },
+  { kind: "sarvam", defaultBaseUrl: "https://api.sarvam.ai/v1", defaultModel: "sarvam-105b", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts." },
+  { kind: "hosted", defaultBaseUrl: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything." },
 ] as const;
 
 /** Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine. */
-export type ProviderKind = "local" | "openai" | "anthropic" | "hosted";
-export const PROVIDERKIND_CASES: readonly ProviderKind[] = ["local", "openai", "anthropic", "hosted"] as const;
+export type ProviderKind = "local" | "openai" | "anthropic" | "sarvam" | "hosted";
+export const PROVIDERKIND_CASES: readonly ProviderKind[] = ["local", "openai", "anthropic", "sarvam", "hosted"] as const;
 
 /** How a spoken line should sound. Accessibility-first: the companion says what is happening, and how it says it is part of the message. */
 export type Tone = "calm" | "encouraging" | "neutral";

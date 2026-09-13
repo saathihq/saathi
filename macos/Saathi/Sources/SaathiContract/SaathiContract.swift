@@ -1,13 +1,13 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.2.0.
+// Contract version 0.3.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.2.0"
+    public static let contractVersion = "0.3.0"
 }
 
 /// One row per provider mode: where it runs, what it needs, and whether using it means
@@ -22,14 +22,27 @@ public struct SaathiProvider: Sendable, Equatable {
     public let requiresToken: Bool
     /// False only for `local`. Worth surfacing to the user rather than burying.
     public let sendsDataOffMachine: Bool
+    /// The header the credential goes in, empty when none is needed.
+    public let keyHeader: String
+    /// What precedes the credential in that header ("Bearer ", or empty).
+    public let keyPrefix: String
     public let summary: String
 
     public static let all: [SaathiProvider] = [
-        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
-        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
-        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
-        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, keyHeader: "", keyPrefix: "", summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "x-api-key", keyPrefix: "", summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        SaathiProvider(kind: .sarvam, defaultBaseURL: "https://api.sarvam.ai/v1", defaultModel: "sarvam-105b", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
+        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
     ]
+
+    /// The one header this provider needs, ready to set — or nil when it needs none.
+    /// Built here so no client hard-codes `Bearer` for one provider and `x-api-key` for another.
+    public func authorizationHeader(credential: String) -> (name: String, value: String)? {
+        let trimmed = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyHeader.isEmpty, !trimmed.isEmpty else { return nil }
+        return (keyHeader, keyPrefix + trimmed)
+    }
 
     public static func of(_ kind: ProviderKind) -> SaathiProvider {
         // `all` covers every case of a closed enum, so this cannot be nil in practice;
@@ -94,6 +107,7 @@ public enum ProviderKind: String, Codable, CaseIterable, Sendable {
     case local
     case openai
     case anthropic
+    case sarvam
     case hosted
 }
 

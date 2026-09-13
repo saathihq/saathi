@@ -14,6 +14,15 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAC="$REPO_DIR/macos/Saathi/.build/debug/saathi"
 WIN="$REPO_DIR/windows/src/Saathi.Cli/bin/Debug/net8.0/saathi"
 
+# Build both first unless told not to. Skipping this is how the check lies: `dotnet test` does not
+# rebuild Saathi.Cli (the test project does not reference it), so a stale Windows binary silently
+# compares an old contract against a new one — a false failure here, and just as easily a false pass.
+if [[ "${1:-}" != "--no-build" ]]; then
+  echo "building both clients (pass --no-build to skip)"
+  (cd "$REPO_DIR/macos/Saathi" && swift build) >/dev/null
+  (cd "$REPO_DIR/windows" && dotnet build Saathi.sln -v q --nologo) >/dev/null
+fi
+
 for binary in "$MAC" "$WIN"; do
   [[ -x "$binary" ]] || { echo "not built: $binary" >&2; exit 1; }
 done

@@ -1,9 +1,10 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.2.0.
+// Contract version 0.3.0.
 
 #nullable enable
 using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Saathi.Contract;
@@ -12,7 +13,7 @@ namespace Saathi.Contract;
 public static class SaathiBackend
 {
     public const string DefaultBaseUrl = "https://api.saathi.dev";
-    public const string ContractVersion = "0.2.0";
+    public const string ContractVersion = "0.3.0";
 }
 
 /// <summary>One row per provider mode: where it runs, what it needs, and whether using it
@@ -24,15 +25,27 @@ public sealed record SaathiProvider(
     bool RequiresKey,
     bool RequiresToken,
     bool SendsDataOffMachine,
+    string KeyHeader,
+    string KeyPrefix,
     string Summary)
 {
     public static readonly IReadOnlyList<SaathiProvider> All =
     [
-        new(global::Saathi.Contract.ProviderKind.Local, "http://localhost:11434", "llama3.2", false, false, false, "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
-        new(global::Saathi.Contract.ProviderKind.Openai, "https://api.openai.com/v1", "gpt-4o-mini", true, false, true, "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
-        new(global::Saathi.Contract.ProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-5", true, false, true, "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
-        new(global::Saathi.Contract.ProviderKind.Hosted, "https://api.saathi.dev", "", false, true, true, "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+        new(global::Saathi.Contract.ProviderKind.Local, "http://localhost:11434", "llama3.2", false, false, false, "", "", "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        new(global::Saathi.Contract.ProviderKind.Openai, "https://api.openai.com/v1", "gpt-4o-mini", true, false, true, "Authorization", "Bearer ", "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        new(global::Saathi.Contract.ProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-5", true, false, true, "x-api-key", "", "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        new(global::Saathi.Contract.ProviderKind.Sarvam, "https://api.sarvam.ai/v1", "sarvam-105b", true, false, true, "Authorization", "Bearer ", "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
+        new(global::Saathi.Contract.ProviderKind.Hosted, "https://api.saathi.dev", "", false, true, true, "Authorization", "Bearer ", "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
     ];
+
+    /// <summary>The one header this provider needs, ready to set — or null when it needs none.
+    /// Built here so no client hard-codes Bearer for one provider and x-api-key for another.</summary>
+    public (string Name, string Value)? AuthorizationHeader(string credential)
+    {
+        var trimmed = credential?.Trim() ?? string.Empty;
+        if (KeyHeader.Length == 0 || trimmed.Length == 0) return null;
+        return (KeyHeader, KeyPrefix + trimmed);
+    }
 
     /// <summary>`All` covers every case of a closed enum, so this cannot miss in practice;
     /// throwing is better than inventing a fallback that would silently pick a mode.</summary>
@@ -86,39 +99,102 @@ public sealed class SaathiConfiguration
         string.IsNullOrWhiteSpace(BackendUrl) ? SaathiBackend.DefaultBaseUrl : BackendUrl!.Trim();
 }
 
+/// <summary>ProviderKind on the wire. Accepts the contract's spelling only — the C# member
+/// name is not an alias, because the Swift client would not accept it either.</summary>
+public sealed class ProviderKindWireConverter : JsonConverter<ProviderKind>
+{
+    public override ProviderKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.GetString() switch
+        {
+            "local" => ProviderKind.Local,
+            "openai" => ProviderKind.Openai,
+            "anthropic" => ProviderKind.Anthropic,
+            "sarvam" => ProviderKind.Sarvam,
+            "hosted" => ProviderKind.Hosted,
+            var other => throw new JsonException($"{other} is not a valid ProviderKind — expected one of: local, openai, anthropic, sarvam, hosted"),
+        };
+
+    public override void Write(Utf8JsonWriter writer, ProviderKind value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value switch
+        {
+            ProviderKind.Local => "local",
+            ProviderKind.Openai => "openai",
+            ProviderKind.Anthropic => "anthropic",
+            ProviderKind.Sarvam => "sarvam",
+            ProviderKind.Hosted => "hosted",
+            _ => throw new JsonException($"no wire spelling for {value} — the contract is out of sync"),
+        });
+}
+
+/// <summary>Tone on the wire. Accepts the contract's spelling only — the C# member
+/// name is not an alias, because the Swift client would not accept it either.</summary>
+public sealed class ToneWireConverter : JsonConverter<Tone>
+{
+    public override Tone Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.GetString() switch
+        {
+            "calm" => Tone.Calm,
+            "encouraging" => Tone.Encouraging,
+            "neutral" => Tone.Neutral,
+            var other => throw new JsonException($"{other} is not a valid Tone — expected one of: calm, encouraging, neutral"),
+        };
+
+    public override void Write(Utf8JsonWriter writer, Tone value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value switch
+        {
+            Tone.Calm => "calm",
+            Tone.Encouraging => "encouraging",
+            Tone.Neutral => "neutral",
+            _ => throw new JsonException($"no wire spelling for {value} — the contract is out of sync"),
+        });
+}
+
+/// <summary>Pace on the wire. Accepts the contract's spelling only — the C# member
+/// name is not an alias, because the Swift client would not accept it either.</summary>
+public sealed class PaceWireConverter : JsonConverter<Pace>
+{
+    public override Pace Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.GetString() switch
+        {
+            "slow" => Pace.Slow,
+            "normal" => Pace.Normal,
+            var other => throw new JsonException($"{other} is not a valid Pace — expected one of: slow, normal"),
+        };
+
+    public override void Write(Utf8JsonWriter writer, Pace value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value switch
+        {
+            Pace.Slow => "slow",
+            Pace.Normal => "normal",
+            _ => throw new JsonException($"no wire spelling for {value} — the contract is out of sync"),
+        });
+}
+
 /// <summary>Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(ProviderKindWireConverter))]
 public enum ProviderKind
 {
-    [JsonPropertyName("local")]
     Local,
-    [JsonPropertyName("openai")]
     Openai,
-    [JsonPropertyName("anthropic")]
     Anthropic,
-    [JsonPropertyName("hosted")]
+    Sarvam,
     Hosted,
 }
 
 /// <summary>How a spoken line should sound. Accessibility-first: the companion says what is happening, and how it says it is part of the message.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(ToneWireConverter))]
 public enum Tone
 {
-    [JsonPropertyName("calm")]
     Calm,
-    [JsonPropertyName("encouraging")]
     Encouraging,
-    [JsonPropertyName("neutral")]
     Neutral,
 }
 
 /// <summary>How fast to move through a sequence of steps. The learner sets this, not the model.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(PaceWireConverter))]
 public enum Pace
 {
-    [JsonPropertyName("slow")]
     Slow,
-    [JsonPropertyName("normal")]
     Normal,
 }
 

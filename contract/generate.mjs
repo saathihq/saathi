@@ -28,6 +28,17 @@ const BANNER = (comment) =>
   `${comment} Contract version ${schema.version}.\n`;
 
 const enumNames = new Set(schema.enums.map((e) => e.name));
+
+// The C# side maps enum members to wire strings with JsonNamingPolicy.SnakeCaseLower, which only
+// reproduces a case name that is already lower snake case. Fail loudly here rather than emit a
+// client that cannot read the other client's files.
+for (const e of schema.enums) {
+  for (const c of e.cases) {
+    if (!/^[a-z][a-z0-9]*(_[a-z0-9]+)*$/.test(c)) {
+      throw new Error(`enum ${e.name} case "${c}" must be lower snake case — the C# converter cannot round-trip it`);
+    }
+  }
+}
 const providerRows = schema.providers.rows;
 const providerDefault = schema.providers.default;
 const pascal = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -73,12 +84,23 @@ function swift() {
   out.push("    public let requiresToken: Bool");
   out.push("    /// False only for `local`. Worth surfacing to the user rather than burying.");
   out.push("    public let sendsDataOffMachine: Bool");
+  out.push("    /// The header the credential goes in, empty when none is needed.");
+  out.push("    public let keyHeader: String");
+  out.push("    /// What precedes the credential in that header (\"Bearer \", or empty).");
+  out.push("    public let keyPrefix: String");
   out.push("    public let summary: String\n");
   out.push("    public static let all: [SaathiProvider] = [");
   for (const r of providerRows) {
-    out.push(`        SaathiProvider(kind: .${r.kind}, defaultBaseURL: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, summary: ${JSON.stringify(r.doc)}),`);
+    out.push(`        SaathiProvider(kind: .${r.kind}, defaultBaseURL: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, keyHeader: "${r.keyHeader}", keyPrefix: "${r.keyPrefix}", summary: ${JSON.stringify(r.doc)}),`);
   }
   out.push("    ]\n");
+  out.push("    /// The one header this provider needs, ready to set — or nil when it needs none.");
+  out.push("    /// Built here so no client hard-codes `Bearer` for one provider and `x-api-key` for another.");
+  out.push("    public func authorizationHeader(credential: String) -> (name: String, value: String)? {");
+  out.push("        let trimmed = credential.trimmingCharacters(in: .whitespacesAndNewlines)");
+  out.push("        guard !keyHeader.isEmpty, !trimmed.isEmpty else { return nil }");
+  out.push("        return (keyHeader, keyPrefix + trimmed)");
+  out.push("    }\n");
   out.push("    public static func of(_ kind: ProviderKind) -> SaathiProvider {");
   out.push("        // `all` covers every case of a closed enum, so this cannot be nil in practice;");
   out.push("        // trapping is better than inventing a fallback that would silently pick a mode.");
@@ -176,6 +198,7 @@ function csharp() {
   out.push(BANNER("//"));
   out.push("#nullable enable");
   out.push("using System.Linq;");
+  out.push("using System.Text.Json;");
   out.push("using System.Text.Json.Serialization;\n");
   out.push("namespace Saathi.Contract;\n");
 
@@ -195,14 +218,24 @@ function csharp() {
   out.push("    bool RequiresKey,");
   out.push("    bool RequiresToken,");
   out.push("    bool SendsDataOffMachine,");
+  out.push("    string KeyHeader,");
+  out.push("    string KeyPrefix,");
   out.push("    string Summary)");
   out.push("{");
   out.push("    public static readonly IReadOnlyList<SaathiProvider> All =");
   out.push("    [");
   for (const r of providerRows) {
-    out.push(`        new(global::Saathi.Contract.ProviderKind.${pascal(r.kind)}, "${r.defaultBaseUrl}", "${r.defaultModel}", ${r.requiresKey}, ${r.requiresToken}, ${r.sendsDataOffMachine}, ${JSON.stringify(r.doc)}),`);
+    out.push(`        new(global::Saathi.Contract.ProviderKind.${pascal(r.kind)}, "${r.defaultBaseUrl}", "${r.defaultModel}", ${r.requiresKey}, ${r.requiresToken}, ${r.sendsDataOffMachine}, "${r.keyHeader}", "${r.keyPrefix}", ${JSON.stringify(r.doc)}),`);
   }
   out.push("    ];\n");
+  out.push("    /// <summary>The one header this provider needs, ready to set — or null when it needs none.");
+  out.push("    /// Built here so no client hard-codes Bearer for one provider and x-api-key for another.</summary>");
+  out.push("    public (string Name, string Value)? AuthorizationHeader(string credential)");
+  out.push("    {");
+  out.push("        var trimmed = credential?.Trim() ?? string.Empty;");
+  out.push("        if (KeyHeader.Length == 0 || trimmed.Length == 0) return null;");
+  out.push("        return (KeyHeader, KeyPrefix + trimmed);");
+  out.push("    }\n");
   out.push("    /// <summary>`All` covers every case of a closed enum, so this cannot miss in practice;");
   out.push("    /// throwing is better than inventing a fallback that would silently pick a mode.</summary>");
   out.push("    public static SaathiProvider Of(ProviderKind kind) =>");
@@ -235,15 +268,42 @@ function csharp() {
   out.push(`        string.IsNullOrWhiteSpace(${baseUrlField}) ? SaathiBackend.DefaultBaseUrl : ${baseUrlField}!.Trim();`);
   out.push("}\n");
 
+  // Two things make this converter hand-written rather than JsonStringEnumConverter.
+  //
+  // First, `[JsonPropertyName]` is silently ignored on enum members by System.Text.Json — it
+  // compiles, reads as intentional, and does nothing, which left the C# client able to read only
+  // "Sarvam" while Swift wrote "sarvam".
+  //
+  // Second, JsonStringEnumConverter with a naming policy still ACCEPTS the raw member name as a
+  // fallback. That leniency is worse than it sounds here: a config written by hand as "Sarvam"
+  // would work on Windows and fail on macOS, which is exactly the divergence the whole contract
+  // exists to prevent. These converters accept the wire spelling and nothing else.
+  for (const e of schema.enums) {
+    out.push(`/// <summary>${e.name} on the wire. Accepts the contract's spelling only — the C# member`);
+    out.push("/// name is not an alias, because the Swift client would not accept it either.</summary>");
+    out.push(`public sealed class ${e.name}WireConverter : JsonConverter<${e.name}>`);
+    out.push("{");
+    out.push(`    public override ${e.name} Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>`);
+    out.push("        reader.GetString() switch");
+    out.push("        {");
+    for (const c of e.cases) out.push(`            "${c}" => ${e.name}.${pascal(c)},`);
+    out.push(`            var other => throw new JsonException($"{other} is not a valid ${e.name} — expected one of: ${e.cases.join(", ")}"),`);
+    out.push("        };\n");
+    out.push(`    public override void Write(Utf8JsonWriter writer, ${e.name} value, JsonSerializerOptions options) =>`);
+    out.push("        writer.WriteStringValue(value switch");
+    out.push("        {");
+    for (const c of e.cases) out.push(`            ${e.name}.${pascal(c)} => "${c}",`);
+    out.push(`            _ => throw new JsonException($"no wire spelling for {value} — the contract is out of sync"),`);
+    out.push("        });");
+    out.push("}\n");
+  }
+
   for (const e of schema.enums) {
     out.push(`/// <summary>${e.doc}</summary>`);
-    out.push("[JsonConverter(typeof(JsonStringEnumConverter))]");
+    out.push(`[JsonConverter(typeof(${e.name}WireConverter))]`);
     out.push(`public enum ${e.name}`);
     out.push("{");
-    for (const c of e.cases) {
-      out.push(`    [JsonPropertyName("${c}")]`);
-      out.push(`    ${pascal(c)},`);
-    }
+    for (const c of e.cases) out.push(`    ${pascal(c)},`);
     out.push("}\n");
   }
 
@@ -313,12 +373,14 @@ function typescript() {
   out.push("  requiresKey: boolean;");
   out.push("  requiresToken: boolean;");
   out.push("  sendsDataOffMachine: boolean;");
+  out.push("  keyHeader: string;");
+  out.push("  keyPrefix: string;");
   out.push("  summary: string;");
   out.push("};\n");
   out.push(`export const DEFAULT_PROVIDER: ProviderKind = "${providerDefault}";`);
   out.push("export const PROVIDERS: readonly SaathiProvider[] = [");
   for (const r of providerRows) {
-    out.push(`  { kind: "${r.kind}", defaultBaseUrl: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, summary: ${JSON.stringify(r.doc)} },`);
+    out.push(`  { kind: "${r.kind}", defaultBaseUrl: "${r.defaultBaseUrl}", defaultModel: "${r.defaultModel}", requiresKey: ${r.requiresKey}, requiresToken: ${r.requiresToken}, sendsDataOffMachine: ${r.sendsDataOffMachine}, keyHeader: "${r.keyHeader}", keyPrefix: "${r.keyPrefix}", summary: ${JSON.stringify(r.doc)} },`);
   }
   out.push("] as const;\n");
 

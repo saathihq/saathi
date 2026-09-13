@@ -20,8 +20,13 @@ nothing from anybody:
 | Mode | Keys | Account | Does anything leave your machine? |
 |---|---|---|---|
 | **`local`** *(default)* | none | none | **no** |
-| `openai` / `anthropic` | your own, on your machine | none | yes, straight to that provider |
+| `openai` / `anthropic` / `sarvam` | your own, on your machine | none | yes, straight to that provider |
 | `hosted` | none — we hold them | yes | yes, to Saathi's backend |
+
+`sarvam` is [Sarvam AI](https://sarvam.ai) — Indian-built models with real
+Indic-language coverage, which matters given where Saathi starts. It is
+OpenAI-shaped (`https://api.sarvam.ai/v1`, `Authorization: Bearer`), so it shares
+the same client path as the others.
 
 `local` talks to an OpenAI-compatible server on your own machine — Ollama, LM
 Studio, llama.cpp. With nothing configured at all, that is what you get:
@@ -48,8 +53,13 @@ your machine and goes straight to that provider; Saathi's servers are not in the
 path:
 
 ```json
-{ "provider": "anthropic", "apiKey": "sk-ant-…" }
+{ "provider": "sarvam", "apiKey": "…" }
 ```
+
+How a key is presented is data, not code: each provider row carries the header
+name and prefix it needs (`Authorization: Bearer …` for most, `x-api-key` for
+Anthropic). Adding a provider is a row in `contract/schema/saathi.json`, not a
+branch in Swift and another in C#.
 
 **There is no silent fallback.** If a local model is not reachable, Saathi says so.
 It never quietly upgrades to sending your words somewhere else, and both clients

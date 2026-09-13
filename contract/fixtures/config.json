@@ -1,0 +1,9 @@
+{
+  "_comment": "A shell.json exercising every field and an enum value, read by BOTH test suites. If the Swift and C# clients ever stop agreeing on the wire spelling of an enum, this is what fails. It is the fixture that would have caught System.Text.Json ignoring [JsonPropertyName] on enum members, which made the C# client unable to read a config the Swift client had written.",
+  "provider": "sarvam",
+  "providerBaseUrl": "http://192.168.1.9:11434",
+  "model": "sarvam-105b-conversations",
+  "apiKey": "not-a-real-key",
+  "backendUrl": "https://backend.example.test",
+  "token": "not-a-real-token"
+}

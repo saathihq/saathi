@@ -246,7 +246,7 @@ final class ProviderTests: XCTestCase {
 
     /// There is no silent fallback from local to a network provider. An unreachable local model is
     /// an error the user sees, never a quiet upgrade to sending their words to someone else.
-    func testOnlyTheHostedModeIsEverReachedByAskingForIt() {
+    func testEveryNetworkModeIsMarkedAsLeavingTheMachine() {
         for kind in ProviderKind.allCases where kind != .local {
             XCTAssertTrue(
                 SaathiProvider.of(kind).sendsDataOffMachine,
@@ -307,5 +307,104 @@ final class ProviderTests: XCTestCase {
         XCTAssertFalse(report.contains(secret))
         XCTAssertFalse(report.contains("sk-"))
         XCTAssertTrue(report.contains("set"))
+    }
+}
+
+/// Adding a provider should be a row in the schema, not a branch in Swift and another in C#.
+/// These check the data-driven half actually holds.
+final class ProviderCredentialTests: XCTestCase {
+
+    func testSarvamIsPresentAndShapedLikeOpenAI() {
+        let row = SaathiProvider.of(.sarvam)
+        XCTAssertEqual(row.defaultBaseURL, "https://api.sarvam.ai/v1")
+        XCTAssertTrue(row.requiresKey)
+        XCTAssertFalse(row.requiresToken)
+        XCTAssertTrue(row.sendsDataOffMachine)
+    }
+
+    func testEachProviderPresentsItsCredentialItsOwnWay() {
+        let cases: [(ProviderKind, String, String)] = [
+            (.openai, "Authorization", "Bearer k"),
+            (.sarvam, "Authorization", "Bearer k"),
+            (.anthropic, "x-api-key", "k"),
+            (.hosted, "Authorization", "Bearer k"),
+        ]
+        for (kind, expectedName, expectedValue) in cases {
+            let header = SaathiProvider.of(kind).authorizationHeader(credential: "k")
+            XCTAssertEqual(header?.name, expectedName, "\(kind)")
+            XCTAssertEqual(header?.value, expectedValue, "\(kind)")
+        }
+    }
+
+    func testTheLocalModeAsksForNoHeaderAtAll() {
+        XCTAssertNil(SaathiProvider.of(.local).authorizationHeader(credential: "anything"))
+    }
+
+    func testAnEmptyCredentialProducesNoHeaderRatherThanABareBearer() {
+        for blank in ["", "   "] {
+            XCTAssertNil(
+                SaathiProvider.of(.openai).authorizationHeader(credential: blank),
+                "a blank credential must not become \"Bearer \""
+            )
+        }
+    }
+
+    func testTheCredentialIsTrimmedBeforeItIsSent() {
+        let header = SaathiProvider.of(.openai).authorizationHeader(credential: "  k  ")
+        XCTAssertEqual(header?.value, "Bearer k")
+    }
+}
+
+/// Reads the same fixture the C# suite reads. Two clients that cannot parse each other's config
+/// file are two clients whose users cannot move between them — and nothing else in either
+/// single-language suite would notice, because each would be self-consistently wrong.
+final class SharedFixtureTests: XCTestCase {
+
+    private var fixtureURL: URL {
+        URL(fileURLWithPath: #filePath)          // <repo>/macos/Saathi/Tests/SaathiKitTests/SaathiKitTests.swift
+            .deletingLastPathComponent()          // SaathiKitTests
+            .deletingLastPathComponent()          // Tests
+            .deletingLastPathComponent()          // Saathi
+            .deletingLastPathComponent()          // macos
+            .deletingLastPathComponent()          // <repo>
+            .appendingPathComponent("contract/fixtures/config.json")
+    }
+
+    func testTheSharedConfigFixtureParses() throws {
+        let data = try Data(contentsOf: fixtureURL)
+        let configuration = try JSONDecoder().decode(SaathiConfiguration.self, from: data)
+
+        XCTAssertEqual(configuration.provider, .sarvam, "the enum must parse from its wire spelling")
+        XCTAssertEqual(configuration.providerBaseUrl, "http://192.168.1.9:11434")
+        XCTAssertEqual(configuration.model, "sarvam-105b-conversations")
+        XCTAssertEqual(configuration.apiKey, "not-a-real-key")
+        XCTAssertEqual(configuration.backendUrl, "https://backend.example.test")
+        XCTAssertEqual(configuration.token, "not-a-real-token")
+    }
+
+    /// The override wins over the provider's own default — checked through the fixture so both
+    /// clients agree on precedence, not just on parsing.
+    func testResolutionThroughTheFixtureMatches() throws {
+        let data = try Data(contentsOf: fixtureURL)
+        let configuration = try JSONDecoder().decode(SaathiConfiguration.self, from: data)
+
+        XCTAssertEqual(configuration.resolvedProvider, .sarvam)
+        XCTAssertEqual(configuration.resolvedProviderBaseURL, "http://192.168.1.9:11434")
+        XCTAssertEqual(configuration.resolvedModel, "sarvam-105b-conversations")
+    }
+
+    /// Every enum value must survive a round trip through its wire spelling in this client, since
+    /// the other client reads what this one writes.
+    func testEveryEnumValueRoundTripsThroughItsWireSpelling() throws {
+        for kind in ProviderKind.allCases {
+            let encoded = try JSONEncoder().encode(SaathiConfiguration(provider: kind))
+            let text = String(data: encoded, encoding: .utf8) ?? ""
+            XCTAssertTrue(
+                text.contains("\"\(kind.rawValue)\""),
+                "\(kind) should serialise as \"\(kind.rawValue)\", got \(text)"
+            )
+            let decoded = try JSONDecoder().decode(SaathiConfiguration.self, from: encoded)
+            XCTAssertEqual(decoded.provider, kind)
+        }
     }
 }
