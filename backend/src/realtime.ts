@@ -62,6 +62,14 @@ export type RealtimeGrant = {
 export interface SessionLedger {
   /** Named so `/health` can say what is actually enforcing limits. */
   readonly description: string;
+  /**
+   * Is this token a real, active account? Returns null to allow, or a reason to refuse.
+   *
+   * Separate from `check` because asking what actions exist must not consume a voice allowance.
+   * Optional: a ledger that only counts (and leaves authentication to `SAATHI_TOKENS`) omits it,
+   * and the backend then keeps using the static token list.
+   */
+  authorize?(token: string): Promise<string | null>;
   /** Returns null to allow, or a reason to refuse. Must be atomic against concurrent callers. */
   check(token: string): Promise<string | null>;
 }
@@ -155,3 +163,99 @@ export async function mintRealtimeGrant(
 }
 
 export class RealtimeMintError extends Error {}
+
+//
+// ── Supabase-backed accounts and ledger ──────────────────────────────────────
+//
+// Why HTTP rather than a Postgres connection: this deploys to the edge runtime, which has no TCP
+// sockets, so `pg` cannot run there at all. PostgREST's `/rpc/` endpoint is plain HTTPS and works
+// anywhere `fetch` does — and it keeps the whole interaction to ONE round trip, which matters when
+// the alternative (read, decide, write) is the exact shape that cannot be made atomic.
+//
+// The tables are not reachable through this API. Only two SECURITY DEFINER functions in `public`
+// are exposed, and only to the service role; see backend/migrations/0001_*.sql.
+//
+
+export type SupabaseConfig = {
+  url: string;
+  /** The secret (service-role) key. Never a publishable one: those reach browsers. */
+  secretKey: string;
+};
+
+/** Hex SHA-256, via Web Crypto so it runs on the edge runtime as well as under Node. */
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+type RpcResult = { ok?: boolean; reason?: string; account?: string; used?: number; allowance?: number };
+
+/**
+ * Accounts and the voice allowance, in Postgres.
+ *
+ * `check` is one call to `saathi_claim_voice_session`, whose body is a single conditional
+ * `insert … on conflict do update … where … returning`. Verified against 10 concurrent callers on
+ * an allowance of 3: three allowed, seven refused, counter exactly 3. A read followed by a write
+ * cannot give that answer, which is why it is not written that way.
+ */
+export function supabaseLedger(
+  config: SupabaseConfig,
+  fetchImpl: typeof fetch = fetch,
+): SessionLedger {
+  const base = config.url.endsWith("/") ? config.url.slice(0, -1) : config.url;
+
+  const rpc = async (name: string, token: string): Promise<RpcResult> => {
+    const response = await fetchImpl(`${base}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: {
+        apikey: config.secretKey,
+        authorization: `Bearer ${config.secretKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ p_token_sha256: await sha256Hex(token) }),
+    });
+    if (!response.ok) {
+      // A database that cannot be reached must not read as "allowed". Refusing is the safe
+      // direction: the worst case is a learner told to try again, not an unmetered account.
+      throw new LedgerUnavailableError(`the accounts database did not answer (${response.status})`);
+    }
+    return (await response.json()) as RpcResult;
+  };
+
+  return {
+    description: "per-account daily limit, counted in Postgres (shared across every instance)",
+
+    authorize: async (token: string) => {
+      const result = await rpc("saathi_resolve_token", token);
+      return result.ok ? null : "not authorised";
+    },
+
+    check: async (token: string) => {
+      const result = await rpc("saathi_claim_voice_session", token);
+      return result.ok ? null : (result.reason ?? "not authorised");
+    },
+  };
+}
+
+export class LedgerUnavailableError extends Error {}
+
+/** Reads the Supabase configuration out of the environment, or returns null when it is absent. */
+export function supabaseFromEnv(env: {
+  SAATHI_SUPABASE_URL?: string;
+  SAATHI_SUPABASE_SECRET_KEY?: string;
+}): SupabaseConfig | null {
+  const url = (env.SAATHI_SUPABASE_URL ?? "").trim();
+  const secretKey = (env.SAATHI_SUPABASE_SECRET_KEY ?? "").trim();
+  if (url.length === 0 || secretKey.length === 0) return null;
+  // A publishable key here would be a serious mistake — it is the key that reaches browsers, and
+  // the functions are not granted to it anyway, so every call would fail confusingly. Catch it at
+  // startup with a clear reason instead.
+  if (secretKey.startsWith("sb_publishable_") || secretKey.includes('"role":"anon"')) {
+    throw new Error(
+      "SAATHI_SUPABASE_SECRET_KEY looks like a publishable key. It must be the secret (service-role) key.",
+    );
+  }
+  return { url, secretKey };
+}

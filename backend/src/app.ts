@@ -13,6 +13,7 @@
 import { Hono } from "hono";
 import { ACTION_WIRE_NAMES, CONTRACT_VERSION } from "./contract.js";
 import {
+  LedgerUnavailableError,
   mintRealtimeGrant,
   RealtimeMintError,
   unlimitedLedger,
@@ -52,16 +53,28 @@ export type AppDependencies = {
 /** What the backend will accept, decided once so both the route and /health can report it. */
 export type AuthPosture =
   | { mode: "tokens"; accepted: string[] }
+  /** Accounts live in a database; the ledger decides. */
+  | { mode: "accounts" }
   | { mode: "anonymous" }
   | { mode: "closed" };
 
-export function authPosture(env: AppEnv): AuthPosture {
+/**
+ * `hasAccountStore` is passed rather than read from the environment because it is a property of
+ * what was actually wired in, not of what was configured. A deploy with database credentials set
+ * but no store constructed must not claim to be checking accounts.
+ */
+export function authPosture(env: AppEnv, hasAccountStore = false): AuthPosture {
   const accepted = (env.SAATHI_TOKENS ?? "")
     .split(",")
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
 
+  // A static list wins when present: it needs no network, and a self-hoster who set it meant it.
   if (accepted.length > 0) return { mode: "tokens", accepted };
+
+  // Accounts in a database are the hosted posture. Checked before ANONYMOUS on purpose — a deploy
+  // that has an accounts database is never meant to be open.
+  if (hasAccountStore) return { mode: "accounts" };
 
   const anonymous = (env.SAATHI_ALLOW_ANONYMOUS ?? "").trim().toLowerCase();
   if (anonymous === "1" || anonymous === "true" || anonymous === "yes") return { mode: "anonymous" };
@@ -72,9 +85,13 @@ export function authPosture(env: AppEnv): AuthPosture {
 export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) {
   const app = new Hono();
 
-  const posture = authPosture(env);
   const ledger = dependencies.ledger ?? unlimitedLedger;
   const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const posture = authPosture(env, typeof ledger.authorize === "function");
+
+  /** Pulls the bearer token out, or "" when there is not one. */
+  const bearer = (authorization: string): string =>
+    authorization.toLowerCase().startsWith("bearer ") ? authorization.slice("bearer ".length).trim() : "";
 
   /**
    * The one authorisation rule, written once.
@@ -85,25 +102,39 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
    *
    * Returns a Response to send, or null when the caller may proceed.
    */
-  const rejectIfUnauthorised = (authorization: string): Response | null => {
+  const rejectIfUnauthorised = async (authorization: string): Promise<Response | null> => {
     if (posture.mode === "closed") {
       return Response.json(
         {
           error: "this backend has no accounts configured",
-          hint: "set SAATHI_TOKENS, or SAATHI_ALLOW_ANONYMOUS=1 to run it open for self-hosting",
+          hint: "set SAATHI_TOKENS, an accounts database, or SAATHI_ALLOW_ANONYMOUS=1 for self-hosting",
         },
         { status: 401 },
       );
     }
 
+    const presented = bearer(authorization);
+
     if (posture.mode === "tokens") {
-      const presented = authorization.toLowerCase().startsWith("bearer ")
-        ? authorization.slice("bearer ".length).trim()
-        : "";
       // Compared against the configured list rather than a prefix or a pattern; an empty presented
       // token must never match an empty configured one, which `authPosture` already filters out.
       if (presented.length === 0 || !posture.accepted.includes(presented)) {
         return Response.json({ error: "not authorised" }, { status: 401 });
+      }
+    }
+
+    if (posture.mode === "accounts") {
+      if (presented.length === 0) return Response.json({ error: "not authorised" }, { status: 401 });
+      try {
+        const refusal = await ledger.authorize!(presented);
+        if (refusal) return Response.json({ error: refusal }, { status: 401 });
+      } catch (error) {
+        // A database that cannot be reached must refuse, not allow. 503 rather than 401, because
+        // the caller's credentials were never the problem and retrying is the right response.
+        if (error instanceof LedgerUnavailableError) {
+          return Response.json({ error: error.message }, { status: 503 });
+        }
+        return Response.json({ error: "could not check that account" }, { status: 503 });
       }
     }
 
@@ -125,8 +156,8 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
     }),
   );
 
-  app.post("/session", (c) => {
-    const rejection = rejectIfUnauthorised(c.req.header("authorization") ?? "");
+  app.post("/session", async (c) => {
+    const rejection = await rejectIfUnauthorised(c.req.header("authorization") ?? "");
     if (rejection) return rejection;
 
     return c.json({
@@ -146,7 +177,7 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
    */
   app.post("/realtime/session", async (c) => {
     const authorization = c.req.header("authorization") ?? "";
-    const rejection = rejectIfUnauthorised(authorization);
+    const rejection = await rejectIfUnauthorised(authorization);
     if (rejection) return rejection;
 
     const key = (env.SAATHI_REALTIME_KEY ?? "").trim();
@@ -163,11 +194,16 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
     }
 
     // The caller's own token, used only as a ledger key. It is never forwarded to the provider.
-    const presented = authorization.toLowerCase().startsWith("bearer ")
-      ? authorization.slice("bearer ".length).trim()
-      : "anonymous";
+    const presented = bearer(authorization) || "anonymous";
 
-    const refusal = await ledger.check(presented);
+    let refusal: string | null;
+    try {
+      refusal = await ledger.check(presented);
+    } catch (error) {
+      const message = error instanceof LedgerUnavailableError ? error.message : "could not check the allowance";
+      return c.json({ error: message }, 503);
+    }
+    // 429 is the honest code: the caller is fine, they have simply used what they had today.
     if (refusal) return c.json({ error: refusal }, 429);
 
     try {

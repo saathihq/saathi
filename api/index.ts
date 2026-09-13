@@ -23,18 +23,23 @@
 //
 
 import { createApp } from "../backend/src/app.js";
+import { supabaseFromEnv, supabaseLedger } from "../backend/src/realtime.js";
 
-//  ── Why no session ledger is wired here ──────────────────────────────────────
-//  Grant-time limits need a counter shared across callers. On this runtime each isolate has its
-//  own memory, so an in-memory ledger would not be a limit at all — it would be one quota per warm
-//  isolate, silently multiplying whatever number was configured. Rather than ship a control that
-//  looks like it works, this deploys with no ledger and `/health` says so ("limits: none").
+//  ── The ledger, and why it is in Postgres ───────────────────────────────────
+//  Grant-time limits need a counter shared across callers, and on this runtime each isolate has
+//  its own memory — an in-process counter here would be one quota per warm isolate, which is not a
+//  limit at all. So the counter lives in Postgres and is reached over HTTPS (no TCP on the edge),
+//  in a single statement that both checks and spends. See backend/migrations/0001_*.sql.
 //
-//  A real one needs a shared store. When it arrives, it belongs here as a `SessionLedger` whose
-//  `check` is a single atomic conditional UPDATE — never a read followed by a write, which is the
-//  shape that let the predecessor's parallel requests both see the same balance and both spend it.
+//  With no database configured this deploys with no ledger and /health says "limits: none", which
+//  is the honest answer rather than a control that looks like it works.
 
 export const config = { runtime: "edge" };
+
+const supabase = supabaseFromEnv({
+  SAATHI_SUPABASE_URL: process.env.SAATHI_SUPABASE_URL,
+  SAATHI_SUPABASE_SECRET_KEY: process.env.SAATHI_SUPABASE_SECRET_KEY,
+});
 
 const app = createApp({
   SAATHI_TOKENS: process.env.SAATHI_TOKENS,
@@ -43,7 +48,7 @@ const app = createApp({
   SAATHI_REALTIME_BASE_URL: process.env.SAATHI_REALTIME_BASE_URL,
   SAATHI_REALTIME_MODEL: process.env.SAATHI_REALTIME_MODEL,
   SAATHI_REALTIME_VOICE: process.env.SAATHI_REALTIME_VOICE,
-});
+}, supabase ? { ledger: supabaseLedger(supabase) } : {});
 
 export default function handler(request: Request): Response | Promise<Response> {
   const incoming = new URL(request.url);

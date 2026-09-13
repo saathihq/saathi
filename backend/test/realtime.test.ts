@@ -204,3 +204,109 @@ describe("grant-time metering", () => {
     expect(await response.text()).not.toContain("sk-real");
   });
 });
+
+describe("accounts in a database", () => {
+  /** A stand-in for PostgREST that answers the two RPCs the migration defines. */
+  const supabaseRespondingWith = (byFunction: Record<string, unknown>, status = 200) =>
+    vi.fn(async (url: string) => {
+      const name = String(url).split("/rpc/")[1] ?? "";
+      return new Response(JSON.stringify(byFunction[name] ?? { ok: false }), { status });
+    }) as unknown as typeof fetch;
+
+  const supabase = { url: "https://project.supabase.co", secretKey: "sb_secret_test" };
+
+  it("uses the database as the account list when no static tokens are set", async () => {
+    const { supabaseLedger } = await import("../src/realtime.js");
+    const ledger = supabaseLedger(
+      supabase,
+      supabaseRespondingWith({ saathi_resolve_token: { ok: true, account: "a1", plan: "invited" } }),
+    );
+    const response = await createApp({}, { ledger }).request("/session", {
+      method: "POST",
+      headers: { authorization: "Bearer real-token" },
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it("reports the accounts posture rather than claiming to be closed", async () => {
+    const { supabaseLedger } = await import("../src/realtime.js");
+    const ledger = supabaseLedger(supabase, supabaseRespondingWith({}));
+    const health = await createApp({}, { ledger }).request("/health");
+    const body = (await health.json()) as { auth: string; limits: string };
+    expect(body.auth).toBe("accounts");
+    expect(body.limits).toContain("shared across every instance");
+  });
+
+  it("refuses a token the database does not know", async () => {
+    const { supabaseLedger } = await import("../src/realtime.js");
+    const ledger = supabaseLedger(supabase, supabaseRespondingWith({ saathi_resolve_token: { ok: false } }));
+    const response = await createApp({}, { ledger }).request("/session", {
+      method: "POST",
+      headers: { authorization: "Bearer made-up" },
+    });
+    expect(response.status).toBe(401);
+  });
+
+  /**
+   * The direction an outage must fail in. An accounts database that cannot be reached means the
+   * backend does not know who is calling — which is a reason to refuse, never a reason to let
+   * everyone through. 503 rather than 401 because the caller's credentials were not the problem.
+   */
+  it("refuses, and says retry, when the accounts database is unreachable", async () => {
+    const { supabaseLedger } = await import("../src/realtime.js");
+    const down = vi.fn(async () => new Response("upstream down", { status: 502 })) as unknown as typeof fetch;
+    const ledger = supabaseLedger(supabase, down);
+    const response = await createApp({}, { ledger }).request("/session", {
+      method: "POST",
+      headers: { authorization: "Bearer real-token" },
+    });
+    expect(response.status).toBe(503);
+    expect((await response.json() as { error: string }).error).toContain("did not answer");
+  });
+
+  /** A token is sent as a hash, so a database dump is not a set of working credentials. */
+  it("never sends the raw token to the database", async () => {
+    const { supabaseLedger } = await import("../src/realtime.js");
+    const spy = supabaseRespondingWith({ saathi_resolve_token: { ok: true } });
+    const ledger = supabaseLedger(supabase, spy);
+    await ledger.authorize!("super-secret-token");
+
+    const [, init] = (spy as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0]!;
+    expect(String(init.body)).not.toContain("super-secret-token");
+    // And it is a real digest, not merely an absence — a bug that dropped the token entirely
+    // would also pass the assertion above.
+    expect(JSON.parse(String(init.body)).p_token_sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  /** A publishable key here would fail every call confusingly; catch it at startup instead. */
+  it("refuses a publishable key where the secret key belongs", async () => {
+    const { supabaseFromEnv } = await import("../src/realtime.js");
+    expect(() =>
+      supabaseFromEnv({
+        SAATHI_SUPABASE_URL: "https://project.supabase.co",
+        SAATHI_SUPABASE_SECRET_KEY: "sb_publishable_abc",
+      }),
+    ).toThrow(/publishable/);
+  });
+
+  it("is absent, not broken, when the environment has no database configured", async () => {
+    const { supabaseFromEnv } = await import("../src/realtime.js");
+    expect(supabaseFromEnv({})).toBeNull();
+    expect(supabaseFromEnv({ SAATHI_SUPABASE_URL: "https://x.supabase.co" })).toBeNull();
+  });
+
+  /** A static token list is a deliberate self-hosting choice and must not be overridden. */
+  it("lets a static token list win over a database", async () => {
+    const { supabaseLedger } = await import("../src/realtime.js");
+    const ledger = supabaseLedger(supabase, supabaseRespondingWith({ saathi_resolve_token: { ok: true } }));
+    const app = createApp({ SAATHI_TOKENS: "only-this" }, { ledger });
+    expect((await app.request("/health")).status).toBe(200);
+    expect(((await (await app.request("/health")).json()) as { auth: string }).auth).toBe("tokens");
+
+    const rejected = await app.request("/session", {
+      method: "POST",
+      headers: { authorization: "Bearer something-the-db-would-accept" },
+    });
+    expect(rejected.status).toBe(401);
+  });
+});
