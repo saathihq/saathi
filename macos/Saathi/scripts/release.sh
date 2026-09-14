@@ -155,8 +155,17 @@ else
   /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 fi
 
+SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+
 echo
-echo "  app   $APP"
-echo "  zip   $ZIP  ($(du -h "$ZIP" | cut -f1))"
+echo "  app     $APP"
+echo "  zip     $ZIP  ($(du -h "$ZIP" | cut -f1))"
+# Printed because the Homebrew cask pins it. A cask whose sha256 does not match the release refuses
+# to install with a checksum error, which is the correct behaviour and a confusing thing to debug
+# if the number had to be recomputed by hand each time.
+echo "  sha256  $SHA"
 echo
 echo "  try it:  \"$APP/Contents/MacOS/saathi\" voice"
+echo
+echo "  release: gh release create v$VERSION \"$ZIP\" --repo saathihq/saathi"
+echo "           then set version + sha256 in the tap's Casks/saathi.rb"
