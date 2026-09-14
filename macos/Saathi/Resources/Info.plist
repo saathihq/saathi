@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Info.plist for Saathi.app.
+
+    The reason this file exists at all, rather than shipping the bare `saathi` binary: a
+    command-line executable has NO main bundle, and macOS requires the usage-description strings
+    below to live in the main bundle before it will let a process ask for the microphone or for
+    speech recognition. Probed on the loose binary, the answers were:
+
+        main bundle id:                       none — not a bundle
+        NSSpeechRecognitionUsageDescription:  ABSENT
+        NSMicrophoneUsageDescription:         ABSENT
+
+    So the chain voice lane — which is the DEFAULT lane, the one that works with no key — cannot
+    ask for what it needs unless the executable is inside a bundle. A notarized loose binary would
+    have looked finished and still not been able to listen.
+
+    The strings themselves matter more here than in most apps. Someone deciding whether to let a
+    companion hear them deserves the real answer in the sentence macOS shows, not a generic one —
+    so each says what is done with the audio and where it goes.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Saathi</string>
+    <key>CFBundleDisplayName</key>
+    <string>Saathi</string>
+    <key>CFBundleIdentifier</key>
+    <string>dev.saathi.Saathi</string>
+    <key>CFBundleExecutable</key>
+    <string>saathi</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <!-- No window and no Dock tile: this build is the CLI inside a bundle, and the bundle exists
+         for identity and permissions rather than for a user interface. The menu-bar shell will
+         change this to a real app; SaathiKit is written so it links against the same code. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Saathi listens when you talk to it. In the default mode your voice is turned into text on this Mac and never leaves it.</string>
+
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Saathi uses on-device speech recognition so it can understand you without sending your voice anywhere. Run `saathi voice` to see exactly where each part of a spoken turn goes.</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>Apache-2.0. Source at github.com/saathihq/saathi</string>
+</dict>
+</plist>

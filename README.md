@@ -170,6 +170,52 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
 
 Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
 
+### Installing it on a Mac
+
+```bash
+cd macos/Saathi && scripts/release.sh          # signed, notarized, stapled
+scripts/release.sh --no-notarize               # signed only, ~30 s
+scripts/release.sh --adhoc                     # this Mac only, no identity needed
+```
+
+That produces `dist/Saathi.app` and a zip beside it. Gatekeeper accepts a quarantined copy
+extracted from that zip, which is the test that matters — it is what a person downloading it gets.
+
+**Why there is an .app bundle around what is still a command-line tool.** A bare executable has no
+main bundle, and macOS will not let a process ask for the microphone or for speech recognition
+unless the usage-description strings are in its main bundle. Probed on the loose binary:
+
+```
+main bundle id:                       none — not a bundle
+NSMicrophoneUsageDescription:         ABSENT
+NSSpeechRecognitionUsageDescription:  ABSENT
+```
+
+The chain lane is the **default** lane — the one that needs no key — so shipping the loose binary
+would have produced something correctly notarized that still could not listen. The bundle exists
+for identity and permissions rather than for a user interface (`LSUIElement` is true, there is no
+window), so you run it as:
+
+```bash
+/Applications/Saathi.app/Contents/MacOS/saathi voice --listen
+```
+
+**One limitation, stated rather than discovered later.** TCC attributes a permission prompt to the
+*responsible* process. A binary started from a terminal is a child of that terminal, so the grant
+can land on the terminal instead of on Saathi. The bundle fixes identity, the usage strings and
+distribution; it does not by itself fix attribution for terminal-launched processes. `open -a
+Saathi` goes through LaunchServices and attributes correctly. The real fix is the menu-bar shell,
+which is a product decision rather than a packaging one.
+
+Notarization uses a keychain profile, so no key file is read at build time and nothing secret lives
+in this repository:
+
+```bash
+xcrun notarytool store-credentials "saathi-notary" \
+  --key ~/.appstoreconnect/private_keys/AuthKey_XXXXXXXXXX.p8 \
+  --key-id XXXXXXXXXX --issuer <issuer-uuid>
+```
+
 ### Hosting — this repository serves `api.saathi.dev`
 
 Every path is rewritten onto the Hono function in `api/`. There is no static

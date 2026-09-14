@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Entitlements for the hardened runtime, which Developer ID distribution requires and which
+    notarization checks.
+
+    Deliberately short. Every entitlement is a thing the app is allowed to do that it could not
+    otherwise, so the list is the answer to "what does trusting this actually grant", and it should
+    stay readable in one screen.
+
+    Not here, on purpose:
+      - App Sandbox. This is direct Developer ID distribution, not the App Store. Adding the
+        sandbox without also adding network-client, file-access and device entitlements would break
+        the app quietly; adding all of them would grant more than this list does. When the menu-bar
+        shell arrives and the App Store becomes a question, that is the moment to sandbox properly.
+      - allow-jit / allow-unsigned-executable-memory / disable-library-validation. Nothing here
+        generates code or loads third-party plug-ins, and each of those measurably weakens the
+        hardened runtime.
+-->
+<plist version="1.0">
+<dict>
+    <!-- The microphone. Saathi is a companion you talk to; this is the whole premise. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

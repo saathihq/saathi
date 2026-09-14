@@ -32,3 +32,6 @@ obj/
 
 # Shallow clones of the Windows reference projects (see reference/windows/README.md for the list)
 reference/windows/*/
+
+# Built app bundles and release artifacts
+macos/Saathi/dist/
