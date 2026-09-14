@@ -11,6 +11,36 @@ what make a good companion for anyone learning something new.
 and a Windows client that both run — enough to prove the structure holds and to have something to
 put a real idea into. The product shape itself is deliberately still open — see below.
 
+## Install
+
+```bash
+brew trust saathihq/tap
+brew tap saathihq/tap
+brew install --cask saathi
+```
+
+`Saathi.app` goes to `/Applications` and `saathi` onto your PATH — one signed, notarized binary,
+symlinked, not copied twice.
+
+`brew trust` is required, not optional: Homebrew 6 refuses to load a cask from a third-party tap
+until you say you trust it, and without it `brew tap` fails outright. A cask is Ruby that runs on
+your machine, so it is a fair question to be asked. It applies to every third-party cask tap, not
+just this one.
+
+It is a tap rather than homebrew-cask because homebrew-cask wants a project to be about a month old
+with a few dozen stars first. Moving it there later will not change the command anyone types.
+
+Then:
+
+```bash
+saathi provider     # which mode you are in, and whether anything leaves your machine
+saathi voice        # which voice lane that gives you, and where your voice goes
+saathi demo         # a three-step lesson, narrated
+```
+
+With nothing configured you are in `local` mode — an OpenAI-compatible server on your own machine,
+no key, no account, nothing leaving the device.
+
 ## Run it yourself
 
 Saathi is open source (Apache-2.0) and **running it yourself is the point**, not a
@@ -170,7 +200,9 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
 
 Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
 
-### Installing it on a Mac
+### Building and signing it yourself
+
+Installing is `brew install --cask saathi` above; this is how that artifact is produced.
 
 ```bash
 cd macos/Saathi && scripts/release.sh          # signed, notarized, stapled
