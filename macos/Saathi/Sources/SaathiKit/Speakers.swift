@@ -19,8 +19,16 @@ import SaathiContract
 public final class SystemSpeaker: Speaker, @unchecked Sendable {
     private let synthesizer = AVSpeechSynthesizer()
 
+    private struct State {
+        var inFlight: Task<Void, Never>?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
     public init() {}
 
+    // Two overlapping calls run one after the other instead of the first being stranded: each
+    // call waits for whatever is already in flight, then registers itself as the new in-flight
+    // task before awaiting its own turn.
     public func speak(_ text: String, tone: Tone) async {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
@@ -37,14 +45,26 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
             utterance.pitchMultiplier = 1.0
         }
 
-        // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
-        // turned out, before it started: `isSpeaking` stays false for ~50 ms after `speak()`, so
-        // polling it returned at once and every spoken command was silent. The delegate is the
-        // only signal that means what it says.
+        let previous = state.withLock { $0.inFlight }
+        await previous?.value
+        let task = Task { await self.say(utterance) }
+        state.withLock { $0.inFlight = task }
+        await task.value
+    }
+
+    // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
+    // turned out, before it started: `isSpeaking` stays false for ~50 ms after `speak()`, so
+    // polling it returned at once and every spoken command was silent. The delegate is the
+    // only signal that means what it says.
+    private func say(_ utterance: AVSpeechUtterance) async {
         let waiter = UtteranceWaiter()
         synthesizer.delegate = waiter
         synthesizer.speak(utterance)
-        await waiter.wait()
+        await withTaskCancellationHandler {
+            await waiter.wait()
+        } onCancel: {
+            synthesizer.stopSpeaking(at: .immediate)   // the delegate's didCancel resumes the waiter
+        }
         synthesizer.delegate = nil
     }
 }

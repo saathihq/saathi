@@ -42,9 +42,35 @@ final class UtteranceWaiterTests: XCTestCase {
 
     func testACancelAlsoEndsTheWait() async {
         let waiter = UtteranceWaiter()
-        let waiting = Task { await waiter.wait() }
+        let finished = OSAllocatedUnfairLock(initialState: false)
+        let waiting = Task {
+            await waiter.wait()
+            finished.withLock { $0 = true }
+        }
+
         try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(finished.withLock { $0 }, "wait() returned before the delegate said anything")
+
         waiter.speechSynthesizer(synthesizer, didCancel: utterance)
         await waiting.value
+        XCTAssertTrue(finished.withLock { $0 })
+    }
+}
+
+final class SystemSpeakerTests: XCTestCase {
+
+    /// Not a test of audio (there is none here): it exercises the serialisation seam in `speak` —
+    /// two overlapping calls each await whatever is already in flight before starting their own,
+    /// so neither one strands. An empty utterance finishes fast, so both calls should return
+    /// well within the timeout even run back to back.
+    func testOverlappingSpeakCallsDoNotStrandTheFirst() async throws {
+        let speaker = SystemSpeaker()
+        let start = DispatchTime.now()
+        async let first: Void = speaker.speak("", tone: .neutral)
+        async let second: Void = speaker.speak("", tone: .neutral)
+        _ = await (first, second)
+
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
+        XCTAssertLessThan(elapsed, 5, "overlapping speak calls did not both return within 5 s")
     }
 }
