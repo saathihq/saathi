@@ -63,4 +63,18 @@ final class MotionTransformTests: XCTestCase {
         XCTAssertEqual(foot.x, pivot.x, accuracy: 1e-6)
         XCTAssertEqual(foot.y, baseline + 2.5, accuracy: 1e-6, "only the bob moves it")
     }
+
+    func testSquashHappensBeforeTheTurnSoTheFootStaysOnTheBaseline() throws {
+        // playful: bob [6, 620], sway [5, 1240], squash 0.3. Three-quarters through the bob
+        // period the body is at the bottom of its travel and squashed; the sway is then at 3/8 of
+        // its own period, a tilt of 5·sin(135°) degrees. Squash first leaves the foot on the
+        // baseline, so only the tilt and the bob move it; squash after the tilt would stretch the
+        // foot's x by 15% and this would fail.
+        let t = MotionTransform.transform(preset: try preset("playful"), elapsed: 0.465, strength: 1, pivot: pivot, baseline: baseline)
+        let foot = CGPoint(x: pivot.x, y: baseline).applying(t)
+        let tilt = 5 * sin(0.375 * 2 * CGFloat.pi) * .pi / 180
+        let reach = baseline - pivot.y
+        XCTAssertEqual(foot.x, pivot.x - reach * sin(tilt), accuracy: 1e-6)
+        XCTAssertEqual(foot.y, pivot.y + reach * cos(tilt) + 6, accuracy: 1e-6)
+    }
 }
