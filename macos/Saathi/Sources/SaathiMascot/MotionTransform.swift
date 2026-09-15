@@ -22,7 +22,7 @@ enum MotionTransform {
         baseline: CGFloat
     ) -> CGAffineTransform {
         guard let preset, strength > 0 else { return .identity }
-        let ms = elapsed * 1000
+        let ms = max(0, elapsed * 1000)
 
         func wave(_ period: Double, _ phase: Double = 0) -> CGFloat {
             CGFloat(sin(ms / period * .pi * 2 + phase))
@@ -60,7 +60,10 @@ enum MotionTransform {
             let progress = ms / enter[1]
             if progress < 1 {
                 let r = progress - 1
-                scale *= CGFloat(enter[0] + (1 - enter[0]) * (1 + 2.7 * r * r * r + 1.7 * r * r))
+                let ease = 1 + 2.7 * r * r * r + 1.7 * r * r
+                let grown = enter[0] + (1 - enter[0]) * ease
+                // The departure from 1 (fully grown) is scaled by strength, not the raw value.
+                scale *= 1 + (CGFloat(grown) - 1) * strength
             }
         }
         if let settle = preset.settle {

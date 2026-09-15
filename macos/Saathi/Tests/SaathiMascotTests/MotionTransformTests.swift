@@ -64,6 +64,25 @@ final class MotionTransformTests: XCTestCase {
         XCTAssertEqual(foot.y, baseline + 2.5, accuracy: 1e-6, "only the bob moves it")
     }
 
+    func testNegativeElapsedIsTreatedAsZero() throws {
+        let atZero = MotionTransform.transform(preset: try preset("waking"), elapsed: 0, strength: 1, pivot: pivot, baseline: baseline)
+        let negative = MotionTransform.transform(preset: try preset("waking"), elapsed: -5, strength: 1, pivot: pivot, baseline: baseline)
+        XCTAssertEqual(negative.a, atZero.a, accuracy: 1e-9)
+        XCTAssertEqual(negative.d, atZero.d, accuracy: 1e-9)
+        XCTAssertEqual(negative.tx, atZero.tx, accuracy: 1e-9)
+        XCTAssertEqual(negative.ty, atZero.ty, accuracy: 1e-9)
+    }
+
+    func testEnterHonoursStrength() throws {
+        // waking: enter [0.92, 700 ms]. At elapsed 0, pulse's sin(0) == 0 and the ease at r = -1
+        // is 1 - 2.7 + 1.7 = 0, so the fully-grown value is 0.92: strength 1 sees that whole
+        // departure from 1, strength 0.5 sees half of it.
+        let full = MotionTransform.transform(preset: try preset("waking"), elapsed: 0, strength: 1, pivot: pivot, baseline: baseline)
+        let half = MotionTransform.transform(preset: try preset("waking"), elapsed: 0, strength: 0.5, pivot: pivot, baseline: baseline)
+        XCTAssertEqual(hypot(full.a, full.b), 0.92, accuracy: 1e-6)
+        XCTAssertEqual(hypot(half.a, half.b), 0.96, accuracy: 1e-6)
+    }
+
     func testSquashHappensBeforeTheTurnSoTheFootStaysOnTheBaseline() throws {
         // playful: bob [6, 620], sway [5, 1240], squash 0.3. Three-quarters through the bob
         // period the body is at the bottom of its travel and squashed; the sway is then at 3/8 of
