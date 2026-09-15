@@ -14,6 +14,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "SaathiKit", targets: ["SaathiKit"]),
+        .library(name: "SaathiMascot", targets: ["SaathiMascot"]),
         .executable(name: "saathi", targets: ["saathi"]),
     ],
     targets: [
@@ -26,6 +27,15 @@ let package = Package(
         .target(name: "SaathiKit", dependencies: ["SaathiContract"]),
 
         .executableTarget(name: "saathi", dependencies: ["SaathiKit"]),
+
+        // The character. Draws and animates the pointer mascot from Resources/mascot.json, and
+        // knows nothing about voice, actions or Saathi — so it can be previewed and tested alone.
+        .target(name: "SaathiMascot", resources: [.copy("Resources/mascot.json")]),
+
+        // `swift run MascotPreview`: every expression in a grid, for eyes rather than tests.
+        .executableTarget(name: "MascotPreview", dependencies: ["SaathiMascot"]),
+
+        .testTarget(name: "SaathiMascotTests", dependencies: ["SaathiMascot"]),
 
         .testTarget(name: "SaathiKitTests", dependencies: ["SaathiKit"]),
     ]
