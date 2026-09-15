@@ -57,6 +57,18 @@ final class FaceGeometryTests: XCTestCase {
         XCTAssertEqual(placement.path.boundingBox.width, CGFloat(data.mouths[1][0]) * 2, accuracy: 0.5, "as wide as twice the half-width")
     }
 
+    func testTurningTheHeadNarrowsAndThenHidesTheMouth() {
+        let eyeRefX = CGFloat(data.eyeRefX)
+        let rest = FaceGeometry.mouthPlacement(eyes: eyes, mouth: data.mouths[1], turn: 0, shift: .zero, eyeRefX: eyeRefX)
+        let quarter = FaceGeometry.mouthPlacement(eyes: eyes, mouth: data.mouths[1], turn: .pi / 4, shift: .zero, eyeRefX: eyeRefX)
+        let away = FaceGeometry.mouthPlacement(eyes: eyes, mouth: data.mouths[1], turn: .pi, shift: .zero, eyeRefX: eyeRefX)
+        XCTAssertTrue(rest.visible)
+        XCTAssertTrue(quarter.visible)
+        XCTAssertLessThan(quarter.transform.a, rest.transform.a, "a quarter turn narrows the mouth")
+        XCTAssertGreaterThan(quarter.transform.a, 0.3)
+        XCTAssertFalse(away.visible, "turned right round, the mouth is on the far side")
+    }
+
     func testDriftMovesTheWholeFace() {
         let drifted = FaceGeometry.eyes(from: data.faces[1], drift: CGPoint(x: 2, y: 4))
         XCTAssertEqual(drifted[0].centroid.x, eyes[0].centroid.x + 2, accuracy: 0.001)
