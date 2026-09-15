@@ -79,8 +79,10 @@ public final class MascotView: NSView {
         self.color = color
         self.expression = expression
         self.now = now
-        // Decoded once at construction; a bad outline is a programming error, not a runtime case.
-        self.bodyOutline = (try? SVGPath.cgPath(from: data.bodyPath)) ?? CGMutablePath()
+        // Decoded once at construction; a bad outline is a programming error, not a runtime case —
+        // SVGPathTests pins that the bundled path parses, so this can only fire on a bad re-port,
+        // and it should fire in the test run, not ship a blank character.
+        self.bodyOutline = try! SVGPath.cgPath(from: data.bodyPath)
         super.init(frame: frame)
         wantsLayer = true
         layer?.masksToBounds = false
