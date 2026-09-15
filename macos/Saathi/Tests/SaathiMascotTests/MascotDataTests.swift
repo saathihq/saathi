@@ -47,6 +47,21 @@ final class MascotDataTests: XCTestCase {
         XCTAssertNil(data.motion["idle"]?.bob)
     }
 
+    func testMotionPairsHaveExactlyTwoValues() throws {
+        let data = try MascotData.load()
+        for (name, preset) in data.motion {
+            let pairs: [(String, [Double]?)] = [
+                ("pulse", preset.pulse), ("bob", preset.bob), ("sway", preset.sway),
+                ("circle", preset.circle), ("jitter", preset.jitter), ("enter", preset.enter),
+            ]
+            for (label, pair) in pairs {
+                if let pair {
+                    XCTAssertEqual(pair.count, 2, "\(name).\(label) is not a [amount, period] pair")
+                }
+            }
+        }
+    }
+
     func testThePaletteHasSaathiBlue() throws {
         XCTAssertEqual(try MascotData.load().palette["blue"], "#377FE6")
     }
