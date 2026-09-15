@@ -15,7 +15,7 @@ public final class MascotView: NSView {
 
     public let data: MascotData
 
-    public var expression: Expression {
+    public var expression: MascotExpression {
         didSet { if expression != oldValue { enter(expression, hard: false) } }
     }
 
@@ -67,7 +67,7 @@ public final class MascotView: NSView {
 
     public override var isFlipped: Bool { true }
 
-    public init(data: MascotData, color: MascotColor, expression: Expression, frame: NSRect) {
+    public init(data: MascotData, color: MascotColor, expression: MascotExpression, frame: NSRect) {
         self.data = data
         self.color = color
         self.expression = expression
@@ -196,7 +196,7 @@ public final class MascotView: NSView {
 
     // MARK: expressions
 
-    private func enter(_ expression: Expression, hard: Bool) {
+    private func enter(_ expression: MascotExpression, hard: Bool) {
         let now = lastNow
         let first = data.expressions[expression.rawValue]?.first ?? 0
         setFace(first, hard: hard, now: now)

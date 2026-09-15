@@ -20,7 +20,7 @@ final class MascotViewTests: XCTestCase {
 
     func testEveryExpressionCanDrawAFrame() throws {
         let view = try makeView()
-        for expression in Expression.allCases {
+        for expression in MascotExpression.allCases {
             view.expression = expression
             view.tick(now: 0)
             view.tick(now: 0.5)

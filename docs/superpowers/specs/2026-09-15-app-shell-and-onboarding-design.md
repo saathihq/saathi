@@ -58,9 +58,9 @@ is a menu-bar item plus panels. The Homebrew cask keeps symlinking `Contents/Mac
   colour), two eyes, mouth, all inside a motion layer. Blink, face cycling within an expression,
   gaze toward a point, and the motion presets (pulse, bob, sway, tilt) are driven by a
   `CADisplayLink` on macOS 14 and a 60 Hz timer on 13.
-- Public surface: `expression: Expression`, `color: MascotColor`, `size: CGFloat`,
-  `lookAt(point:)`, `blinkNow()`, `spin()`. `Expression` is an enum with the names the app uses;
-  unknown names in the JSON are ignored, missing ones fail the test.
+- Public surface: `expression: MascotExpression`, `color: MascotColor`, `lookAt(point:)`,
+  `blinkNow()`, `spin()`; the view scales the drawing to its frame. `MascotExpression` is an enum
+  with the names the app uses; a test fails if the enum and the JSON disagree in either direction.
 - Face clipping to the body is done with a `CAShapeLayer` mask, which Core Animation supports even
   though AppKit's SVG loader does not.
 

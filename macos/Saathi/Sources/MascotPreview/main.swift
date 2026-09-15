@@ -29,13 +29,13 @@ final class PreviewController: NSObject {
 let controller = PreviewController()
 let cell: CGFloat = 96
 let columns = 8
-let rows = Int((Double(Expression.allCases.count) / Double(columns)).rounded(.up))
+let rows = Int((Double(MascotExpression.allCases.count) / Double(columns)).rounded(.up))
 let content = NSView(frame: NSRect(x: 0, y: 0, width: CGFloat(columns) * (cell + 24) + 24, height: CGFloat(rows) * (cell + 36) + 80))
 content.wantsLayer = true
 content.layer?.backgroundColor = CGColor(gray: 0.06, alpha: 1)
 
 let blue = MascotColor(paletteName: "blue", in: data)!
-for (i, expression) in Expression.allCases.enumerated() {
+for (i, expression) in MascotExpression.allCases.enumerated() {
     let column = i % columns, row = i / columns
     let x = 24 + CGFloat(column) * (cell + 24)
     let y = content.bounds.height - 80 - CGFloat(row + 1) * (cell + 36)
@@ -66,7 +66,7 @@ spin.frame = NSRect(x: 270, y: content.bounds.height - 56, width: 80, height: 28
 content.addSubview(spin)
 
 let window = NSWindow(contentRect: content.frame, styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-window.title = "Saathi mascot — \(Expression.allCases.count) expressions"
+window.title = "Saathi mascot — \(MascotExpression.allCases.count) expressions"
 window.contentView = content
 window.center()
 window.makeKeyAndOrderFront(nil)
