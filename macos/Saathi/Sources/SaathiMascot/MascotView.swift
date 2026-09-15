@@ -94,6 +94,8 @@ public final class MascotView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("MascotView is built in code") }
 
+    deinit { ticker?.invalidate() }
+
     // MARK: public controls
 
     /// Point in this view's (flipped) coordinates; nil looks straight ahead.
