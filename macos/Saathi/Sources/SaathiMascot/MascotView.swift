@@ -121,10 +121,25 @@ public final class MascotView: NSView {
         ticker?.invalidate()
         ticker = nil
         if window != nil {
+            rebaseClock()
             ticker = Ticker(view: self) { [weak self] in
                 guard let self else { return }
                 self.tick(now: self.now())
             }
+        }
+    }
+
+    /// The view may have sat out of a window for a while (hidden, or its window closed); shift
+    /// every scheduled time forward by the gap so tick doesn't see a huge elapsed time and fire
+    /// every pending face change, blink, and motion preset all at once.
+    private func rebaseClock() {
+        let current = now()
+        let gap = current - lastNow
+        if gap > 0 {
+            stateStart += gap
+            nextFaceAt += gap
+            if let blink = nextBlinkAt { nextBlinkAt = blink + gap }
+            lastNow = current
         }
     }
 
