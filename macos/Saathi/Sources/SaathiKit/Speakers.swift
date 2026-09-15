@@ -37,13 +37,56 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
             utterance.pitchMultiplier = 1.0
         }
 
+        // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
+        // turned out, before it started: `isSpeaking` stays false for ~50 ms after `speak()`, so
+        // polling it returned at once and every spoken command was silent. The delegate is the
+        // only signal that means what it says.
+        let waiter = UtteranceWaiter()
+        synthesizer.delegate = waiter
         synthesizer.speak(utterance)
+        await waiter.wait()
+        synthesizer.delegate = nil
+    }
+}
 
-        // A CLI exits the moment its work is done, which would cut the sentence off mid-word.
-        // Polling is crude but it is honest about what it is waiting for.
-        while synthesizer.isSpeaking {
-            try? await Task.sleep(nanoseconds: 50_000_000)
+/// Turns the synthesizer's "finished" and "cancelled" delegate calls into one awaitable.
+///
+/// Handles both orders: `wait()` before the delegate fires (the normal case) and after (a very
+/// short utterance on a fast machine), so neither can hang.
+final class UtteranceWaiter: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    private struct State {
+        var finished = false
+        var continuation: CheckedContinuation<Void, Never>?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let alreadyFinished = state.withLock { box -> Bool in
+                if box.finished { return true }
+                box.continuation = continuation
+                return false
+            }
+            if alreadyFinished { continuation.resume() }
         }
+    }
+
+    private func finish() {
+        let continuation = state.withLock { box -> CheckedContinuation<Void, Never>? in
+            box.finished = true
+            defer { box.continuation = nil }
+            return box.continuation
+        }
+        continuation?.resume()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        finish()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        finish()
     }
 }
 
