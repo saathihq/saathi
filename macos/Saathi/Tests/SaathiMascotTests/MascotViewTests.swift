@@ -7,6 +7,7 @@
 //
 
 import AppKit
+import QuartzCore
 import XCTest
 @testable import SaathiMascot
 
@@ -67,5 +68,12 @@ final class MascotViewTests: XCTestCase {
         view.tick(now: 60)
         view.tick(now: 120)
         XCTAssertEqual(view.faceIndex, before)
+    }
+
+    func testTheClockStartsAtConstructionNotAtTimeZero() throws {
+        let before = CACurrentMediaTime()
+        let view = try makeView()   // idle: blinks every 6–14 s
+        XCTAssertGreaterThanOrEqual(view.stateStart, before, "the expression's clock starts now, not at zero")
+        XCTAssertGreaterThan(try XCTUnwrap(view.nextBlinkAt), before + 1, "the first blink is scheduled seconds ahead, not immediately")
     }
 }

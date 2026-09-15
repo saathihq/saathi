@@ -53,7 +53,7 @@ public final class MascotView: NSView {
     private var toGaze: CGPoint = .zero
     /// 0 = fully the previous face, 1 = fully the new one.
     private var morph: CGFloat = 1
-    private var stateStart: TimeInterval = 0
+    private(set) var stateStart: TimeInterval = 0
     private var nextFaceAt: TimeInterval = .infinity
     private(set) var nextBlinkAt: TimeInterval?
     private var blinkStart: TimeInterval?
@@ -78,6 +78,7 @@ public final class MascotView: NSView {
         layer?.masksToBounds = false
         buildLayers()
         applyColor()
+        lastNow = CACurrentMediaTime()
         enter(expression, hard: true)
         tick(now: CACurrentMediaTime())
     }
