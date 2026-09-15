@@ -78,7 +78,7 @@ public enum CompanionState: Equatable {
   on `onStatus("thinking…")`; speaking while the speaker is speaking; showingStep on a
   `show_step` action, celebrating when `index == total`; alert on any error; idle two seconds
   after speaking ends; asleep after three quiet minutes; poweringDown on quit.
-- `expression(for: CompanionState) -> Expression` is a table: asleep → sleeping, idle → idle,
+- `expression(for: CompanionState) -> MascotExpression` is a table: asleep → sleeping, idle → idle,
   listening → listening, thinking → thinking, speaking → dictating, showingStep → working,
   celebrating → celebrate, alert → alerting, poweringDown → powering-down.
 - The `Speaker` protocol gains `onSpeakingChanged: ((Bool) -> Void)?` so the state machine can
