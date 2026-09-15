@@ -90,6 +90,10 @@ if grep -q "__VERSION__\|__BUILD__" "$APP/Contents/Info.plist"; then
 fi
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
+# The icon is rendered from Resources/Saathi.svg on every build rather than checked in, so the
+# SVG stays the only thing to edit. It has to land before signing: codesign seals Resources.
+"$PACKAGE_DIR/scripts/make-icon.sh" "$APP/Contents/Resources/Saathi.icns"
+
 # ── sign ─────────────────────────────────────────────────────────────────────
 # `--options runtime` is the hardened runtime, which notarization requires. `--timestamp` needs
 # Apple's timestamp server, which fails often enough under a flaky connection that retrying is

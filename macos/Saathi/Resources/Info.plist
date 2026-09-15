@@ -39,6 +39,8 @@
     <string>__BUILD__</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>CFBundleIconFile</key>
+    <string>Saathi</string>
 
     <!-- No window and no Dock tile: this build is the CLI inside a bundle, and the bundle exists
          for identity and permissions rather than for a user interface. The menu-bar shell will
