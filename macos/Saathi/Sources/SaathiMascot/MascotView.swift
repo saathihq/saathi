@@ -29,6 +29,10 @@ public final class MascotView: NSView {
     /// Auto-blink and cycling between an expression's faces. Off, the face holds still.
     public var animates = true
 
+    /// Where the ticker and `init` read the current time. Overridable so tests can drive the
+    /// clock deterministically instead of racing the real one.
+    public var now: () -> TimeInterval = { CACurrentMediaTime() }
+
     // MARK: layers
 
     private let scaled = CALayer()
@@ -62,15 +66,19 @@ public final class MascotView: NSView {
     private(set) var pointerGazeTarget: CGPoint = .zero
     private var lastNow: TimeInterval = 0
     private var ticker: Ticker?
+    /// The last motion transform `tick` computed; exposed so tests can assert it stays finite.
+    private(set) var lastMotion: CGAffineTransform = .identity
 
     private let bodyOutline: CGPath
 
     public override var isFlipped: Bool { true }
 
-    public init(data: MascotData, color: MascotColor, expression: MascotExpression, frame: NSRect) {
+    public init(data: MascotData, color: MascotColor, expression: MascotExpression, frame: NSRect,
+                now: @escaping () -> TimeInterval = { CACurrentMediaTime() }) {
         self.data = data
         self.color = color
         self.expression = expression
+        self.now = now
         // Decoded once at construction; a bad outline is a programming error, not a runtime case.
         self.bodyOutline = (try? SVGPath.cgPath(from: data.bodyPath)) ?? CGMutablePath()
         super.init(frame: frame)
@@ -78,9 +86,9 @@ public final class MascotView: NSView {
         layer?.masksToBounds = false
         buildLayers()
         applyColor()
-        lastNow = CACurrentMediaTime()
+        lastNow = now()
         enter(expression, hard: true)
-        tick(now: CACurrentMediaTime())
+        tick(now: now())
     }
 
     @available(*, unavailable)
@@ -113,7 +121,10 @@ public final class MascotView: NSView {
         ticker?.invalidate()
         ticker = nil
         if window != nil {
-            ticker = Ticker(view: self) { [weak self] in self?.tick(now: CACurrentMediaTime()) }
+            ticker = Ticker(view: self) { [weak self] in
+                guard let self else { return }
+                self.tick(now: self.now())
+            }
         }
     }
 
@@ -311,13 +322,14 @@ public final class MascotView: NSView {
         place(eyeLeft, FaceGeometry.eyePlacement(eyes[0], blink: blink, turn: turn, shift: shift, eyeRefX: eyeRefX))
         place(eyeRight, FaceGeometry.eyePlacement(eyes[1], blink: blink, turn: turn, shift: shift, eyeRefX: eyeRefX))
         place(mouth, FaceGeometry.mouthPlacement(eyes: eyes, mouth: currentMouth(), turn: turn, shift: shift, eyeRefX: eyeRefX))
-        motion.setAffineTransform(MotionTransform.transform(
+        lastMotion = MotionTransform.transform(
             preset: data.motion[expression.rawValue],
             elapsed: now - stateStart,
             strength: motionStrength,
             pivot: CGPoint(x: eyeRefX, y: eyeRefX),
             baseline: eyeRefX * 2
-        ))
+        )
+        motion.setAffineTransform(lastMotion)
         CATransaction.commit()
     }
 

@@ -13,23 +13,33 @@ import XCTest
 
 final class MascotViewTests: XCTestCase {
 
-    private func makeView() throws -> MascotView {
-        MascotView(data: try MascotData.load(), color: MascotColor(hex: "#377FE6"), expression: .idle,
-                   frame: NSRect(x: 0, y: 0, width: 96, height: 96))
+    /// A view whose clock the test owns: `clock.value` is what `now()` returns.
+    final class Clock { var value: TimeInterval = 1_000 }
+
+    private func makeView(expression: MascotExpression = .idle, data: MascotData? = nil) throws -> (MascotView, Clock) {
+        let clock = Clock()
+        let view = MascotView(data: try data ?? MascotData.load(), color: MascotColor(hex: "#377FE6"), expression: expression,
+                              frame: NSRect(x: 0, y: 0, width: 96, height: 96), now: { clock.value })
+        return (view, clock)
     }
 
     func testEveryExpressionCanDrawAFrame() throws {
-        let view = try makeView()
+        let (view, clock) = try makeView()
         for expression in MascotExpression.allCases {
             view.expression = expression
-            view.tick(now: 0)
-            view.tick(now: 0.5)
+            clock.value += 0.5
+            view.tick(now: clock.value)
+            // Past every face and blink interval, so the cycling and blink branches run too.
+            clock.value += 30
+            view.tick(now: clock.value)
             XCTAssertEqual(view.expression, expression)
+            XCTAssertTrue(view.lastMotion.a.isFinite && view.lastMotion.d.isFinite, "\(expression) produced a non-finite transform")
+            XCTAssertLessThan(abs(view.lastMotion.a), 10, "\(expression) scaled implausibly large")
         }
     }
 
     func testChangingExpressionSwitchesToItsFirstFace() throws {
-        let view = try makeView()
+        let (view, _) = try makeView()
         let data = try MascotData.load()
         view.expression = .listening
         XCTAssertEqual(view.faceIndex, data.expressions["listening"]?.first)
@@ -38,7 +48,7 @@ final class MascotViewTests: XCTestCase {
     }
 
     func testLookAtMapsTheViewToMinusOneToOne() throws {
-        let view = try makeView()
+        let (view, _) = try makeView()
         view.lookAt(CGPoint(x: 96, y: 0))       // top-right corner in flipped coordinates
         XCTAssertEqual(view.pointerGazeTarget.x, 1, accuracy: 0.001)
         XCTAssertEqual(view.pointerGazeTarget.y, -1, accuracy: 0.001)
@@ -47,7 +57,7 @@ final class MascotViewTests: XCTestCase {
     }
 
     func testAutoBlinkIsScheduledOnlyWhereTheDataAllowsIt() throws {
-        let view = try makeView()
+        let (view, _) = try makeView()
         view.expression = .idle
         XCTAssertNotNil(view.nextBlinkAt, "idle blinks")
         view.expression = .sleeping
@@ -55,25 +65,28 @@ final class MascotViewTests: XCTestCase {
     }
 
     func testTheViewIsFlippedSoTheJSONCoordinatesAreUsedAsIs() throws {
-        XCTAssertTrue(try makeView().isFlipped)
+        let (view, _) = try makeView()
+        XCTAssertTrue(view.isFlipped)
     }
 
     func testAnExpressionWithNoFacesKeepsTheCurrentFaceInsteadOfCrashing() throws {
         var data = try MascotData.load()
         data.expressions["idle"] = []
-        let view = MascotView(data: data, color: MascotColor(hex: "#377FE6"), expression: .idle,
-                              frame: NSRect(x: 0, y: 0, width: 96, height: 96))
+        let (view, clock) = try makeView(expression: .idle, data: data)
         let before = view.faceIndex
         // Well past any face interval, so the cycling branch runs.
-        view.tick(now: 60)
-        view.tick(now: 120)
+        clock.value += 60
+        view.tick(now: clock.value)
+        clock.value += 60
+        view.tick(now: clock.value)
         XCTAssertEqual(view.faceIndex, before)
     }
 
-    func testTheClockStartsAtConstructionNotAtTimeZero() throws {
-        let before = CACurrentMediaTime()
-        let view = try makeView()   // idle: blinks every 6–14 s
-        XCTAssertGreaterThanOrEqual(view.stateStart, before, "the expression's clock starts now, not at zero")
-        XCTAssertGreaterThan(try XCTUnwrap(view.nextBlinkAt), before + 1, "the first blink is scheduled seconds ahead, not immediately")
+    func testTheClockStartsAtConstruction() throws {
+        let (view, _) = try makeView()   // idle: blinks every 6–14 s
+        XCTAssertEqual(view.stateStart, 1_000)
+        let nextBlinkAt = try XCTUnwrap(view.nextBlinkAt)
+        XCTAssertGreaterThan(nextBlinkAt, 1_006)
+        XCTAssertLessThanOrEqual(nextBlinkAt, 1_014)
     }
 }
