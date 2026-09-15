@@ -89,4 +89,12 @@ final class MascotViewTests: XCTestCase {
         XCTAssertGreaterThan(nextBlinkAt, 1_006)
         XCTAssertLessThanOrEqual(nextBlinkAt, 1_014)
     }
+
+    func testAOneFaceExpressionKeepsItsClockAcrossFaceIntervals() throws {
+        let (view, clock) = try makeView(expression: .waking)
+        let start = view.stateStart
+        clock.value += 2   // past waking's 800 ms face interval
+        view.tick(now: clock.value)
+        XCTAssertEqual(view.stateStart, start)
+    }
 }

@@ -220,7 +220,6 @@ public final class MascotView: NSView {
         let count = data.faces.count
         let wrapped = ((index % count) + count) % count
         if wrapped == faceIndex, morph >= 1, !fromEyes.isEmpty {
-            stateStart = now
             return
         }
         let target = data.faces[wrapped].map { $0.map { CGPoint(x: CGFloat($0[0]), y: CGFloat($0[1])) } }
@@ -290,7 +289,11 @@ public final class MascotView: NSView {
         if animates, now >= nextFaceAt {
             let sequence = data.expressions[expression.rawValue] ?? []
             let others = sequence.filter { $0 != faceIndex }
-            setFace(others.randomElement() ?? sequence.first ?? faceIndex, hard: false, now: now)
+            // A single-face expression (or none at all) has nothing to switch to; leave the
+            // expression's own clock alone rather than restarting it every interval.
+            if !others.isEmpty {
+                setFace(others.randomElement()!, hard: false, now: now)
+            }
             scheduleFace(now: now)
         }
 
