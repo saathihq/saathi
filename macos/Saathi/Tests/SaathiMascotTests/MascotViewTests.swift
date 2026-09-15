@@ -56,4 +56,16 @@ final class MascotViewTests: XCTestCase {
     func testTheViewIsFlippedSoTheJSONCoordinatesAreUsedAsIs() throws {
         XCTAssertTrue(try makeView().isFlipped)
     }
+
+    func testAnExpressionWithNoFacesKeepsTheCurrentFaceInsteadOfCrashing() throws {
+        var data = try MascotData.load()
+        data.expressions["idle"] = []
+        let view = MascotView(data: data, color: MascotColor(hex: "#377FE6"), expression: .idle,
+                              frame: NSRect(x: 0, y: 0, width: 96, height: 96))
+        let before = view.faceIndex
+        // Well past any face interval, so the cycling branch runs.
+        view.tick(now: 60)
+        view.tick(now: 120)
+        XCTAssertEqual(view.faceIndex, before)
+    }
 }

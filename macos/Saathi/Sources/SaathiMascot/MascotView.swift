@@ -276,9 +276,9 @@ public final class MascotView: NSView {
             scheduleBlink(now: now)
         }
         if animates, now >= nextFaceAt {
-            let sequence = data.expressions[expression.rawValue] ?? [0]
+            let sequence = data.expressions[expression.rawValue] ?? []
             let others = sequence.filter { $0 != faceIndex }
-            setFace(others.randomElement() ?? sequence[0], hard: false, now: now)
+            setFace(others.randomElement() ?? sequence.first ?? faceIndex, hard: false, now: now)
             scheduleFace(now: now)
         }
 
