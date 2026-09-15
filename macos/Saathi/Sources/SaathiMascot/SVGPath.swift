@@ -59,7 +59,9 @@ enum SVGPath {
         }
 
         for character in d {
-            if character.isLetter {
+            if (character == "e" || character == "E"), let last = token.last, last.isNumber || last == "." {
+                token.append(character)
+            } else if character.isLetter {
                 try flushToken()
                 try apply()
                 command = character

@@ -55,4 +55,17 @@ final class SVGPathTests: XCTestCase {
         XCTAssertLessThan(box.maxX, square)
         XCTAssertGreaterThan(box.width, 150)
     }
+
+    func testExponentNotationIsOneNumber() throws {
+        let path = try SVGPath.cgPath(from: "M0 0 L1e-2 3 L2E1 3")
+        XCTAssertEqual(path.currentPoint, CGPoint(x: 20, y: 3))
+        XCTAssertEqual(path.boundingBoxOfPath.minX, 0)
+        XCTAssertEqual(path.boundingBoxOfPath.maxX, 20)
+    }
+
+    func testAMalformedNumberIsAnError() {
+        XCTAssertThrowsError(try SVGPath.cgPath(from: "M0 0 L1..2 3")) { error in
+            XCTAssertEqual(error as? SVGPath.ParseError, .malformedNumber("1..2"))
+        }
+    }
 }
