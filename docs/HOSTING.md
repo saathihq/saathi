@@ -56,8 +56,33 @@ browsers, and the database functions are not granted to it, so every call would 
 
 ```bash
 curl https://api.saathi.dev/health
-{"ok":true,"version":"0.5.0","auth":"accounts","voice":"hosted","limits":"per-account daily limit, counted in Postgres (shared across every instance)"}
+{"ok":true,"version":"0.6.0","auth":"accounts","voice":"hosted","limits":"per-account daily limit, counted in Postgres (shared across every instance)"}
 ```
+
+As deployed on 2026-09-16: accounts in Supabase project `qkrkijwdwsclpikjgvcb`, hosted voice on
+`gpt-realtime` in the `cedar` voice. Five variables are set, **Production only** — matching how
+`SAATHI_SUPABASE_URL` was already scoped, and keeping a live provider key off preview deployments:
+`SAATHI_SUPABASE_URL`, `SAATHI_SUPABASE_SECRET_KEY`, `SAATHI_REALTIME_KEY`, `SAATHI_REALTIME_MODEL`,
+`SAATHI_REALTIME_VOICE`.
+
+`SAATHI_TOKENS` is deliberately unset. `authPosture` checks a static token list *before* the accounts
+database, so setting it would silently bypass the Postgres ledger and every per-account limit with
+it — the deploy would still look healthy while enforcing nothing.
+
+What was verified against the live deployment, not assumed:
+
+| Check | Result |
+|---|---|
+| `/health` posture | `auth: accounts`, `voice: hosted`, contract `0.6.0` |
+| A real account token | `POST /realtime/session` → 200 |
+| An unknown token | 401 |
+| No token at all | 401 |
+| The minted grant | `wss://api.openai.com/v1/realtime?model=gpt-realtime`, expires in 600 s |
+
+The last row is the one that matters most: the grant sends the client to **OpenAI**, not back here, so
+no audio crosses `api.saathi.dev` even in hosted mode. A grant naming a `saathi.dev` host would mean
+every learner's voice was flowing through this backend, which is exactly what minting exists to avoid
+— and the macOS client rejects any grant URL that is not `ws`/`wss` before it connects.
 
 ## The database
 
