@@ -6,7 +6,7 @@
     "Never edit a generated file: `npm run generate -w contract` rewrites them, and CI fails any PR",
     "where the checked-in output does not match what this schema produces.",
     "",
-    "The SHAPE of this file is the decided part. The action list is still a seed \u2014 the product",
+    "The SHAPE of this file is the decided part. The action list is still a seed — the product",
     "questions in the root README are open. The PROVIDER section below is not a seed: running",
     "Saathi against your own local model, with no key and no account, is the primary objective, and",
     "the three modes here are what make that possible without a second implementation.",
@@ -14,7 +14,7 @@
     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
     "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
   ],
-  "version": "0.5.0",
+  "version": "0.6.0",
   "backend": {
     "defaultBaseUrl": "https://api.saathi.dev",
     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
@@ -40,7 +40,7 @@
     ]
   },
   "config": {
-    "$comment": "~/.saathi/shell.json on every platform. Owner-readable only (0600) \u2014 it can hold a key.",
+    "$comment": "~/.saathi/shell.json on every platform. Owner-readable only (0600) — it can hold a key.",
     "fileName": "shell.json",
     "directoryName": ".saathi",
     "fields": [
@@ -48,7 +48,7 @@
         "name": "provider",
         "type": "ProviderKind",
         "optional": true,
-        "doc": "Which mode to run in. Unset means local \u2014 see providers.default."
+        "doc": "Which mode to run in. Unset means local — see providers.default."
       },
       {
         "name": "providerBaseUrl",
@@ -66,7 +66,31 @@
         "name": "apiKey",
         "type": "string",
         "optional": true,
-        "doc": "Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers."
+        "doc": "Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."
+      },
+      {
+        "name": "openaiKey",
+        "type": "string",
+        "optional": true,
+        "doc": "Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers."
+      },
+      {
+        "name": "anthropicKey",
+        "type": "string",
+        "optional": true,
+        "doc": "Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today."
+      },
+      {
+        "name": "voiceModel",
+        "type": "string",
+        "optional": true,
+        "doc": "Overrides the realtime voice model. Distinct from model, which is what does the thinking."
+      },
+      {
+        "name": "voice",
+        "type": "string",
+        "optional": true,
+        "doc": "The realtime voice's name. Defaults to the provider row's."
       },
       {
         "name": "backendUrl",
@@ -175,7 +199,7 @@
     {
       "name": "openUrl",
       "wireName": "open_url",
-      "doc": "Open a resource in the learner's browser. http(s) only \u2014 clients MUST reject every other scheme rather than pass it to the OS.",
+      "doc": "Open a resource in the learner's browser. http(s) only — clients MUST reject every other scheme rather than pass it to the OS.",
       "parameters": [
         {
           "name": "url",
@@ -188,7 +212,7 @@
   "providers": {
     "$comment": [
       "One row per ProviderKind. `defaultModel` is a starting point a user can change, not a",
-      "recommendation \u2014 model names churn faster than this file should.",
+      "recommendation — model names churn faster than this file should.",
       "",
       "`keyHeader` / `keyPrefix` say how the credential is presented, as data rather than a switch",
       "in each client. Most providers take `Authorization: Bearer <key>`; Anthropic wants its own",
@@ -206,7 +230,13 @@
       "column, not a preference: `realtime` where the provider really has one, `chain` (speech in,",
       "think, speech out as three steps) everywhere else. The chain lane is slower and says so out",
       "loud. What it is not is absent — a companion whose default mode cannot be spoken to would",
-      "have the accessibility premise backwards."
+      "have the accessibility premise backwards.",
+      "",
+      "`defaultVoiceModel` and `defaultVoice` are separate from `defaultModel` because they are a",
+      "different thing: the model that carries a realtime socket is not the model that answers a",
+      "chat completion, and a client that opened the socket with `defaultModel` would be rejected by",
+      "the provider. Empty on every chain-lane row, because a plausible name there would invite",
+      "someone to try to use a socket that does not exist."
     ],
     "default": "local",
     "rows": [
@@ -218,9 +248,11 @@
         "requiresToken": false,
         "sendsDataOffMachine": false,
         "voice": "chain",
-        "doc": "An OpenAI-compatible server on this machine \u2014 Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device.",
+        "doc": "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device.",
         "keyHeader": "",
-        "keyPrefix": ""
+        "keyPrefix": "",
+        "defaultVoiceModel": "",
+        "defaultVoice": ""
       },
       {
         "kind": "openai",
@@ -232,7 +264,9 @@
         "voice": "realtime",
         "doc": "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved.",
         "keyHeader": "Authorization",
-        "keyPrefix": "Bearer "
+        "keyPrefix": "Bearer ",
+        "defaultVoiceModel": "gpt-realtime",
+        "defaultVoice": "cedar"
       },
       {
         "kind": "anthropic",
@@ -244,7 +278,9 @@
         "voice": "chain",
         "doc": "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved.",
         "keyHeader": "x-api-key",
-        "keyPrefix": ""
+        "keyPrefix": "",
+        "defaultVoiceModel": "",
+        "defaultVoice": ""
       },
       {
         "kind": "sarvam",
@@ -254,9 +290,11 @@
         "requiresToken": false,
         "sendsDataOffMachine": true,
         "voice": "chain",
-        "doc": "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage \u2014 the reason this option exists, given where Saathi starts.",
+        "doc": "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts.",
         "keyHeader": "Authorization",
-        "keyPrefix": "Bearer "
+        "keyPrefix": "Bearer ",
+        "defaultVoiceModel": "",
+        "defaultVoice": ""
       },
       {
         "kind": "hosted",
@@ -268,7 +306,9 @@
         "voice": "realtime",
         "doc": "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything.",
         "keyHeader": "Authorization",
-        "keyPrefix": "Bearer "
+        "keyPrefix": "Bearer ",
+        "defaultVoiceModel": "gpt-realtime",
+        "defaultVoice": "cedar"
       }
     ]
   }

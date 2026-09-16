@@ -35,6 +35,10 @@ public class SharedFixtureTests
         Assert.Equal("http://192.168.1.9:11434", configuration.ProviderBaseUrl);
         Assert.Equal("sarvam-105b-conversations", configuration.Model);
         Assert.Equal("not-a-real-key", configuration.ApiKey);
+        Assert.Equal("not-a-real-openai-key", configuration.OpenaiKey);
+        Assert.Equal("not-a-real-anthropic-key", configuration.AnthropicKey);
+        Assert.Equal("not-a-real-voice-model", configuration.VoiceModel);
+        Assert.Equal("not-a-real-voice", configuration.Voice);
         Assert.Equal("https://backend.example.test", configuration.BackendUrl);
         Assert.Equal("not-a-real-token", configuration.Token);
     }

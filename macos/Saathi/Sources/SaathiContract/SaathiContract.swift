@@ -1,13 +1,13 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.5.0.
+// Contract version 0.6.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.5.0"
+    public static let contractVersion = "0.6.0"
 }
 
 /// One row per provider mode: where it runs, what it needs, and whether using it means
@@ -29,14 +29,19 @@ public struct SaathiProvider: Sendable, Equatable {
     /// How this provider carries a spoken turn. A capability, not a preference — see the
     /// schema's providers comment for why only some providers have a realtime socket.
     public let voice: VoiceLane
+    /// The realtime voice model, empty on every chain-lane row — see the schema's
+    /// providers comment for why this is not `defaultModel`.
+    public let defaultVoiceModel: String
+    /// The realtime voice's name, empty where there is no socket to speak over.
+    public let defaultVoice: String
     public let summary: String
 
     public static let all: [SaathiProvider] = [
-        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, keyHeader: "", keyPrefix: "", voice: .chain, summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
-        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .realtime, summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
-        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "x-api-key", keyPrefix: "", voice: .chain, summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
-        SaathiProvider(kind: .sarvam, defaultBaseURL: "https://api.sarvam.ai/v1", defaultModel: "sarvam-105b", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .chain, summary: "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
-        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .realtime, summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+        SaathiProvider(kind: .local, defaultBaseURL: "http://localhost:11434", defaultModel: "llama3.2", requiresKey: false, requiresToken: false, sendsDataOffMachine: false, keyHeader: "", keyPrefix: "", voice: .chain, defaultVoiceModel: "", defaultVoice: "", summary: "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        SaathiProvider(kind: .openai, defaultBaseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .realtime, defaultVoiceModel: "gpt-realtime", defaultVoice: "cedar", summary: "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        SaathiProvider(kind: .anthropic, defaultBaseURL: "https://api.anthropic.com", defaultModel: "claude-sonnet-5", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "x-api-key", keyPrefix: "", voice: .chain, defaultVoiceModel: "", defaultVoice: "", summary: "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        SaathiProvider(kind: .sarvam, defaultBaseURL: "https://api.sarvam.ai/v1", defaultModel: "sarvam-105b", requiresKey: true, requiresToken: false, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .chain, defaultVoiceModel: "", defaultVoice: "", summary: "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
+        SaathiProvider(kind: .hosted, defaultBaseURL: "https://api.saathi.dev", defaultModel: "", requiresKey: false, requiresToken: true, sendsDataOffMachine: true, keyHeader: "Authorization", keyPrefix: "Bearer ", voice: .realtime, defaultVoiceModel: "gpt-realtime", defaultVoice: "cedar", summary: "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
     ]
 
     /// The one header this provider needs, ready to set — or nil when it needs none.
@@ -156,18 +161,30 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var providerBaseUrl: String?
     /// Overrides the provider's default model.
     public var model: String?
-    /// Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers.
+    /// Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.
     public var apiKey: String?
+    /// Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers.
+    public var openaiKey: String?
+    /// Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today.
+    public var anthropicKey: String?
+    /// Overrides the realtime voice model. Distinct from model, which is what does the thinking.
+    public var voiceModel: String?
+    /// The realtime voice's name. Defaults to the provider row's.
+    public var voice: String?
     /// Overrides the hosted backend URL. Only used in hosted mode.
     public var backendUrl: String?
     /// Account token for the hosted backend. Only used in hosted mode.
     public var token: String?
 
-    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, backendUrl: String? = nil, token: String? = nil) {
+    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, backendUrl: String? = nil, token: String? = nil) {
         self.provider = provider
         self.providerBaseUrl = providerBaseUrl
         self.model = model
         self.apiKey = apiKey
+        self.openaiKey = openaiKey
+        self.anthropicKey = anthropicKey
+        self.voiceModel = voiceModel
+        self.voice = voice
         self.backendUrl = backendUrl
         self.token = token
     }
@@ -187,6 +204,38 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var resolvedModel: String {
         let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? providerRow.defaultModel : trimmed
+    }
+
+    /// The realtime voice model. Separate from `resolvedModel` on purpose: the socket is
+    /// opened with this one, and opening it with the thinking model is rejected by the
+    /// provider — which is exactly the bug this property exists to prevent.
+    public var resolvedVoiceModel: String {
+        let trimmed = voiceModel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? providerRow.defaultVoiceModel : trimmed
+    }
+
+    public var resolvedVoice: String {
+        let trimmed = voice?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? providerRow.defaultVoice : trimmed
+    }
+
+    /// The credential for a provider: its own vendor field first, then the legacy shared
+    /// `apiKey`. Vendor-specific wins, so a config holding both an OpenAI and an Anthropic
+    /// key is unambiguous — which is the whole reason the two fields exist. Providers that
+    /// need no key of their own get nil even when keys are present.
+    public func credential(for kind: ProviderKind) -> String? {
+        guard SaathiProvider.of(kind).requiresKey else { return nil }
+        let candidates: [String?]
+        switch kind {
+        case .openai: candidates = [openaiKey, apiKey]
+        case .anthropic: candidates = [anthropicKey, apiKey]
+        default: candidates = [apiKey]
+        }
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
     }
 
     /// The hosted backend unless the config names another one. Only meaningful in hosted mode.

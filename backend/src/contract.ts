@@ -1,8 +1,8 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.5.0.
+// Contract version 0.6.0.
 
-export const CONTRACT_VERSION = "0.5.0";
+export const CONTRACT_VERSION = "0.6.0";
 export const DEFAULT_BASE_URL = "https://api.saathi.dev";
 
 /** `~/.saathi/shell.json`. */
@@ -13,8 +13,16 @@ export type SaathiConfiguration = {
   providerBaseUrl?: string;
   /** Overrides the provider's default model. */
   model?: string;
-  /** Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers. */
+  /** Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working. */
   apiKey?: string;
+  /** Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers. */
+  openaiKey?: string;
+  /** Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today. */
+  anthropicKey?: string;
+  /** Overrides the realtime voice model. Distinct from model, which is what does the thinking. */
+  voiceModel?: string;
+  /** The realtime voice's name. Defaults to the provider row's. */
+  voice?: string;
   /** Overrides the hosted backend URL. Only used in hosted mode. */
   backendUrl?: string;
   /** Account token for the hosted backend. Only used in hosted mode. */

@@ -1,6 +1,6 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.5.0.
+// Contract version 0.6.0.
 
 #nullable enable
 using System.Linq;
@@ -13,7 +13,7 @@ namespace Saathi.Contract;
 public static class SaathiBackend
 {
     public const string DefaultBaseUrl = "https://api.saathi.dev";
-    public const string ContractVersion = "0.5.0";
+    public const string ContractVersion = "0.6.0";
 }
 
 /// <summary>One row per provider mode: where it runs, what it needs, and whether using it
@@ -28,15 +28,17 @@ public sealed record SaathiProvider(
     string KeyHeader,
     string KeyPrefix,
     VoiceLane Voice,
+    string DefaultVoiceModel,
+    string DefaultVoice,
     string Summary)
 {
     public static readonly IReadOnlyList<SaathiProvider> All =
     [
-        new(global::Saathi.Contract.ProviderKind.Local, "http://localhost:11434", "llama3.2", false, false, false, "", "", global::Saathi.Contract.VoiceLane.Chain, "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
-        new(global::Saathi.Contract.ProviderKind.Openai, "https://api.openai.com/v1", "gpt-4o-mini", true, false, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Realtime, "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
-        new(global::Saathi.Contract.ProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-5", true, false, true, "x-api-key", "", global::Saathi.Contract.VoiceLane.Chain, "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
-        new(global::Saathi.Contract.ProviderKind.Sarvam, "https://api.sarvam.ai/v1", "sarvam-105b", true, false, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Chain, "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
-        new(global::Saathi.Contract.ProviderKind.Hosted, "https://api.saathi.dev", "", false, true, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Realtime, "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
+        new(global::Saathi.Contract.ProviderKind.Local, "http://localhost:11434", "llama3.2", false, false, false, "", "", global::Saathi.Contract.VoiceLane.Chain, "", "", "An OpenAI-compatible server on this machine — Ollama, LM Studio, llama.cpp. No key, no account, nothing leaves the device."),
+        new(global::Saathi.Contract.ProviderKind.Openai, "https://api.openai.com/v1", "gpt-4o-mini", true, false, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Realtime, "gpt-realtime", "cedar", "Your own OpenAI key, held on your machine and sent straight to OpenAI. Saathi's servers are not involved."),
+        new(global::Saathi.Contract.ProviderKind.Anthropic, "https://api.anthropic.com", "claude-sonnet-5", true, false, true, "x-api-key", "", global::Saathi.Contract.VoiceLane.Chain, "", "", "Your own Anthropic key, held on your machine and sent straight to Anthropic. Saathi's servers are not involved."),
+        new(global::Saathi.Contract.ProviderKind.Sarvam, "https://api.sarvam.ai/v1", "sarvam-105b", true, false, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Chain, "", "", "Your own Sarvam AI key, sent straight to Sarvam. Indian-built models with real Indic-language coverage — the reason this option exists, given where Saathi starts."),
+        new(global::Saathi.Contract.ProviderKind.Hosted, "https://api.saathi.dev", "", false, true, true, "Authorization", "Bearer ", global::Saathi.Contract.VoiceLane.Realtime, "gpt-realtime", "cedar", "Saathi's hosted backend holds the provider keys; you hold an account token. For people who would rather not run or configure anything."),
     ];
 
     /// <summary>The one header this provider needs, ready to set — or null when it needs none.
@@ -162,9 +164,25 @@ public sealed class SaathiConfiguration
     [JsonPropertyName("model")]
     public string? Model { get; set; }
 
-    /// <summary>Your own provider key, for the openai and anthropic modes. Never sent to Saathi's servers.</summary>
+    /// <summary>Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.</summary>
     [JsonPropertyName("apiKey")]
     public string? ApiKey { get; set; }
+
+    /// <summary>Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers.</summary>
+    [JsonPropertyName("openaiKey")]
+    public string? OpenaiKey { get; set; }
+
+    /// <summary>Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today.</summary>
+    [JsonPropertyName("anthropicKey")]
+    public string? AnthropicKey { get; set; }
+
+    /// <summary>Overrides the realtime voice model. Distinct from model, which is what does the thinking.</summary>
+    [JsonPropertyName("voiceModel")]
+    public string? VoiceModel { get; set; }
+
+    /// <summary>The realtime voice's name. Defaults to the provider row's.</summary>
+    [JsonPropertyName("voice")]
+    public string? Voice { get; set; }
 
     /// <summary>Overrides the hosted backend URL. Only used in hosted mode.</summary>
     [JsonPropertyName("backendUrl")]
@@ -186,6 +204,30 @@ public sealed class SaathiConfiguration
 
     public string ResolvedModel =>
         string.IsNullOrWhiteSpace(Model) ? ProviderRow.DefaultModel : Model!.Trim();
+
+    /// <summary>The realtime voice model. Separate from ResolvedModel on purpose: the socket is
+    /// opened with this one, and opening it with the thinking model is rejected by the provider.</summary>
+    public string ResolvedVoiceModel =>
+        string.IsNullOrWhiteSpace(VoiceModel) ? ProviderRow.DefaultVoiceModel : VoiceModel!.Trim();
+
+    public string ResolvedVoice =>
+        string.IsNullOrWhiteSpace(Voice) ? ProviderRow.DefaultVoice : Voice!.Trim();
+
+    /// <summary>The credential for a provider: its own vendor field first, then the legacy
+    /// shared ApiKey. Providers needing no key of their own get null.</summary>
+    public string? Credential(ProviderKind kind)
+    {
+        if (!SaathiProvider.Of(kind).RequiresKey) return null;
+        var candidates = kind switch
+        {
+            global::Saathi.Contract.ProviderKind.Openai => new[] { OpenaiKey, ApiKey },
+            global::Saathi.Contract.ProviderKind.Anthropic => new[] { AnthropicKey, ApiKey },
+            _ => new[] { ApiKey },
+        };
+        foreach (var candidate in candidates)
+            if (!string.IsNullOrWhiteSpace(candidate)) return candidate!.Trim();
+        return null;
+    }
 
     /// <summary>The hosted backend unless the config names another one. Only meaningful in hosted mode.</summary>
     public string ResolvedBaseUrl =>

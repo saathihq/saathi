@@ -378,6 +378,10 @@ final class SharedFixtureTests: XCTestCase {
         XCTAssertEqual(configuration.providerBaseUrl, "http://192.168.1.9:11434")
         XCTAssertEqual(configuration.model, "sarvam-105b-conversations")
         XCTAssertEqual(configuration.apiKey, "not-a-real-key")
+        XCTAssertEqual(configuration.openaiKey, "not-a-real-openai-key")
+        XCTAssertEqual(configuration.anthropicKey, "not-a-real-anthropic-key")
+        XCTAssertEqual(configuration.voiceModel, "not-a-real-voice-model")
+        XCTAssertEqual(configuration.voice, "not-a-real-voice")
         XCTAssertEqual(configuration.backendUrl, "https://backend.example.test")
         XCTAssertEqual(configuration.token, "not-a-real-token")
     }
@@ -406,5 +410,123 @@ final class SharedFixtureTests: XCTestCase {
             let decoded = try JSONDecoder().decode(SaathiConfiguration.self, from: encoded)
             XCTAssertEqual(decoded.provider, kind)
         }
+    }
+}
+
+// MARK: - Two keys at once
+
+/// The reason the two vendor fields exist: a config holding both an OpenAI and an Anthropic key
+/// must be unambiguous about which one a given provider gets. The old single `apiKey` could not
+/// express that, and guessing from the key's prefix would be a parlour trick, not a contract.
+final class CredentialResolutionTests: XCTestCase {
+
+    func testEachVendorFieldFeedsItsOwnProvider() {
+        let both = SaathiConfiguration(openaiKey: "sk-openai", anthropicKey: "sk-ant-key")
+        XCTAssertEqual(both.credential(for: .openai), "sk-openai")
+        XCTAssertEqual(both.credential(for: .anthropic), "sk-ant-key")
+    }
+
+    /// Existing configs in the wild have only `apiKey`. They must keep working, whichever provider
+    /// they named — this is the compatibility promise of keeping the field at all.
+    func testTheLegacySharedKeyIsStillReadWhenThereIsNoVendorField() {
+        let legacy = SaathiConfiguration(apiKey: "sk-legacy")
+        XCTAssertEqual(legacy.credential(for: .openai), "sk-legacy")
+        XCTAssertEqual(legacy.credential(for: .anthropic), "sk-legacy")
+    }
+
+    func testAVendorFieldWinsOverTheLegacyOne() {
+        let mixed = SaathiConfiguration(apiKey: "sk-legacy", openaiKey: "sk-vendor")
+        XCTAssertEqual(mixed.credential(for: .openai), "sk-vendor")
+    }
+
+    /// Whitespace and an empty string are both "no key". A pasted key routinely arrives with a
+    /// trailing newline, and an empty-but-present field must not read as a configured credential.
+    func testBlankIsNotACredential() {
+        XCTAssertNil(SaathiConfiguration(openaiKey: "   ").credential(for: .openai))
+        XCTAssertNil(SaathiConfiguration().credential(for: .openai))
+        XCTAssertEqual(SaathiConfiguration(openaiKey: " sk-padded \n").credential(for: .openai), "sk-padded")
+    }
+
+    /// Providers that need no key of their own get none, even when keys are present.
+    func testLocalAndHostedTakeNoVendorKey() {
+        let both = SaathiConfiguration(openaiKey: "sk-openai", anthropicKey: "sk-ant-key")
+        XCTAssertNil(both.credential(for: .local))
+        XCTAssertNil(both.credential(for: .hosted))
+    }
+}
+
+/// The realtime socket is opened with a VOICE model, which is a different thing from the model that
+/// does the thinking. Conflating them is the bug this separation exists to make impossible.
+final class VoiceModelResolutionTests: XCTestCase {
+
+    func testOpenAIHasBothAThinkingModelAndADistinctVoiceModel() {
+        let openai = SaathiConfiguration(provider: .openai)
+        XCTAssertEqual(openai.resolvedModel, "gpt-4o-mini")
+        XCTAssertEqual(openai.resolvedVoiceModel, "gpt-realtime")
+        XCTAssertNotEqual(openai.resolvedModel, openai.resolvedVoiceModel)
+    }
+
+    func testTheVoiceModelCanBeOverriddenWithoutTouchingTheThinkingModel() {
+        let pinned = SaathiConfiguration(provider: .openai, model: "gpt-4o", voiceModel: "gpt-realtime-mini")
+        XCTAssertEqual(pinned.resolvedModel, "gpt-4o")
+        XCTAssertEqual(pinned.resolvedVoiceModel, "gpt-realtime-mini")
+    }
+
+    func testTheDefaultVoiceIsWarmAndOverridable() {
+        XCTAssertEqual(SaathiConfiguration(provider: .openai).resolvedVoice, "cedar")
+        XCTAssertEqual(SaathiConfiguration(provider: .openai, voice: "marin").resolvedVoice, "marin")
+    }
+
+    /// Chain-lane providers have no realtime socket, so they have no voice model. An empty string
+    /// rather than a plausible-looking default: a name here would invite someone to try to use it.
+    func testChainLaneProvidersDeclareNoVoiceModel() {
+        XCTAssertEqual(SaathiConfiguration(provider: .anthropic).resolvedVoiceModel, "")
+        XCTAssertEqual(SaathiConfiguration(provider: .local).resolvedVoiceModel, "")
+    }
+
+    func testEveryRealtimeProviderHasAVoiceModelAndEveryChainProviderDoesNot() {
+        for row in SaathiProvider.all {
+            if row.voice == .realtime {
+                XCTAssertFalse(row.defaultVoiceModel.isEmpty, "\(row.kind) opens a socket but names no voice model")
+                XCTAssertFalse(row.defaultVoice.isEmpty, "\(row.kind) opens a socket but names no voice")
+            } else {
+                XCTAssertTrue(row.defaultVoiceModel.isEmpty, "\(row.kind) has no socket to use a voice model on")
+            }
+        }
+    }
+}
+
+/// The new fields have to survive the file, or the Setup tab writes keys that vanish on restart.
+final class ConfigurationRoundTripTests: XCTestCase {
+
+    func testEveryNewFieldSurvivesAWriteAndARead() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("saathi-roundtrip-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let written = SaathiConfiguration(
+            provider: .openai, model: "gpt-4o", openaiKey: "sk-o", anthropicKey: "sk-a",
+            voiceModel: "gpt-realtime", voice: "cedar")
+        try ConfigurationStore.save(written, to: url)
+        let read = try ConfigurationStore.load(from: url)
+
+        XCTAssertEqual(read.provider, .openai)
+        XCTAssertEqual(read.model, "gpt-4o")
+        XCTAssertEqual(read.openaiKey, "sk-o")
+        XCTAssertEqual(read.anthropicKey, "sk-a")
+        XCTAssertEqual(read.voiceModel, "gpt-realtime")
+        XCTAssertEqual(read.voice, "cedar")
+    }
+
+    /// A file holding two provider keys is worth more to an attacker than one holding a single key.
+    /// The mode was already right; this test is here so it stays right.
+    func testTheSavedFileIsOwnerReadableOnly() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("saathi-mode-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try ConfigurationStore.save(SaathiConfiguration(openaiKey: "sk-o"), to: url)
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.int16Value, 0o600)
     }
 }
