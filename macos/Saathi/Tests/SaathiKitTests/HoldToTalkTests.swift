@@ -37,3 +37,21 @@ final class HoldToTalkTrackerTests: XCTestCase {
         XCTAssertEqual(HoldToTalkCombination.controlOption.spoken, "control and option")
     }
 }
+
+final class HoldToTalkMonitorTests: XCTestCase {
+    func testStopBeforeStartIsANoOpAndDeinitIsSafe() {
+        var monitor: HoldToTalkMonitor? = HoldToTalkMonitor { _ in }
+        monitor?.stop()
+        monitor = nil   // deinit without a tap: nothing to release, no crash
+    }
+    func testStartWithoutTheGrantRefusesOrInstalls() throws {
+        let monitor = HoldToTalkMonitor { _ in }
+        do {
+            try monitor.start()
+            XCTAssertTrue(HoldToTalkMonitor.isPermitted(), "installed, so the grant must be present")
+            monitor.stop()
+        } catch HoldToTalkError.notPermitted {
+            XCTAssertFalse(HoldToTalkMonitor.isPermitted())
+        }
+    }
+}

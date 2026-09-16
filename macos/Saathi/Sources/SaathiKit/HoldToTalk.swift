@@ -72,12 +72,21 @@ public enum HoldToTalkError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-/// The event tap. Main-thread only: the run-loop source is added to the main run loop and the
-/// callback runs there.
+/// What the tap actually points at. It is retained by the tap for as long as the tap exists and
+/// only weakly reaches the monitor, so a callback that races the monitor's deinit finds nil
+/// instead of freed memory.
+private final class TapRelay {
+    weak var monitor: HoldToTalkMonitor?
+    init(_ monitor: HoldToTalkMonitor) { self.monitor = monitor }
+}
+
+/// The event tap. Main-thread only for `start()` (enforced) and `handle()`; `stop()` and
+/// `deinit` may run anywhere because they never touch the tracker and the relay is released
+/// on the main queue.
 public final class HoldToTalkMonitor {
 
     public static func isPermitted() -> Bool {
-        CGPreflightListenEventAccess()
+        Permissions.status(of: .inputMonitoring) == .granted
     }
 
     /// Shows the system prompt the first time; afterwards the answer is remembered and this just
@@ -90,6 +99,7 @@ public final class HoldToTalkMonitor {
     private let onEvent: (HoldToTalkEvent) -> Void
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var relay: UnsafeMutableRawPointer?
 
     public init(combination: HoldToTalkCombination = .controlOption, onEvent: @escaping (HoldToTalkEvent) -> Void) {
         self.tracker = HoldToTalkTracker(combination: combination)
@@ -97,11 +107,12 @@ public final class HoldToTalkMonitor {
     }
 
     public func start() throws {
+        precondition(Thread.isMainThread, "HoldToTalkMonitor is main-thread only")
         guard tap == nil else { return }
         guard Self.isPermitted() else { throw HoldToTalkError.notPermitted }
 
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
-        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        let refcon = Unmanaged.passRetained(TapRelay(self)).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -109,15 +120,17 @@ public final class HoldToTalkMonitor {
             eventsOfInterest: mask,
             callback: { _, type, event, refcon in
                 if let refcon {
-                    Unmanaged<HoldToTalkMonitor>.fromOpaque(refcon).takeUnretainedValue().handle(type: type, event: event)
+                    Unmanaged<TapRelay>.fromOpaque(refcon).takeUnretainedValue().monitor?.handle(type: type, event: event)
                 }
                 return Unmanaged.passUnretained(event)
             },
             userInfo: refcon
         ) else {
+            Unmanaged<TapRelay>.fromOpaque(refcon).release()
             throw HoldToTalkError.tapFailed
         }
         self.tap = tap
+        self.relay = refcon
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         self.source = source
@@ -127,8 +140,12 @@ public final class HoldToTalkMonitor {
     public func stop() {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        if let relay {
+            DispatchQueue.main.async { Unmanaged<TapRelay>.fromOpaque(relay).release() }
+        }
         tap = nil
         source = nil
+        relay = nil
     }
 
     deinit { stop() }
