@@ -11,6 +11,7 @@ import AVFoundation
 import Foundation
 import os
 import XCTest
+import SaathiContract
 @testable import SaathiKit
 
 final class UtteranceWaiterTests: XCTestCase {
@@ -72,5 +73,30 @@ final class SystemSpeakerTests: XCTestCase {
 
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
         XCTAssertLessThan(elapsed, 5, "overlapping speak calls did not both return within 5 s")
+    }
+}
+
+final class ObservedSpeakerTests: XCTestCase {
+
+    func testItReportsStartAndStopAroundTheInnerSpeaker() async {
+        let inner = RecordingSpeaker()
+        let events = OSAllocatedUnfairLock(initialState: [Bool]())
+        let speaker = ObservedSpeaker(inner) { speaking in events.withLock { $0.append(speaking) } }
+        await speaker.speak("hello", tone: .calm)
+        XCTAssertEqual(events.withLock { $0 }, [true, false])
+        XCTAssertEqual(inner.lines, [RecordingSpeaker.Line(text: "hello", tone: .calm)])
+    }
+
+    func testStopIsReportedEvenIfTheInnerSpeakerIsCancelled() async {
+        struct Slow: Speaker {
+            func speak(_ text: String, tone: Tone) async { try? await Task.sleep(nanoseconds: 500_000_000) }
+        }
+        let events = OSAllocatedUnfairLock(initialState: [Bool]())
+        let speaker = ObservedSpeaker(Slow()) { speaking in events.withLock { $0.append(speaking) } }
+        let task = Task { await speaker.speak("x", tone: .neutral) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        task.cancel()
+        await task.value
+        XCTAssertEqual(events.withLock { $0 }, [true, false])
     }
 }

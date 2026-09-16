@@ -18,17 +18,12 @@ import SaathiContract
 /// three companions.
 public final class SystemSpeaker: Speaker, @unchecked Sendable {
     private let synthesizer = AVSpeechSynthesizer()
-
-    private struct State {
-        var inFlight: Task<Void, Never>?
-    }
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let queue = SerialTaskQueue()
 
     public init() {}
 
-    // Two overlapping calls run one after the other instead of the first being stranded: each
-    // call waits for whatever is already in flight, then registers itself as the new in-flight
-    // task before awaiting its own turn.
+    // Two overlapping calls run one after the other instead of the first being stranded, and a
+    // caller's cancellation reaches the utterance it is waiting on (see `say`).
     public func speak(_ text: String, tone: Tone) async {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
@@ -45,11 +40,7 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
             utterance.pitchMultiplier = 1.0
         }
 
-        let previous = state.withLock { $0.inFlight }
-        await previous?.value
-        let task = Task { await self.say(utterance) }
-        state.withLock { $0.inFlight = task }
-        await task.value
+        await queue.run { await self.say(utterance) }
     }
 
     // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
@@ -66,6 +57,25 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
             synthesizer.stopSpeaking(at: .immediate)   // the delegate's didCancel resumes the waiter
         }
         synthesizer.delegate = nil
+    }
+}
+
+/// Wraps any speaker and reports when speech starts and stops, so the companion's face can follow
+/// its own voice without the speaker protocol knowing about faces. Stop is reported on every exit,
+/// including cancellation.
+public final class ObservedSpeaker: Speaker, @unchecked Sendable {
+    private let inner: any Speaker
+    private let onSpeakingChanged: @Sendable (Bool) -> Void
+
+    public init(_ inner: any Speaker, onSpeakingChanged: @escaping @Sendable (Bool) -> Void) {
+        self.inner = inner
+        self.onSpeakingChanged = onSpeakingChanged
+    }
+
+    public func speak(_ text: String, tone: Tone) async {
+        onSpeakingChanged(true)
+        defer { onSpeakingChanged(false) }
+        await inner.speak(text, tone: tone)
     }
 }
 
