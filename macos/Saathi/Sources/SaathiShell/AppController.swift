@@ -35,6 +35,10 @@ public final class AppController {
     private var performer: ActionPerformer!
     private var session: (any VoiceSession)?
     private var turns: TurnCoordinator!
+    /// The in-flight `session.start(callbacks:)` call, held so a reconfigure can cancel it before
+    /// stopping the session it belongs to — otherwise a start still resolving a connection can
+    /// resume and open a socket after the replacement session already exists.
+    private var startTask: Task<Void, Never>?
     private var monitor: HoldToTalkMonitor?
     private var ticker: Timer?
     private var ticks = 0
@@ -161,9 +165,15 @@ public final class AppController {
                 },
                 onStatus: { [weak self] status in Task { @MainActor in self?.handle(.status(status)) } }
             )
-            Task {
+            // Cancelling any previous start before racing a fresh one in keeps at most one
+            // start in flight for this controller — see `startTask`'s doc comment.
+            startTask?.cancel()
+            startTask = Task {
                 do {
                     try await session.start(callbacks: callbacks)
+                } catch is CancellationError {
+                    // Superseded by a reconfigure; the session this call belonged to is already
+                    // gone, so there is nothing left to report.
                 } catch {
                     await MainActor.run { self.handle(.failure(error.localizedDescription)) }
                 }
@@ -199,16 +209,26 @@ public final class AppController {
         reconfiguring = true
         defer { reconfiguring = false }
 
-        if let turns, turns.isOpen {
-            _ = turns.close()
-            handle(.keysReleased)
-            // The coordinator already knows when the queued end call has actually finished, so
-            // wait on that rather than guess at a duration: a timed sleep is wrong in both
-            // directions — a stall on a turn that closed instantly, and a race with the teardown
-            // below on a turn that took longer than the guess.
+        if let turns {
+            if turns.isOpen {
+                _ = turns.close()
+                handle(.keysReleased)
+            }
+            // Drain whatever end call is queued, whether or not a turn is open right now.
+            // `close()` marks `isOpen` false synchronously, but the end call it queues can still be
+            // running long after that flips — and gating this wait behind `isOpen` skipped it in
+            // exactly the ordinary case that matters: keys are usually already released by the time
+            // someone opens Setup and hits Save, so `isOpen` already reads false while `endTurn()`
+            // is still finishing underneath. Waiting unconditionally is free when nothing is
+            // queued — `work` is never nilled, so awaiting a finished task returns immediately.
             await turns.settle()
         }
 
+        // The old session's start may still be resolving a connection or opening a socket; cancel
+        // it before stopping the session, or it can resume afterwards and open a second live
+        // socket after the new session already exists — the same hazard this ordering exists to
+        // prevent, entered from the start side instead of the stop side.
+        startTask?.cancel()
         speaker.stop()
         await session?.stop()
         session = nil
@@ -259,6 +279,16 @@ public final class AppController {
         return (hasKey || hasToken) ? .home : .setup
     }
 
+    /// What `onSaveKeys` should actually save: the field's text if there is any, the key already on
+    /// disk otherwise. The Setup fields live in view-local `@State`, destroyed whenever the view
+    /// leaves the tree — saving switches to Home, and the island collapsing on hover-out tears down
+    /// the whole tree — while a `.saved` verdict survives in the long-lived `IslandModel`. Without
+    /// this fallback, reopening Setup with an empty field but a remembered "saved" verdict reads as
+    /// "no key" and erases the one that already worked.
+    static func effectiveKey(field: String, stored: String?) -> String {
+        field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (stored ?? "") : field
+    }
+
     // MARK: hold to talk
 
     /// A no-op when a monitor is already installed or Input Monitoring is not yet granted. Called
@@ -282,6 +312,11 @@ public final class AppController {
                     }
                     if turns.open() { self.handle(.keysHeld) }
                 case .ended:
+                    // Unguarded on purpose: `reconfigure` closes any open turn itself,
+                    // synchronously, before its first await, so by the time `reconfiguring` is
+                    // observably true here `turns.isOpen` already reads false and this is a no-op.
+                    // `open()` has exactly one other call site (`menu.onTalk`, guarded above) — if
+                    // a future await ever lands above that `close()`, this comment is the tripwire.
                     if turns.close() { self.handle(.keysReleased) }
                 }
             }
@@ -442,11 +477,24 @@ public final class AppController {
 
         actions.onSaveKeys = { [weak self] openAIKey, anthropicKey in
             guard let self, let notch = self.notch else { return }
+            // Refused coherently rather than half-applied: without this a second Save during an
+            // in-flight reconfigure could still write the file, flip the fields to `.saved` and
+            // switch to Home, only to have the reconfigure it raced drop on the floor — leaving
+            // disk naming one provider and the island showing another until relaunch.
+            guard !self.reconfiguring else {
+                self.reportReconfiguring()
+                return
+            }
+
+            // The field's text if there is any, the key already on disk otherwise — see
+            // `effectiveKey`'s doc comment for why an empty field must not mean "no key".
+            let effectiveOpenAI = Self.effectiveKey(field: openAIKey, stored: self.configuration.openaiKey)
+            let effectiveAnthropic = Self.effectiveKey(field: anthropicKey, stored: self.configuration.anthropicKey)
             let plan = SetupPlan.make(
-                openAIKeyValid: notch.model.openAIKeyState.isValid,
-                anthropicKeyValid: notch.model.anthropicKeyState.isValid)
+                openAIKeyValid: notch.model.openAIKeyState.isValid && !effectiveOpenAI.isEmpty,
+                anthropicKeyValid: notch.model.anthropicKeyState.isValid && !effectiveAnthropic.isEmpty)
             let updated = plan.applied(
-                to: self.configuration, openAIKey: openAIKey, anthropicKey: anthropicKey)
+                to: self.configuration, openAIKey: effectiveOpenAI, anthropicKey: effectiveAnthropic)
 
             do {
                 try ConfigurationStore.save(updated, to: ConfigurationStore.defaultPath())
@@ -456,12 +504,13 @@ public final class AppController {
             }
 
             // Saved keys come back only as their last four characters; the full key is never put
-            // back into a field.
+            // back into a field. Masked from the effective key, not the field, so a retained
+            // stored key still shows its real suffix instead of the empty field's generic mask.
             if plan.provider == .openai || plan.storedButUnused.contains(.openai) {
-                notch.model.openAIKeyState = .saved(masked: IslandModel.masked(openAIKey))
+                notch.model.openAIKeyState = .saved(masked: IslandModel.masked(effectiveOpenAI))
             }
             if plan.provider == .anthropic || plan.storedButUnused.contains(.anthropic) {
-                notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(anthropicKey))
+                notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(effectiveAnthropic))
             }
             notch.model.planExplanation = plan.explanation
             notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)

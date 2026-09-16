@@ -161,4 +161,24 @@ final class SetupPresentationTests: XCTestCase {
         // disk can tell us that, so an empty config still opens on Setup.
         XCTAssertEqual(AppController.openingTab(for: SaathiConfiguration(provider: .local)), .setup)
     }
+
+    /// Regression for the bug where reopening Setup with an empty field but a remembered `.saved`
+    /// verdict erased a working key: the Setup fields live in view-local state that does not
+    /// survive the view leaving the tree, so an empty field must fall back to what is already on
+    /// disk rather than reading as "no key".
+    func testAnEmptyFieldFallsBackToTheStoredKey() {
+        XCTAssertEqual(AppController.effectiveKey(field: "", stored: "sk-existing"), "sk-existing")
+        XCTAssertEqual(AppController.effectiveKey(field: "   ", stored: "sk-existing"), "sk-existing")
+    }
+
+    func testANonEmptyFieldWinsOverAnyStoredKey() {
+        XCTAssertEqual(AppController.effectiveKey(field: "sk-new", stored: "sk-old"), "sk-new")
+        XCTAssertEqual(AppController.effectiveKey(field: "sk-new", stored: nil), "sk-new")
+    }
+
+    /// Nothing typed and nothing stored is genuinely no key — the fallback must not invent one.
+    func testNoFieldAndNoStoredKeyIsGenuinelyEmpty() {
+        XCTAssertEqual(AppController.effectiveKey(field: "", stored: nil), "")
+        XCTAssertEqual(AppController.effectiveKey(field: "  ", stored: ""), "")
+    }
 }
