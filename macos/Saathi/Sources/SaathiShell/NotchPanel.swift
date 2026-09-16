@@ -125,7 +125,10 @@ public final class NotchPanel: NSPanel {
         }
     }
 
-    /// Recompute the geometry when the pointer moves to another display.
+    /// Recompute the geometry for a display: the pointer has moved to another one, or the
+    /// displays themselves have changed. The geometry is always recomputed from the screen that
+    /// is passed and compared by value, so the same screen object with a new frame, safe area or
+    /// menu-bar band re-lays the island, and an unchanged one costs nothing.
     public func moveTo(screen: NSScreen) {
         let next = Self.geometry(of: screen)
         guard next != geometry else { return }

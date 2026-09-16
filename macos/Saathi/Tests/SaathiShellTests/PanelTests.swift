@@ -176,6 +176,16 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.mascot.accessibilityLabel(), "Thinking")
     }
 
+    /// A display change re-lays the island on whatever screen is main now. The change itself
+    /// cannot be staged in a test, but the call the notification makes can.
+    func testLayingTheIslandOutAgainOnTheSameScreenKeepsItAtTheTopOfThatScreen() throws {
+        let (panel, screen) = try island()
+        panel.moveTo(screen: screen)
+        XCTAssertEqual(panel.frame.maxY, screen.frame.maxY, accuracy: 0.5)
+        XCTAssertEqual(panel.frame.width, NotchPanel.openWidth)
+        XCTAssertEqual(panel.islandState, .collapsed)
+    }
+
     // MARK: the two kinds of display — the look the user rejected lived here
 
     func testOnADisplayWithoutANotchCollapsedIsNothingButTheHandle() throws {

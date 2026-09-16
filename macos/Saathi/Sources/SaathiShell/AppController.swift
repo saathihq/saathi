@@ -34,6 +34,7 @@ public final class AppController {
     private var monitor: HoldToTalkMonitor?
     private var ticker: Timer?
     private var permissionPoll: Timer?
+    private var screenObserver: NSObjectProtocol?
 
     public init() throws {
         configuration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
@@ -64,6 +65,28 @@ public final class AppController {
         startVoice()
         startHoldToTalkIfPossible()
         refreshPermissions()
+        observeScreenChanges()
+    }
+
+    deinit {
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+    }
+
+    /// A display arriving or leaving, a resolution change, a menu bar that starts hiding itself:
+    /// all of them move the notch the island hangs in, and none of them move the pointer, so the
+    /// poll that follows the pointer between displays would not notice. Lay the island out again
+    /// on the screen that is now the main one.
+    private func observeScreenChanges() {
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+                self.notch?.moveTo(screen: screen)
+            }
+        }
     }
 
     // MARK: events
