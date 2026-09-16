@@ -42,7 +42,7 @@ for argument in "$@"; do
   case "$argument" in
     --no-notarize) NOTARIZE=0 ;;
     --adhoc)       SIGN_IDENTITY="-"; NOTARIZE=0 ;;
-    -h|--help)     sed -n '2,40p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)     sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $argument" >&2; exit 2 ;;
   esac
 done

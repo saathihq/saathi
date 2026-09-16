@@ -109,6 +109,8 @@ public struct CompanionStateMachine: Equatable, Sendable {
             settleAt = now + idleDelay
         case let .action(action):
             if case let .showStep(step) = action {
+                // `index >= total`, including a zero or overshooting total, celebrates; the
+                // contract validates indices upstream.
                 state = step.index >= step.total
                     ? .celebrating
                     : .showingStep(index: step.index, total: step.total)

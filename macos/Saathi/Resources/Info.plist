@@ -2,18 +2,26 @@
 <!--
     Info.plist for Saathi.app.
 
-    The reason this file exists at all, rather than shipping the bare `saathi` binary: a
-    command-line executable has NO main bundle, and macOS requires the usage-description strings
-    below to live in the main bundle before it will let a process ask for the microphone or for
-    speech recognition. Probed on the loose binary, the answers were:
+    The bundle's main executable is SaathiApp, the menu-bar app: LSUIElement is true, so there is
+    no Dock tile, and it is what LaunchServices launches. The `saathi` CLI ships beside it at
+    Contents/MacOS/saathi for the Homebrew cask's symlink onto PATH; the bundle never launches it.
+
+    The reason any of this is a bundle at all: a command-line executable has NO main bundle, and
+    macOS requires the usage-description strings below to live in the main bundle before it will
+    let a process ask for the microphone or for speech recognition. Probed on the loose binary,
+    the answers were:
 
         main bundle id:                       none — not a bundle
         NSSpeechRecognitionUsageDescription:  ABSENT
         NSMicrophoneUsageDescription:         ABSENT
 
     So the chain voice lane — which is the DEFAULT lane, the one that works with no key — cannot
-    ask for what it needs unless the executable is inside a bundle. A notarized loose binary would
-    have looked finished and still not been able to listen.
+    ask for what it needs unless the executable is inside a bundle.
+
+    Launching through LaunchServices — `open Saathi.app`, or double-clicking it — is also what
+    makes a permission prompt attributed to Saathi rather than to whatever terminal started a
+    process: TCC attributes a prompt to the RESPONSIBLE process, and running the CLI binary
+    straight from a shell does not get that for free.
 
     The strings themselves matter more here than in most apps. Someone deciding whether to let a
     companion hear them deserves the real answer in the sentence macOS shows, not a generic one —

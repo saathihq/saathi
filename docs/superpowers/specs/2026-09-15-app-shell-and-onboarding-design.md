@@ -40,10 +40,10 @@ things to fit its own promises:
 | Target | Kind | Depends on | Purpose |
 |---|---|---|---|
 | `SaathiContract` | library | — | Generated. Gains the new config fields and the trial route. |
-| `SaathiKit` | library | Contract | Unchanged in role. Gains `CompanionState`, the state-to-expression table, the hold-to-talk monitor, permission checks, the trial client, and the onboarding model. All testable without a window. The state-to-expression table lives in `SaathiShell`, a new library between the kit and the character, because the kit cannot see `MascotExpression`. |
+| `SaathiKit` | library | Contract | Unchanged in role. Gains `CompanionState`, the hold-to-talk monitor, permission checks, the trial client, and the onboarding model. All testable without a window. The state-to-expression table lives in `SaathiShell`, a new library between the kit and the character, because the kit cannot see `MascotExpression`. |
 | `SaathiMascot` | library | — | Draws the character with Core Animation from `mascot.json`. Knows nothing about voice or Saathi. |
 | `SaathiShell` | library | Kit, Mascot | The app's testable pieces: state-to-face table, panel geometry, the panels, the menu, the controller. |
-| `SaathiApp` | executable | Kit, Mascot | The shell: menu bar, notch panel, companion panel, onboarding windows. AppKit, no storyboard. |
+| `SaathiApp` | executable | Shell | The shell: menu bar, notch panel, companion panel, onboarding windows. AppKit, no storyboard. Everything testable lives in `SaathiShell`; this target is the `main.swift` that starts it. |
 | `saathi` | executable | Kit | The existing CLI, unchanged. Ships inside the bundle next to `SaathiApp`. |
 
 `SaathiApp` is the bundle's `CFBundleExecutable`. `LSUIElement` stays true: no Dock tile, the app
@@ -114,18 +114,38 @@ Denied is a terminal state the UI explains, with a button to open the right Syst
 
 - **Menu-bar item.** The 16 px pointer icon. Menu: the state word, Talk (press to start, press to
   stop), Companion on/off, Start at login on/off, Provider…, Run onboarding again, Quit.
-- **Notch panel.** A borderless, non-activating `NSPanel` at `.statusBar` level, centred on the
-  screen's top edge, sized to the notch when `NSScreen.main.safeAreaInsets.top > 0`, otherwise a
-  180 pt wide pill under the menu-bar item. Collapsed it shows the mascot at 22 pt and the state
-  word. Expanded it holds one onboarding step, a permission ask, or a tip with buttons.
-- **Companion panel.** A 72 pt square, transparent, click-through (`ignoresMouseEvents`),
-  non-activating `NSPanel` at `.floating` level, on every Space, following the pointer with a
-  fixed offset down and to the right, eased so it trails rather than jitters. Hidden while the
-  notch panel is expanded and during onboarding cards. The mascot looks toward the pointer.
-  Accessibility label is the state word, so VoiceOver reads what the face shows.
+- **The island.** A borderless, non-activating, click-through `NSPanel` at `.popUpMenu` level, hanging
+  from the top edge of the screen the pointer is on, centred on the notch. Its window is always the
+  size of the open island; what changes is the black body laid out inside it, so the panel never
+  resizes over the menu bar. Collapsed it shows nothing: on a display with a hardware notch the body
+  is exactly the notch, black over black hardware; on a display without one the body is hidden and a
+  44 × 6 pt capsule handle, inset 3 pt from the top edge, marks where to reach (no handle at all
+  when there is no menu-bar band to sit in). Taking the pointer to the top of the screen opens the
+  full island (320 pt wide, 96 pt of content below the notch) at once: hover is polled from
+  `NSEvent.mouseLocation` every 50 ms against the island's rect grown by 6 pt collapsed and 14 pt
+  open, and leaving arms a 400 ms grace before it closes. While Saathi is listening, thinking,
+  speaking, showing a step, alerting or powering down, the island opens a compact strip (240 pt
+  wide, 56 pt of content) by itself and collapses 400 ms after it goes idle; the pointer always wins
+  and opens it fully. Open, it holds the mascot at 44 pt and the state word in white; collapsed, the
+  mascot is removed from the view so it does not animate. One panel exists and it follows the
+  pointer between displays while collapsed, and re-lays itself when displays change. Expanded
+  onboarding content (a step, a permission ask, a tip with buttons) is slices 3 and 4 and reuses the
+  open island.
+- **The pointer buddy.** A 48 pt square, transparent, click-through (`ignoresMouseEvents`),
+  non-activating `NSPanel` at `.screenSaver` level, on every Space, following the pointer 35 pt right
+  and 25 pt below with an exponential ease (response 0.07 s) so it trails rather than jitters, and
+  not moving its window at all while the pointer is still. It draws a 16 pt equilateral triangle in
+  `#F0452B` rotated −35°, with a glow of its own colour: radius 8 at rest, 12 while thinking,
+  breathing between 1.0 and 0.6 opacity at 1 Hz while listening. It carries no face; its
+  accessibility label is the state word, so VoiceOver reads what the island shows.
 - **Onboarding cards.** A centred, key `NSWindow` with a dark translucent background and a step
   dot row, used for the welcome, the colour pick, and the demo. Everything on a card is also
   spoken.
+
+*Amended 2026-09-16 after the first build: the earlier permanent notch strip with the state word and
+a 72 pt mascot companion was rejected in use, in favour of OpenClicky's behaviour. The model is
+unchanged: the state word and the face both derive from `CompanionState`, and the island plus
+VoiceOver carry the same word.*
 
 ### First run
 
@@ -216,7 +236,9 @@ sequence. This ships in the first slice because onboarding is spoken.
 - Realtime session fails mid-turn: state goes to alert with the message; the learner can retry
   with the keys.
 - No model reachable after onboarding in local mode: the state word says "no model reachable" and
-  the notch tip offers the provider choice again. Never a fallback to hosted.
+  the notch tip offers the provider choice again. Never a fallback to hosted. *(As of slice 2 the
+  notch tip is not implemented: the state word carries the message and nothing offers the choice
+  again; the provider report is in the menu.)*
 - Event tap disabled by the system (it happens after sleep): re-enable on `kCGEventTapDisabledByTimeout`.
 
 ## Testing

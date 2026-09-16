@@ -2284,6 +2284,7 @@ Claude-Session: https://claude.ai/code/session_01AEU3ZMCHVZiteJzD4Kstn6"
 
 ## Done when
 
-- `swift test` passes with 162 tests.
+- `swift test` passes with 201 tests (SaathiKit 103, SaathiMascot 45, SaathiShell 53).
+- Task 5's look was superseded by the OpenClicky parity brief (2026-09-16): a pointer buddy and an island that comes down when you reach for it, not a permanent notch strip with a 72 pt companion.
 - `open dist/Saathi.app` shows the menu-bar icon, the companion and the notch strip, and the human checklist in Task 7 passes, with the Input Monitoring grant made once by the human.
 - Holding control and option drives a full voice turn through the existing chain lane, ending in either a reply or an honest alert.
