@@ -6,24 +6,18 @@
 #   scripts/release.sh --no-notarize   signed only (~30 s instead of a few minutes)
 #   scripts/release.sh --adhoc         no identity at all; runs on this Mac only
 #
-# ── Why there is an .app bundle around a command-line tool ────────────────────
-# Because a command-line executable has no main bundle, and macOS will not let a process ask for
-# the microphone or for speech recognition unless the usage-description strings are in its main
-# bundle. Probed on the loose binary: `main bundle id: none`, both usage strings `ABSENT`. The
-# chain voice lane is the DEFAULT lane — the one that needs no key — so shipping the bare binary
-# would have produced something notarized that still could not listen.
-#
-# The bundle is therefore about identity and permissions, not about a user interface: LSUIElement
-# is true, there is no window, and you run it as
-#
-#   /Applications/Saathi.app/Contents/MacOS/saathi voice --listen
+# ── What's inside the bundle ───────────────────────────────────────────────────
+# The bundle's main executable is SaathiApp, the menu-bar app: LSUIElement is true, there is no
+# Dock tile, and it is what LaunchServices launches and what TCC attributes permission prompts to.
+# The CLI ships beside it at Contents/MacOS/saathi, unlaunched by the bundle itself but present for
+# the Homebrew cask's symlink onto PATH. The mascot's data travels as the SwiftPM resource bundle
+# in Contents/Resources, found at runtime through Bundle.main.resourceURL.
 #
 # ── One honest limitation ────────────────────────────────────────────────────
-# TCC attributes a permission prompt to the RESPONSIBLE process. A binary started from a terminal
-# is a child of that terminal, so the grant can land on the terminal rather than on Saathi. The
-# bundle fixes identity, usage strings and distribution — it does not by itself fix attribution for
-# terminal-launched processes. `open -a Saathi` goes through LaunchServices instead and attributes
-# correctly. The real fix is the menu-bar shell, which is a product decision and not this script's.
+# TCC attributes a permission prompt to the RESPONSIBLE process. Launching through LaunchServices —
+# `open Saathi.app`, or double-clicking it — is what makes the grant land on Saathi rather than on
+# whatever terminal a process was started from; running the CLI binary directly from a shell does
+# not get this for free.
 #
 # ── Credentials ──────────────────────────────────────────────────────────────
 # Notarization uses a keychain profile so no key file is needed at build time, and nothing secret
@@ -71,7 +65,13 @@ echo "  identity: $SIGN_IDENTITY${SIGN_IDENTITY:+ }${TEAM_ID}"
 # without re-notarizing, which is the kind of thing that is worth doing once at the start.
 echo "▸ building universal (arm64 + x86_64)"
 swift build -c release --arch arm64 --arch x86_64 >/dev/null
-PRODUCTS="$PACKAGE_DIR/.build/out/Products/Release"
+# Where `swift build --arch arm64 --arch x86_64` puts the universal products depends on the
+# toolchain's build system: `.build/apple/...` on the older one, `.build/out/...` on the newer.
+PRODUCTS=""
+for candidate in "$PACKAGE_DIR/.build/out/Products/Release" "$PACKAGE_DIR/.build/apple/Products/Release"; do
+  if [[ -x "$candidate/SaathiApp" ]]; then PRODUCTS="$candidate"; break; fi
+done
+[[ -n "$PRODUCTS" ]] || { echo "could not find the universal build products under .build/out or .build/apple" >&2; exit 1; }
 CLI="$PRODUCTS/saathi"
 APP_BINARY="$PRODUCTS/SaathiApp"
 MASCOT_BUNDLE="$PRODUCTS/Saathi_SaathiMascot.bundle"
