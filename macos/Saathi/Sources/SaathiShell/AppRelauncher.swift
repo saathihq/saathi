@@ -24,12 +24,15 @@ enum AppRelauncher {
     /// Launches a fresh instance and, only once it is confirmed running, ends this one.
     ///
     /// `launch` and `terminate` are injected so the ordering rule can be tested without actually
-    /// relaunching the test runner.
+    /// relaunching the test runner. `@MainActor` because the default `terminate` calls into AppKit
+    /// (`NSApp.terminate`), which — like the rest of AppKit — must run on the main thread; this is
+    /// the one code path whose entire job is shutting the app down, so it must not do that off-main.
+    @MainActor
     @discardableResult
     static func relaunch(
         bundleURL: URL,
-        launch: (URL) async -> Bool = Self.launchAnother,
-        terminate: () -> Void = { NSApp.terminate(nil) }
+        launch: @MainActor (URL) async -> Bool = Self.launchAnother,
+        terminate: @MainActor () -> Void = { NSApp.terminate(nil) }
     ) async -> Bool {
         let launched = await launch(bundleURL)
         guard launched else { return false }
@@ -39,6 +42,7 @@ enum AppRelauncher {
 
     /// `createsNewApplicationInstance` is required: without it AppKit sees a running instance with
     /// this bundle id and simply activates us, so nothing is relaunched and we then quit.
+    @MainActor
     private static func launchAnother(_ bundleURL: URL) async -> Bool {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
