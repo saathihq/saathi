@@ -241,8 +241,17 @@ final class PanelTests: XCTestCase {
         XCTAssertTrue(NotchPanel.isBusy(.alert("no")))
         XCTAssertTrue(NotchPanel.isBusy(.showingStep(index: 1, total: 3)))
         XCTAssertTrue(NotchPanel.isBusy(.celebrating))
+        XCTAssertTrue(NotchPanel.isBusy(.poweringDown), "the goodbye is worth showing")
         XCTAssertFalse(NotchPanel.isBusy(.idle))
         XCTAssertFalse(NotchPanel.isBusy(.asleep))
-        XCTAssertFalse(NotchPanel.isBusy(.poweringDown))
+    }
+
+    /// Quit used to collapse the island and then wait a second and a half in silence.
+    func testPoweringDownShowsTheGoodbye() throws {
+        let (panel, _) = try island()
+        panel.setState(.poweringDown)
+        XCTAssertEqual(panel.islandState, .compact)
+        XCTAssertEqual(panel.word, "Bye")
+        XCTAssertFalse(panel.mascot.isHidden)
     }
 }

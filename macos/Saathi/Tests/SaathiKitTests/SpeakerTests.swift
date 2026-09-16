@@ -87,6 +87,17 @@ final class ObservedSpeakerTests: XCTestCase {
         XCTAssertEqual(inner.lines, [RecordingSpeaker.Line(text: "hello", tone: .calm)])
     }
 
+    /// Quitting cuts speech off through the observer, whatever is underneath it.
+    func testStopPassesThroughAndIsHarmlessOnASpeakerThatCannotBeStopped() async throws {
+        let speaker = ObservedSpeaker(RecordingSpeaker()) { _ in }
+        speaker.stop()   // a recording speaker has nothing to cut off
+        await speaker.speak("still works", tone: .neutral)
+
+        let system: any Speaker = SystemSpeaker()
+        let stoppable = try XCTUnwrap(system as? StoppableSpeaker, "the system speaker can be cut off")
+        stoppable.stop()   // nothing is being said; the synthesizer shrugs
+    }
+
     func testStopIsReportedEvenIfTheInnerSpeakerIsCancelled() async {
         struct Slow: Speaker {
             func speak(_ text: String, tone: Tone) async { try? await Task.sleep(nanoseconds: 500_000_000) }

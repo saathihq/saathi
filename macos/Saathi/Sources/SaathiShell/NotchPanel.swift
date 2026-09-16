@@ -201,9 +201,11 @@ public final class NotchPanel: NSPanel {
 
     static func isBusy(_ state: CompanionState) -> Bool {
         switch state {
-        case .listening, .thinking, .speaking, .alert, .showingStep, .celebrating:
+        // Powering down counts: the goodbye is the last thing the island has to show, and the
+        // app is gone a second and a half later.
+        case .listening, .thinking, .speaking, .alert, .showingStep, .celebrating, .poweringDown:
             return true
-        case .asleep, .idle, .poweringDown:
+        case .asleep, .idle:
             return false
         }
     }

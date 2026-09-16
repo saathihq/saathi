@@ -263,6 +263,7 @@ public final class AppController {
         menu.onQuit = { [weak self] in
             guard let self else { return }
             self.handle(.quit)
+            self.speaker.stop()   // whatever it was saying does not outlive the goodbye
             Task {
                 await self.session?.stop()
                 try? await Task.sleep(nanoseconds: 1_400_000_000)   // let powering-down settle

@@ -11,12 +11,19 @@ import Foundation
 import os
 import SaathiContract
 
+/// A speaker whose current utterance can be cut short — quitting, mostly: the app says goodbye
+/// and goes, and whatever it was in the middle of saying should not outlive the window it came
+/// from. Not every speaker can do this (printing one cannot), so it is its own protocol.
+public protocol StoppableSpeaker: Sendable {
+    func stop()
+}
+
 /// Says the line out loud with the system voice.
 ///
 /// Tone maps to rate and pitch rather than to a different voice: switching voices mid-session is
 /// disorienting, and the three tones are meant to be the same companion sounding different, not
 /// three companions.
-public final class SystemSpeaker: Speaker, @unchecked Sendable {
+public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable {
     private let synthesizer = AVSpeechSynthesizer()
     private let queue = SerialTaskQueue()
 
@@ -26,6 +33,13 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
     // caller's cancellation reaches the utterance it is waiting on (see `say`).
     public func speak(_ text: String, tone: Tone) async {
         await queue.run { await self.say(text, tone: tone) }
+    }
+
+    /// Cuts the current utterance off. The delegate's `didCancel` resumes whoever is waiting on
+    /// it, so the call that was speaking returns rather than hanging. Harmless when nothing is
+    /// being said.
+    public func stop() {
+        synthesizer.stopSpeaking(at: .immediate)
     }
 
     // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
@@ -79,6 +93,12 @@ public final class ObservedSpeaker: Speaker, @unchecked Sendable {
         onSpeakingChanged(true)
         defer { onSpeakingChanged(false) }
         await inner.speak(text, tone: tone)
+    }
+
+    /// Passes a stop through to the speaker underneath if it is one that can be stopped; a
+    /// recording or printing speaker has nothing to cut off.
+    public func stop() {
+        (inner as? StoppableSpeaker)?.stop()
     }
 }
 
