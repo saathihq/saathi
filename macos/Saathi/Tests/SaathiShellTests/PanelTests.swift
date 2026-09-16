@@ -190,6 +190,22 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.rect(for: .collapsed), notched.notchRect)
     }
 
+    /// A `MascotView` tickers on a display link for as long as it is in a window, hidden or not,
+    /// so the collapsed island takes it out of the view rather than hiding it.
+    func testACollapsedIslandTakesTheMascotOutOfTheWindowSoItStopsAnimating() throws {
+        let (panel, _) = try island()
+        panel.apply(.collapsed)
+        XCTAssertNil(panel.mascot.window, "a hidden mascot in a window would go on ticking")
+        XCTAssertNil(panel.mascot.superview)
+
+        panel.apply(.open)
+        XCTAssertTrue(panel.mascot.window === panel, "back in the island when it comes down")
+        XCTAssertFalse(panel.mascot.isHidden)
+
+        panel.apply(.collapsed)
+        XCTAssertNil(panel.mascot.window)
+    }
+
     func testOnlyTheWorkingStatesCountAsBusy() {
         XCTAssertTrue(NotchPanel.isBusy(.listening))
         XCTAssertTrue(NotchPanel.isBusy(.thinking))

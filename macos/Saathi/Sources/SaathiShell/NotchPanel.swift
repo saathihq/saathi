@@ -172,9 +172,28 @@ public final class NotchPanel: NSPanel {
             visible: !collapsed || geometry.hasHardwareNotch
         )
         island.setHandleVisible(collapsed && !geometry.hasHardwareNotch)
+        setMascotInIsland(!collapsed)
         mascot.isHidden = collapsed
         label.isHidden = collapsed
         if !collapsed { layOutContent() }
+    }
+
+    /// A `MascotView` runs its display-link ticker for as long as it is in a window, hidden or not,
+    /// so a collapsed island that merely hid the face would go on animating an invisible one all
+    /// day. Taking it out of the view stops the ticker (`viewDidMoveToWindow` tears it down) and
+    /// putting it back rebases the clock, so the face resumes where it left off.
+    ///
+    /// The mascot goes in after the body and the handle, and the label is re-added after it, so the
+    /// z-order the island was built with — body and handle underneath, face, then word — survives
+    /// every round trip.
+    private func setMascotInIsland(_ inIsland: Bool) {
+        if inIsland {
+            guard mascot.superview == nil else { return }
+            island.addSubview(mascot)
+            island.addSubview(label)
+        } else {
+            mascot.removeFromSuperview()
+        }
     }
 
     static func isBusy(_ state: CompanionState) -> Bool {
