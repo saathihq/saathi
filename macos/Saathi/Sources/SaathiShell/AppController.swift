@@ -35,6 +35,8 @@ public final class AppController {
     private var ticker: Timer?
     private var permissionPoll: Timer?
     private var screenObserver: NSObjectProtocol?
+    /// Why there is no voice session, kept so a press can say so instead of doing nothing.
+    private var voiceStartFailure: String?
 
     public init() throws {
         configuration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
@@ -153,8 +155,15 @@ public final class AppController {
                 }
             }
         } catch {
+            voiceStartFailure = error.localizedDescription
             handle(.failure(error.localizedDescription))
         }
+    }
+
+    /// There is no session, so there is nothing to talk to. Say why rather than swallow the press:
+    /// a dead session that answers nothing reads as a broken key.
+    private func reportNoVoice() {
+        handle(.failure(voiceStartFailure ?? "voice is not available"))
     }
 
     // MARK: hold to talk
@@ -167,7 +176,11 @@ public final class AppController {
         guard monitor == nil, HoldToTalkMonitor.isPermitted() else { return }
         let monitor = HoldToTalkMonitor { [weak self] event in
             Task { @MainActor in
-                guard let self, let turns = self.turns else { return }
+                guard let self else { return }
+                guard let turns = self.turns else {
+                    if case .began = event { self.reportNoVoice() }
+                    return
+                }
                 switch event {
                 case .began:
                     if turns.open() { self.handle(.keysHeld) }
@@ -194,13 +207,17 @@ public final class AppController {
 
     private func wireMenu() {
         menu.onTalk = { [weak self] in
-            guard let self, let turns = self.turns else { return }
+            guard let self else { return }
+            self.startHoldToTalkIfPossible()   // a granted-while-running permission takes effect here too
+            guard let turns = self.turns else {
+                self.reportNoVoice()
+                return
+            }
             if turns.isOpen {
                 turns.close(); self.handle(.keysReleased)
             } else {
                 turns.open(); self.handle(.keysHeld)
             }
-            self.startHoldToTalkIfPossible()   // a granted-while-running permission takes effect here too
         }
         menu.onToggleCompanion = { [weak self] visible in
             guard let self else { return }
