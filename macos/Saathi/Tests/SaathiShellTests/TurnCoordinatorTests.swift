@@ -33,6 +33,33 @@ final class TurnCoordinatorTests: XCTestCase {
         XCTAssertTrue(turns.open(), "the next press starts a turn rather than trying to end one")
     }
 
+    /// `ChainVoiceSession.endTurn` with no request in flight waits a second and says "I did not
+    /// catch that". A begin the session refused never opened a request, so the end must not run.
+    func testCloseAfterAFailedBeginDoesNotEnd() async {
+        struct Refused: Error {}
+        let ends = OSAllocatedUnfairLock(initialState: 0)
+        let turns = TurnCoordinator(
+            begin: { throw Refused() },
+            end: { ends.withLock { $0 += 1 } },
+            onFailure: { _ in })
+        XCTAssertTrue(turns.open())
+        XCTAssertTrue(turns.close())
+        await turns.settle()
+        XCTAssertEqual(ends.withLock { $0 }, 0, "a turn that never opened must not be ended")
+    }
+
+    func testCloseAfterASuccessfulBeginEnds() async {
+        let ends = OSAllocatedUnfairLock(initialState: 0)
+        let turns = TurnCoordinator(
+            begin: {},
+            end: { ends.withLock { $0 += 1 } },
+            onFailure: { _ in XCTFail("no failure expected") })
+        XCTAssertTrue(turns.open())
+        XCTAssertTrue(turns.close())
+        await turns.settle()
+        XCTAssertEqual(ends.withLock { $0 }, 1)
+    }
+
     func testDoubleOpenAndDoubleCloseAreNoOps() async {
         let turns = TurnCoordinator(begin: {}, end: {}, onFailure: { _ in })
         XCTAssertTrue(turns.open())

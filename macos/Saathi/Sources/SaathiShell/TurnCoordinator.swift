@@ -13,6 +13,8 @@ import Foundation
 @MainActor
 public final class TurnCoordinator {
     public private(set) var isOpen = false
+    /// Whether the begin that opened the turn actually got as far as opening it.
+    private var beginSucceeded = false
     private var work: Task<Void, Never>?
     private let begin: @Sendable () async throws -> Void
     private let end: @Sendable () async throws -> Void
@@ -31,16 +33,32 @@ public final class TurnCoordinator {
     public func open() -> Bool {
         guard !isOpen else { return false }
         isOpen = true
-        run(begin) { [weak self] in self?.isOpen = false }
+        run(begin,
+            onSuccess: { [weak self] in self?.beginSucceeded = true },
+            onError: { [weak self] in
+                self?.isOpen = false
+                self?.beginSucceeded = false
+            })
         return true
     }
 
     /// Closes the open turn if there is one. Returns whether it did.
+    ///
+    /// The end is queued behind the begin it pairs with, so by the time it actually runs the
+    /// begin has resolved and `beginSucceeded` tells the truth. A turn the session refused to
+    /// open is not ended: `ChainVoiceSession.endTurn` with no request in flight waits a second
+    /// and says "I did not catch that", which is the wrong answer to a microphone that never
+    /// opened — the failure has already been reported.
     @discardableResult
     public func close() -> Bool {
         guard isOpen else { return false }
         isOpen = false
-        run(end, onError: nil)
+        let end = self.end
+        run({ [self] in
+                guard await MainActor.run(body: { beginSucceeded }) else { return }
+                try await end()
+            },
+            onSuccess: { [weak self] in self?.beginSucceeded = false })
         return true
     }
 
@@ -49,12 +67,15 @@ public final class TurnCoordinator {
         await work?.value
     }
 
-    private func run(_ operation: @escaping @Sendable () async throws -> Void, onError: (@MainActor () -> Void)?) {
+    private func run(_ operation: @escaping @Sendable () async throws -> Void,
+                     onSuccess: (@MainActor () -> Void)? = nil,
+                     onError: (@MainActor () -> Void)? = nil) {
         let previous = work
         work = Task {
             await previous?.value
             do {
                 try await operation()
+                if let onSuccess { await MainActor.run { onSuccess() } }
             } catch {
                 await MainActor.run {
                     onError?()
