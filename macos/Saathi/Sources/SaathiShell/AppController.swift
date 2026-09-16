@@ -16,9 +16,13 @@ import ServiceManagement
 @MainActor
 public final class AppController {
 
-    private let configuration: SaathiConfiguration
+    private var configuration: SaathiConfiguration
     private let data: MascotData
     private let color: MascotColor
+    private let validator = KeyValidator()
+    /// Set while a reconfigure is waiting for an open turn to finish, so a second Save does not
+    /// start a second teardown alongside the first.
+    private var reconfiguring = false
 
     private var machine: CompanionStateMachine
     private var shown: CompanionState = .idle
@@ -128,7 +132,10 @@ public final class AppController {
 
     // MARK: voice
 
-    private func startVoice() {
+    private func startVoice() { startVoice(with: configuration) }
+
+    private func startVoice(with configuration: SaathiConfiguration) {
+        voiceStartFailure = nil
         do {
             let session = try VoiceSessionFactory.make(configuration: configuration, speaker: speaker)
             self.session = session
@@ -171,6 +178,75 @@ public final class AppController {
     /// a dead session that answers nothing reads as a broken key.
     private func reportNoVoice() {
         handle(.failure(voiceStartFailure ?? "voice is not available"))
+    }
+
+    /// Swaps in a new configuration without a relaunch.
+    ///
+    /// The order is not negotiable. A turn is closed before anything is torn down — `TurnCoordinator`
+    /// exists because a turn that never opened must not be ended, and ripping a session out from
+    /// under an open turn is the same bug approached from the other side. The old socket is closed
+    /// before a new one opens, so two realtime sessions never hold the microphone at once.
+    private func reconfigure(_ updated: SaathiConfiguration) async {
+        guard !reconfiguring else { return }
+        reconfiguring = true
+        defer { reconfiguring = false }
+
+        if let turns, turns.isOpen {
+            _ = turns.close()
+            handle(.keysReleased)
+            // One beat for the turn to finish landing. Longer than this and a person notices;
+            // shorter and the close races the teardown it exists to prevent.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+
+        speaker.stop()
+        await session?.stop()
+        session = nil
+        turns = nil
+
+        configuration = updated
+        startVoice(with: updated)
+        applyConfigurationToIsland()
+    }
+
+    /// Re-fills everything the island says about where Saathi thinks. Called at startup and after
+    /// every reconfigure, so the Home tab can never describe a provider that is no longer in use.
+    private func applyConfigurationToIsland() {
+        guard let notch else { return }
+        notch.model.providerTitle = Self.providerTitle(for: configuration)
+        notch.model.privacyLine = Self.privacyLine(for: configuration)
+    }
+
+    // MARK: what the island says about a configuration
+    //
+    // Static and pure so the wording can be tested without a window, a session or a key. These are
+    // the sentences that tell someone where their voice goes, which makes them worth pinning down.
+
+    static func providerTitle(for configuration: SaathiConfiguration) -> String {
+        "\(configuration.resolvedProvider.rawValue) · \(configuration.resolvedModel)"
+    }
+
+    static func privacyLine(for configuration: SaathiConfiguration) -> String {
+        let row = configuration.providerRow
+        if row.voice == .realtime { return "your voice leaves as audio" }
+        return row.sendsDataOffMachine ? "only the transcript is sent" : "stays on this machine"
+    }
+
+    /// Says out loud that a key was saved and is not being used. Empty when there is nothing to
+    /// confess — a panel that quietly banks an Anthropic key lets someone believe Claude is
+    /// answering them.
+    static func unusedKeyNote(for plan: SetupPlan) -> String {
+        guard !plan.storedButUnused.isEmpty else { return "" }
+        let names = plan.storedButUnused.map { $0.rawValue.capitalized }.joined(separator: " and ")
+        return "\(names) key saved. Nothing uses it yet."
+    }
+
+    /// Which face the island opens on. Derived from the configuration rather than from a
+    /// "has onboarded" flag, so it cannot get out of step with what is actually configured.
+    static func openingTab(for configuration: SaathiConfiguration) -> IslandTab {
+        let hasKey = ProviderKind.allCases.contains { configuration.credential(for: $0) != nil }
+        let hasToken = !(configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return (hasKey || hasToken) ? .home : .setup
     }
 
     // MARK: hold to talk
@@ -297,12 +373,13 @@ public final class AppController {
     /// one place that opens the provider alert.
     private func wireNotch() {
         guard let notch else { return }
-        notch.model.providerTitle = "\(configuration.resolvedProvider.rawValue) · \(configuration.resolvedModel)"
-        let row = configuration.providerRow
-        notch.model.privacyLine = row.voice == .realtime
-            ? "your voice leaves as audio"
-            : (row.sendsDataOffMachine ? "only the transcript is sent" : "stays on this machine")
+        applyConfigurationToIsland()
         notch.model.companionVisible = true
+        notch.model.tab = Self.openingTab(for: configuration)
+        if notch.model.tab == .setup {
+            notch.model.planExplanation =
+                SetupPlan.make(openAIKeyValid: false, anthropicKeyValid: false).explanation
+        }
 
         var actions = IslandActions()
         actions.onTalk = menu.onTalk
@@ -325,6 +402,67 @@ public final class AppController {
             self.setCompanionVisible(!notch.model.companionVisible)
         }
         actions.onQuit = menu.onQuit
+        actions.onCheckKey = { [weak self] kind, key in
+            guard let self, let notch = self.notch else { return }
+            switch kind {
+            case .openai: notch.model.openAIKeyState = .checking
+            case .anthropic: notch.model.anthropicKeyState = .checking
+            default: return
+            }
+            Task {
+                let result = await self.validator.check(kind, key: key)
+                await MainActor.run {
+                    switch kind {
+                    case .openai: notch.model.openAIKeyState = .checked(result)
+                    case .anthropic: notch.model.anthropicKeyState = .checked(result)
+                    default: break
+                    }
+                    self.refreshPlanExplanation()
+                }
+            }
+        }
+
+        actions.onSaveKeys = { [weak self] openAIKey, anthropicKey in
+            guard let self, let notch = self.notch else { return }
+            let plan = SetupPlan.make(
+                openAIKeyValid: notch.model.openAIKeyState.isValid,
+                anthropicKeyValid: notch.model.anthropicKeyState.isValid)
+            let updated = plan.applied(
+                to: self.configuration, openAIKey: openAIKey, anthropicKey: anthropicKey)
+
+            do {
+                try ConfigurationStore.save(updated, to: ConfigurationStore.defaultPath())
+            } catch {
+                self.handle(.failure("could not save your keys: \(error.localizedDescription)"))
+                return
+            }
+
+            // Saved keys come back only as their last four characters; the full key is never put
+            // back into a field.
+            if plan.provider == .openai || plan.storedButUnused.contains(.openai) {
+                notch.model.openAIKeyState = .saved(masked: IslandModel.masked(openAIKey))
+            }
+            if plan.provider == .anthropic || plan.storedButUnused.contains(.anthropic) {
+                notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(anthropicKey))
+            }
+            notch.model.planExplanation = plan.explanation
+            notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)
+            notch.model.tab = .home
+
+            Task { await self.reconfigure(updated) }
+        }
+
         notch.actions = actions
+    }
+
+    /// The plan changes as each check lands, so the sentence under the fields follows it rather than
+    /// appearing only after a save. Someone should be able to see what they are about to get.
+    private func refreshPlanExplanation() {
+        guard let notch else { return }
+        let plan = SetupPlan.make(
+            openAIKeyValid: notch.model.openAIKeyState.isValid,
+            anthropicKeyValid: notch.model.anthropicKeyState.isValid)
+        notch.model.planExplanation = plan.explanation
+        notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)
     }
 }

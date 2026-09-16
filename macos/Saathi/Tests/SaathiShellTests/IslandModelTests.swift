@@ -109,3 +109,56 @@ final class IslandSetupModelTests: XCTestCase {
         actions.onSaveKeys("sk-o", "sk-a")
     }
 }
+
+// MARK: - What the panel says after a save
+
+@MainActor
+final class SetupPresentationTests: XCTestCase {
+
+    func testAnUnusedStoredKeyIsNamedOutLoud() {
+        let plan = SetupPlan.make(openAIKeyValid: true, anthropicKeyValid: true)
+        let note = AppController.unusedKeyNote(for: plan)
+        XCTAssertTrue(note.contains("Anthropic"), "got: \(note)")
+        XCTAssertTrue(note.lowercased().contains("nothing uses it") || note.lowercased().contains("not used"),
+                      "the note must say it is unused, not merely mention it: \(note)")
+    }
+
+    func testThereIsNoNoteWhenEveryStoredKeyIsInUse() {
+        let plan = SetupPlan.make(openAIKeyValid: true, anthropicKeyValid: false)
+        XCTAssertEqual(AppController.unusedKeyNote(for: plan), "")
+    }
+
+    func testTheProviderTitleReadsAsAProviderAndAModel() {
+        let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
+        XCTAssertEqual(AppController.providerTitle(for: configuration), "openai · gpt-4o-mini")
+    }
+
+    /// The three privacy lines are the most consequential sentences in the app; they must stay
+    /// pinned to the lane and not drift into marketing.
+    func testThePrivacyLineFollowsTheLane() {
+        XCTAssertEqual(
+            AppController.privacyLine(for: SaathiConfiguration(provider: .openai, openaiKey: "sk-o")),
+            "your voice leaves as audio")
+        XCTAssertEqual(
+            AppController.privacyLine(for: SaathiConfiguration(provider: .anthropic, anthropicKey: "sk-a")),
+            "only the transcript is sent")
+        XCTAssertEqual(
+            AppController.privacyLine(for: SaathiConfiguration(provider: .local)),
+            "stays on this machine")
+    }
+
+    /// First run opens on Setup, and only first run. "First run" is "no provider has a credential",
+    /// which is a fact about the config rather than a flag that can get out of step with it.
+    func testTheIslandOpensOnSetupOnlyWhileNothingIsConfigured() {
+        XCTAssertEqual(AppController.openingTab(for: SaathiConfiguration()), .setup)
+        XCTAssertEqual(
+            AppController.openingTab(for: SaathiConfiguration(provider: .openai, openaiKey: "sk-o")),
+            .home)
+        XCTAssertEqual(
+            AppController.openingTab(for: SaathiConfiguration(provider: .hosted, token: "tok")),
+            .home)
+        // A local setup with Ollama actually running is a legitimate configuration, but nothing on
+        // disk can tell us that, so an empty config still opens on Setup.
+        XCTAssertEqual(AppController.openingTab(for: SaathiConfiguration(provider: .local)), .setup)
+    }
+}
