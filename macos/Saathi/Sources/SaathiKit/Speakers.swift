@@ -25,9 +25,20 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
     // Two overlapping calls run one after the other instead of the first being stranded, and a
     // caller's cancellation reaches the utterance it is waiting on (see `say`).
     public func speak(_ text: String, tone: Tone) async {
+        await queue.run { await self.say(text, tone: tone) }
+    }
+
+    // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
+    // turned out, before it started: `isSpeaking` stays false for ~50 ms after `speak()`, so
+    // polling it returned at once and every spoken command was silent. The delegate is the
+    // only signal that means what it says.
+    private func say(_ text: String, tone: Tone) async {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
 
+        // Tone maps to rate and pitch rather than to a different voice: switching voices mid-session is
+        // disorienting, and the three tones are meant to be the same companion sounding different, not
+        // three companions.
         switch tone {
         case .calm:
             utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.9
@@ -40,14 +51,6 @@ public final class SystemSpeaker: Speaker, @unchecked Sendable {
             utterance.pitchMultiplier = 1.0
         }
 
-        await queue.run { await self.say(utterance) }
-    }
-
-    // A CLI exits the moment its work is done, which would cut the sentence off — or, as it
-    // turned out, before it started: `isSpeaking` stays false for ~50 ms after `speak()`, so
-    // polling it returned at once and every spoken command was silent. The delegate is the
-    // only signal that means what it says.
-    private func say(_ utterance: AVSpeechUtterance) async {
         let waiter = UtteranceWaiter()
         synthesizer.delegate = waiter
         synthesizer.speak(utterance)
