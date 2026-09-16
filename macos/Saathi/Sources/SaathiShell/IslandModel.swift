@@ -8,7 +8,37 @@
 //
 
 import Foundation
+import SaathiContract
 import SaathiKit
+
+/// Which face of the island is showing. Two, deliberately: a panel that grows a third tab is a
+/// panel that has become a settings window, which this is not.
+public enum IslandTab: Equatable, Sendable {
+    case home
+    case setup
+}
+
+/// Where one key field has got to. `saved` carries the masked form because the full key is never
+/// put back into an editable field — the file is the store, not the view.
+public enum KeyFieldState: Equatable, Sendable {
+    case empty
+    case editing
+    case checking
+    case checked(KeyCheck)
+    case saved(masked: String)
+
+    /// True only while a round trip is in flight, so the button can be made inert. A second click
+    /// during a check starts a second request whose answer would land after the first and win.
+    public var isBusy: Bool { self == .checking }
+
+    /// A key may be saved only when a vendor has actually accepted it.
+    public var isValid: Bool {
+        switch self {
+        case .checked(.valid), .saved: return true
+        default: return false
+        }
+    }
+}
 
 /// Everything the Home panel says about Saathi right now.
 @MainActor
@@ -23,8 +53,25 @@ public final class IslandModel: ObservableObject {
     @Published public var permissions: [Permission: PermissionStatus] = [:]
     /// Whether the pointer companion is on show, for the toggle's wording.
     @Published public var companionVisible = true
+    /// Which face of the island is showing.
+    @Published public var tab: IslandTab = .home
+    @Published public var openAIKeyState: KeyFieldState = .empty
+    @Published public var anthropicKeyState: KeyFieldState = .empty
+    /// The plan's one-line explanation of what it chose and what that means.
+    @Published public var planExplanation: String = ""
+    /// Says out loud that a stored key is not being used. Empty when every stored key is in play.
+    @Published public var unusedKeyNote: String = ""
 
     public init() {}
+
+    /// A saved key, shown so two keys can be told apart and no more. Never a prefix of the secret
+    /// itself: a logged or shoulder-surfed prefix is still part of a credential, and the last four
+    /// characters of a vendor key are not enough to do anything with.
+    public static func masked(_ key: String) -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 8 else { return "sk-…" }
+        return "sk-…" + String(trimmed.suffix(4))
+    }
 }
 
 /// What the Home panel's buttons ask for. Plain closures: the shell points them at the same code
@@ -35,6 +82,10 @@ public struct IslandActions {
     public var onFixPermission: (Permission) -> Void = { _ in }
     public var onToggleCompanion: () -> Void = {}
     public var onQuit: () -> Void = {}
+    /// Ask the vendor whether this key works. The panel never validates anything itself.
+    public var onCheckKey: (ProviderKind, String) -> Void = { _, _ in }
+    /// Save both keys and reconfigure. Called only when at least one field is valid.
+    public var onSaveKeys: (String, String) -> Void = { _, _ in }
 
     public init() {}
 }

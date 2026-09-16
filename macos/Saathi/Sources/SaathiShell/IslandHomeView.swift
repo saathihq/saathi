@@ -82,9 +82,15 @@ struct IslandHomeView: View {
                 .padding(.horizontal, 14)
                 .frame(height: display.topBandHeight)
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: 18) {
-                    leftColumn
-                    rightColumn
+                tabStrip
+                switch model.tab {
+                case .home:
+                    HStack(alignment: .top, spacing: 18) {
+                        leftColumn
+                        rightColumn
+                    }
+                case .setup:
+                    IslandSetupView(display: display, model: model, actions: actions)
                 }
                 bottomRow
             }
@@ -92,6 +98,29 @@ struct IslandHomeView: View {
             .padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: the two faces
+
+    private var tabStrip: some View {
+        HStack(spacing: 6) {
+            tabButton("Home", .home)
+            tabButton("Setup", .setup)
+            Spacer()
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func tabButton(_ title: String, _ tab: IslandTab) -> some View {
+        Button(action: { model.tab = tab }) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(model.tab == tab ? .white : Color.white.opacity(0.45))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(model.tab == tab ? Color.white.opacity(0.16) : .clear))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: top band — who is talking, split around the notch
