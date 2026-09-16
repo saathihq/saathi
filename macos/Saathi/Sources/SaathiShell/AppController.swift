@@ -33,6 +33,7 @@ public final class AppController {
     private var turns: TurnCoordinator!
     private var monitor: HoldToTalkMonitor?
     private var ticker: Timer?
+    private var ticks = 0
     private var permissionPoll: Timer?
     private var screenObserver: NSObjectProtocol?
     /// Why there is no voice session, kept so a press can say so instead of doing nothing.
@@ -113,6 +114,11 @@ public final class AppController {
                 guard let self else { return }
                 self.machine.tick(now: CACurrentMediaTime())
                 self.render()
+                // A permission is granted over in System Settings, which tells the app nothing.
+                // Every twentieth tick — five seconds — the menu item catches up by itself, so
+                // it stops claiming something is missing long after it was granted.
+                self.ticks += 1
+                if self.ticks % 20 == 0 { self.refreshPermissions() }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -246,8 +252,11 @@ public final class AppController {
                 // The poll below and the Talk item both retry installing the tap, so the grant
                 // takes effect without a relaunch.
                 self.permissionPoll?.invalidate()
+                self.startHoldToTalkIfPossible()   // it may already have been granted
                 var remaining = 120
-                self.permissionPoll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
+                // A common-mode timer: a scheduled one stops firing while a menu is tracking,
+                // which is exactly when this poll is asked for.
+                let poll = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
                     Task { @MainActor in
                         guard let self else { timer.invalidate(); return }
                         remaining -= 1
@@ -255,6 +264,8 @@ public final class AppController {
                         if self.monitor != nil || remaining <= 0 { timer.invalidate(); self.permissionPoll = nil }
                     }
                 }
+                RunLoop.main.add(poll, forMode: .common)
+                self.permissionPoll = poll
             } else if let first = Permission.allCases.first(where: { Permissions.status(of: $0) != .granted }) {
                 NSWorkspace.shared.open(first.settingsURL)
             }
