@@ -174,6 +174,12 @@ public final class AppController {
                 } catch is CancellationError {
                     // Superseded by a reconfigure; the session this call belonged to is already
                     // gone, so there is nothing left to report.
+                } catch let error as URLError where error.code == .cancelled {
+                    // URLSession reports a cancelled task this way, not as `CancellationError` — the
+                    // same supersede-by-reconfigure case as above, just surfaced by the transport
+                    // instead of the task tree. (The own-key branch of `resolveConnection()` has no
+                    // real suspension point, so this arm is dead there — harmless, since the worst
+                    // case is an extra banner, never a swallowed failure.)
                 } catch {
                     await MainActor.run { self.handle(.failure(error.localizedDescription)) }
                 }
@@ -287,6 +293,15 @@ public final class AppController {
     /// "no key" and erases the one that already worked.
     static func effectiveKey(field: String, stored: String?) -> String {
         field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (stored ?? "") : field
+    }
+
+    /// Whether a key counts as usable for `SetupPlan`: a verdict that says so, *and* an effective
+    /// key actually behind it. `onSaveKeys` and `refreshPlanExplanation` both preview the same plan
+    /// and must agree on it, so this is the one place either of them consults — a `.saved` or
+    /// `.checked(.valid)` verdict with no effective key (nothing on disk, an empty field) must not
+    /// count in either.
+    static func isUsable(_ state: KeyFieldState, effectiveKey: String) -> Bool {
+        state.isValid && !effectiveKey.isEmpty
     }
 
     // MARK: hold to talk
@@ -422,6 +437,7 @@ public final class AppController {
             guard let self else { return }
             self.handle(.quit)
             self.speaker.stop()   // whatever it was saying does not outlive the goodbye
+            self.startTask?.cancel()   // an in-flight start must not open a socket during power-down
             Task {
                 await self.session?.stop()
                 try? await Task.sleep(nanoseconds: 1_400_000_000)   // let powering-down settle
@@ -440,9 +456,17 @@ public final class AppController {
         applyConfigurationToIsland()
         notch.model.companionVisible = true
         notch.model.tab = Self.openingTab(for: configuration)
+        // Seed both verdicts from what is already on disk, not just the fields' values fixed in
+        // Task 6 — otherwise every launch shows `.empty` regardless of what is stored, and
+        // `onSaveKeys`'s `isValid && !effectiveKey.isEmpty` gate never sees a stored key as valid.
+        if let key = configuration.credential(for: .openai) {
+            notch.model.openAIKeyState = .saved(masked: IslandModel.masked(key))
+        }
+        if let key = configuration.credential(for: .anthropic) {
+            notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(key))
+        }
         if notch.model.tab == .setup {
-            notch.model.planExplanation =
-                SetupPlan.make(openAIKeyValid: false, anthropicKeyValid: false).explanation
+            refreshPlanExplanation()
         }
 
         var actions = IslandActions()
@@ -466,8 +490,10 @@ public final class AppController {
             self.setCompanionVisible(!notch.model.companionVisible)
         }
         actions.onQuit = menu.onQuit
-        actions.onRestart = { [weak self] in
-            guard self != nil else { return }
+        actions.onRestart = {
+            // `IslandActions.onRestart` is typed `() -> Void`, a non-actor-qualified closure type,
+            // so this literal is nonisolated and `Task {}` is a cross-actor hop — safe only because
+            // `AppRelauncher.relaunch` is itself `@MainActor`.
             Task { await AppRelauncher.relaunch(bundleURL: Bundle.main.bundleURL) }
         }
         actions.onCheckKey = { [weak self] kind, key in
@@ -481,11 +507,14 @@ public final class AppController {
                 let result = await self.validator.check(kind, key: key)
                 await MainActor.run {
                     switch kind {
-                    case .openai: notch.model.openAIKeyState = .checked(result)
-                    case .anthropic: notch.model.anthropicKeyState = .checked(result)
+                    case .openai:
+                        notch.model.openAIKeyState = .checked(result)
+                        self.refreshPlanExplanation(openAIField: key)
+                    case .anthropic:
+                        notch.model.anthropicKeyState = .checked(result)
+                        self.refreshPlanExplanation(anthropicField: key)
                     default: break
                     }
-                    self.refreshPlanExplanation()
                 }
             }
         }
@@ -506,8 +535,8 @@ public final class AppController {
             let effectiveOpenAI = Self.effectiveKey(field: openAIKey, stored: self.configuration.openaiKey)
             let effectiveAnthropic = Self.effectiveKey(field: anthropicKey, stored: self.configuration.anthropicKey)
             let plan = SetupPlan.make(
-                openAIKeyValid: notch.model.openAIKeyState.isValid && !effectiveOpenAI.isEmpty,
-                anthropicKeyValid: notch.model.anthropicKeyState.isValid && !effectiveAnthropic.isEmpty)
+                openAIKeyValid: Self.isUsable(notch.model.openAIKeyState, effectiveKey: effectiveOpenAI),
+                anthropicKeyValid: Self.isUsable(notch.model.anthropicKeyState, effectiveKey: effectiveAnthropic))
             let updated = plan.applied(
                 to: self.configuration, openAIKey: effectiveOpenAI, anthropicKey: effectiveAnthropic)
 
@@ -539,11 +568,18 @@ public final class AppController {
 
     /// The plan changes as each check lands, so the sentence under the fields follows it rather than
     /// appearing only after a save. Someone should be able to see what they are about to get.
-    private func refreshPlanExplanation() {
+    ///
+    /// `openAIField`/`anthropicField` are the live text of whichever field just changed — empty for
+    /// the one that did not, which falls back to what is already on disk via `isUsable`. That is
+    /// exactly right for a verdict seeded from disk (a `.saved` state with an empty field, until the
+    /// user types in it) and for a verdict this call was not about (its field has not moved either).
+    private func refreshPlanExplanation(openAIField: String = "", anthropicField: String = "") {
         guard let notch else { return }
+        let effectiveOpenAI = Self.effectiveKey(field: openAIField, stored: configuration.openaiKey)
+        let effectiveAnthropic = Self.effectiveKey(field: anthropicField, stored: configuration.anthropicKey)
         let plan = SetupPlan.make(
-            openAIKeyValid: notch.model.openAIKeyState.isValid,
-            anthropicKeyValid: notch.model.anthropicKeyState.isValid)
+            openAIKeyValid: Self.isUsable(notch.model.openAIKeyState, effectiveKey: effectiveOpenAI),
+            anthropicKeyValid: Self.isUsable(notch.model.anthropicKeyState, effectiveKey: effectiveAnthropic))
         notch.model.planExplanation = plan.explanation
         notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)
     }

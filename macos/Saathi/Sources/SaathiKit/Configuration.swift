@@ -69,13 +69,33 @@ public enum ConfigurationStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(configuration)
 
-        // Create with the right mode rather than chmod-ing after: between the two there is a window
-        // in which the token is readable, and that window is the whole bug.
-        FileManager.default.createFile(
-            atPath: url.path,
+        // Written to a sibling temporary file, created with the right mode rather than chmod-ing
+        // after — between create and chmod there is a window in which the token is readable, and
+        // that window is the whole bug — then moved into place atomically. `createFile`'s write is
+        // create-then-truncate on the destination itself; a disk-full write or a crash mid-write
+        // used to leave shell.json truncated while `save` still returned normally, because the
+        // `Bool` it returns was never checked. Writing to a temporary name first and renaming it in
+        // means the file at `url` is always either the old complete config or the new one, never a
+        // partial one — and the temporary file lives next to it so the move is a rename, not a copy
+        // across filesystems.
+        let temporaryURL = directory.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+        let created = FileManager.default.createFile(
+            atPath: temporaryURL.path,
             contents: data,
             attributes: [.posixPermissions: 0o600]
         )
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        guard created else {
+            throw ConfigurationError.unreadable(
+                path: temporaryURL.path, reason: "could not create temporary file for save")
+        }
+
+        do {
+            // `.usingNewMetadataOnly` so the mode that lands on disk is the temporary file's 0600,
+            // never anything merged in from whatever `url` used to be.
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL, options: .usingNewMetadataOnly)
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw error
+        }
     }
 }

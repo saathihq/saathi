@@ -184,6 +184,37 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(url.path, "/tmp/elsewhere.json")
     }
 
+    /// A failed save must not truncate the file that is already there — `createFile`'s write used
+    /// to go straight at the destination, so a save that could not complete (disk full, a crash mid-
+    /// write) could leave `shell.json` empty or half-written while still reporting success, and a
+    /// malformed config means Saathi will not launch at all. Saving through a temporary file and
+    /// renaming it into place means a failed save leaves the previous, good file untouched.
+    func testAFailedSaveDoesNotTruncateTheExistingFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("saathi-tests-\(UUID().uuidString)", isDirectory: true)
+        let url = directory.appendingPathComponent("shell.json")
+        defer {
+            // Restore write permission before cleanup, or removing the directory itself fails.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let original = SaathiConfiguration(
+            openaiKey: "sk-o", backendUrl: "https://example.test", token: "abc")
+        try ConfigurationStore.save(original, to: url)
+
+        // Read-and-execute only: `save` can still stat the directory but cannot create its
+        // temporary file inside it, so the write must fail before `url` is ever touched.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        XCTAssertThrowsError(try ConfigurationStore.save(original, to: url))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+
+        let reloaded = try ConfigurationStore.load(from: url)
+        XCTAssertEqual(reloaded.backendUrl, original.backendUrl)
+        XCTAssertEqual(reloaded.token, original.token)
+        XCTAssertEqual(reloaded.openaiKey, original.openaiKey)
+    }
+
     func testTheDefaultPathIsUnderTheHomeDirectory() {
         let url = ConfigurationStore.defaultPath(
             environment: [:],
