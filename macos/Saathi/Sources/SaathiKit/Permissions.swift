@@ -17,7 +17,7 @@ public enum PermissionStatus: Equatable, Sendable {
     case notDetermined
 }
 
-public enum Permission: CaseIterable, Equatable, Sendable {
+public enum Permission: CaseIterable, Hashable, Sendable {
     case microphone
     case speechRecognition
     case inputMonitoring

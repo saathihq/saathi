@@ -57,6 +57,7 @@ public final class AppController {
         }
         performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
         wireMenu()
+        wireNotch()
     }
 
     public func start() {
@@ -205,8 +206,17 @@ public final class AppController {
     }
 
     private func refreshPermissions() {
-        let missing = Permission.allCases.filter { Permissions.status(of: $0) != .granted }.map(\.title)
-        menu.setPermissionsNeeded(missing)
+        let statuses = Permission.allCases.map { ($0, Permissions.status(of: $0)) }
+        notch?.model.permissions = Dictionary(uniqueKeysWithValues: statuses)
+        menu.setPermissionsNeeded(statuses.filter { $0.1 != .granted }.map { $0.0.title })
+    }
+
+    /// Shows or hides the pointer companion and keeps the menu's checkbox and the island's toggle
+    /// wording in step with it, whichever of the three asked for the change.
+    private func setCompanionVisible(_ visible: Bool) {
+        if visible { companion.show() } else { companion.hide() }
+        menu.setCompanionVisible(visible)
+        notch?.model.companionVisible = visible
     }
 
     // MARK: menu
@@ -225,10 +235,7 @@ public final class AppController {
                 turns.open(); self.handle(.keysHeld)
             }
         }
-        menu.onToggleCompanion = { [weak self] visible in
-            guard let self else { return }
-            if visible { self.companion.show() } else { self.companion.hide() }
-        }
+        menu.onToggleCompanion = { [weak self] visible in self?.setCompanionVisible(visible) }
         menu.onToggleStartAtLogin = { [weak self] enabled in
             do {
                 if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -281,5 +288,43 @@ public final class AppController {
                 await MainActor.run { NSApp.terminate(nil) }
             }
         }
+    }
+
+    // MARK: notch
+
+    /// The island's Home panel says the same things the menu does, through the same code: Talk,
+    /// Provider and Quit are literally the menu's own closures, so there is one Talk, one Quit and
+    /// one place that opens the provider alert.
+    private func wireNotch() {
+        guard let notch else { return }
+        notch.model.providerTitle = "\(configuration.resolvedProvider.rawValue) · \(configuration.resolvedModel)"
+        let row = configuration.providerRow
+        notch.model.privacyLine = row.voice == .realtime
+            ? "your voice leaves as audio"
+            : (row.sendsDataOffMachine ? "only the transcript is sent" : "stays on this machine")
+        notch.model.companionVisible = true
+
+        var actions = IslandActions()
+        actions.onTalk = menu.onTalk
+        actions.onProvider = menu.onProvider
+        actions.onFixPermission = { [weak self] permission in
+            guard let self else { return }
+            Task {
+                _ = await Permissions.request(permission)
+                await MainActor.run {
+                    self.startHoldToTalkIfPossible()   // a grant just made takes effect here too
+                    self.refreshPermissions()
+                    if Permissions.status(of: permission) != .granted {
+                        NSWorkspace.shared.open(permission.settingsURL)
+                    }
+                }
+            }
+        }
+        actions.onToggleCompanion = { [weak self] in
+            guard let self, let notch = self.notch else { return }
+            self.setCompanionVisible(!notch.model.companionVisible)
+        }
+        actions.onQuit = menu.onQuit
+        notch.actions = actions
     }
 }

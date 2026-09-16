@@ -194,7 +194,7 @@ final class PanelTests: XCTestCase {
         XCTAssertFalse(panel.contents.isBodyVisible, "no black pill under the menu bar")
         XCTAssertTrue(panel.contents.isHandleVisible)
         XCTAssertTrue(panel.mascot.isHidden)
-        XCTAssertTrue(panel.isWordHidden)
+        XCTAssertFalse(panel.isContentVisible)
         XCTAssertEqual(panel.frame.maxY, 1080, accuracy: 0.5)
         XCTAssertEqual(panel.frame.midX, 1512 + 960, accuracy: 0.5)
     }
@@ -267,5 +267,35 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.islandState, .compact)
         XCTAssertEqual(panel.word, "Bye")
         XCTAssertFalse(panel.mascot.isHidden)
+    }
+
+    // MARK: the Home panel
+
+    /// The empty panel the user rejected lived here: nothing drawn, and every click passes
+    /// through to whatever is under the menu bar.
+    func testCollapsedDrawsNothingAndPassesClicksThrough() throws {
+        let (panel, _) = try island()
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        XCTAssertFalse(panel.isContentVisible)
+    }
+
+    /// Open is a real, clickable Home panel: 512 pt wide, and the pointer reaches its buttons.
+    func testOpenIsAClickableFiveTwelveWideHomePanel() throws {
+        let (panel, _) = try island()
+        panel.apply(.open)
+        XCTAssertFalse(panel.ignoresMouseEvents)
+        XCTAssertTrue(panel.isContentVisible)
+        XCTAssertEqual(panel.bodyRect.width, NotchPanel.openWidth)
+    }
+
+    func testTheModelsStateFollowsSetStateAndSoDoesTheWord() throws {
+        let (panel, _) = try island()
+        panel.setState(.thinking)
+        XCTAssertEqual(panel.model.state, .thinking)
+        XCTAssertEqual(panel.word, "Thinking")
+
+        panel.setState(.speaking)
+        XCTAssertEqual(panel.model.state, .speaking)
+        XCTAssertEqual(panel.word, "Speaking")
     }
 }

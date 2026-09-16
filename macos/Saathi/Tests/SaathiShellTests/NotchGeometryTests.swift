@@ -93,6 +93,12 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertEqual(geometry.notchRect.maxY, 982)
     }
 
+    func testTheTopBandIsTheNotchOnHardwareAndAtLeastThirtyFourOtherwise() {
+        XCTAssertEqual(notched().topBandHeight, 32, "a hardware notch is the whole band")
+        XCTAssertEqual(virtual(visibleTop: 958).topBandHeight, 34, "a 24 pt menu-bar band is not enough on its own")
+        XCTAssertEqual(virtual(visibleTop: 982).topBandHeight, 34, "no band at all still gets a full one")
+    }
+
     func testTheHoverRectGrowsSidewaysAndDownButNeverAboveTheScreen() {
         let geometry = notched()
         let hover = NotchGeometry.hoverRect(

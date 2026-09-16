@@ -56,6 +56,13 @@ public struct NotchGeometry: Equatable {
         )
     }
 
+    /// The band the island's top row sits in: exactly the (real or virtual) notch on a display
+    /// where something already occupies that height, or a comfortable minimum — enough for the
+    /// title and the state word — everywhere else.
+    public var topBandHeight: CGFloat {
+        hasHardwareNotch ? notchHeight : max(notchHeight, 34)
+    }
+
     /// Whether there is anywhere to put the handle. A display with a hardware notch never needs
     /// one, and a display whose menu bar is hidden — or is in full screen — has no band to tuck it
     /// into, so a handle there would sit on top of somebody's content with nothing to explain it.

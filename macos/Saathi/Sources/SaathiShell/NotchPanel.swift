@@ -16,6 +16,7 @@ import AppKit
 import QuartzCore
 import SaathiKit
 import SaathiMascot
+import SwiftUI
 
 @MainActor
 public final class NotchPanel: NSPanel {
@@ -23,18 +24,25 @@ public final class NotchPanel: NSPanel {
     /// The busy strip.
     static let compactWidth: CGFloat = 240
     static let compactContentHeight: CGFloat = 56
-    /// The island the pointer opens.
-    static let openWidth: CGFloat = 320
-    static let openContentHeight: CGFloat = 96
+    /// The island the pointer opens: OpenClicky's Home panel, sized the same.
+    static let openWidth: CGFloat = 512
+    static let openContentHeight: CGFloat = 200
     /// How often the pointer is checked against the island's hover rect.
     static let pollInterval: TimeInterval = 0.05
 
     public let mascot: MascotView
+    /// What the Home panel shows; the shell fills it in.
+    public let model = IslandModel()
+    /// What the Home panel's buttons do; the shell points them at the same code the menu runs.
+    public var actions = IslandActions() {
+        didSet { hosting.rootView = IslandRootView(display: display, model: model, mascot: mascot, actions: actions) }
+    }
     public private(set) var islandState: IslandState = .collapsed
-    public var word: String { label.stringValue }
+    public var word: String { model.state.word }
 
-    private let label = NSTextField(labelWithString: CompanionState.idle.word)
     private let island = IslandView()
+    private let display = IslandDisplay()
+    private let hosting: NSHostingView<IslandRootView>
     private var geometry: NotchGeometry
     private var hover = IslandHover()
     private var poll: Timer?
@@ -47,8 +55,9 @@ public final class NotchPanel: NSPanel {
     public init(data: MascotData, color: MascotColor, geometry: NotchGeometry) {
         self.geometry = geometry
         mascot = MascotView(data: data, color: color, expression: .idle, frame: NSRect(x: 0, y: 0, width: 44, height: 44))
+        hosting = NSHostingView(rootView: IslandRootView(display: display, model: model, mascot: mascot, actions: actions))
         super.init(
-            contentRect: geometry.islandRect(width: Self.openWidth, contentHeight: Self.openContentHeight),
+            contentRect: Self.openRect(geometry),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -57,18 +66,16 @@ public final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         level = .popUpMenu
-        // Hovering is read from the global pointer, so the panel never needs the mouse itself —
-        // and letting clicks through keeps the menu bar underneath it usable.
+        // Hovering is read from the global pointer, so the panel never needs the mouse itself to
+        // open; `apply` still turns clicks on once the island is actually down; letting them
+        // through while collapsed keeps the menu bar underneath it usable.
         ignoresMouseEvents = true
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
 
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.textColor = .white
-        label.lineBreakMode = .byTruncatingTail
-        island.addSubview(mascot)
-        island.addSubview(label)
+        hosting.wantsLayer = true
+        island.addSubview(hosting)
         contentView = island
         mascot.setAccessibilityElement(true)
         mascot.setAccessibilityRole(.image)
@@ -81,6 +88,11 @@ public final class NotchPanel: NSPanel {
     public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect
     }
+
+    /// A non-activating panel that never became key would swallow a SwiftUI button's first click
+    /// as nothing more than a focus change — the same reason OpenClicky's own notch window
+    /// overrides this.
+    public override var canBecomeKey: Bool { true }
 
     public func show() {
         orderFrontRegardless()
@@ -115,14 +127,10 @@ public final class NotchPanel: NSPanel {
 
     public func setState(_ state: CompanionState) {
         mascot.expression = state.mascotExpression
-        label.stringValue = state.word
+        model.state = state
         mascot.setAccessibilityLabel(state.word)
         let next = hover.setBusy(Self.isBusy(state), now: CACurrentMediaTime())
-        if next != islandState {
-            apply(next)
-        } else if islandState != .collapsed {
-            layOutContent()   // a longer word needs a wider label
-        }
+        if next != islandState { apply(next) }
     }
 
     /// Recompute the geometry for a display: the pointer has moved to another one, or the
@@ -138,10 +146,13 @@ public final class NotchPanel: NSPanel {
 
     // MARK: internals, exercised by the tests
 
-    /// The island's own view, and whether the word is on show — what the tests read to tell the
+    /// The island's own view, and whether its content is on show — what the tests read to tell the
     /// two collapsed looks apart without a display of each kind to hand.
     var contents: IslandView { island }
-    var isWordHidden: Bool { label.isHidden }
+    var isContentVisible: Bool { !hosting.isHidden }
+    /// The hosting view's own frame, in the panel's local coordinates — what the tests read to
+    /// check the open island is actually 512 pt wide and not just the (always-largest) window.
+    var bodyRect: CGRect { toLocal(rect(for: islandState)) }
 
     /// The island's rect on screen in a given state. Collapsed on a display without a notch this
     /// reaches down to the handle, so the handle itself is something you can hover.
@@ -152,7 +163,7 @@ public final class NotchPanel: NSPanel {
         case .compact:
             return geometry.islandRect(width: Self.compactWidth, contentHeight: Self.compactContentHeight)
         case .open:
-            return geometry.islandRect(width: Self.openWidth, contentHeight: Self.openContentHeight)
+            return Self.openRect(geometry)
         }
     }
 
@@ -166,37 +177,32 @@ public final class NotchPanel: NSPanel {
     }
 
     /// Put the island layer where the state says, and show or hide what belongs to that state.
+    ///
+    /// The hosted SwiftUI tree switches on `display.state`: collapsed draws nothing, so the
+    /// `MascotHostView` inside the compact and open cases is not in the tree at all — that is what
+    /// takes the shared `MascotView` out of the window and stops its display-link ticker, the same
+    /// discipline the hand-laid island used to get by calling `removeFromSuperview()` itself.
+    /// `layoutSubtreeIfNeeded()` forces that SwiftUI diff to run now rather than on the next real
+    /// display pass, so the change is visible to the caller (and to the tests) immediately.
     func apply(_ islandState: IslandState) {
         self.islandState = islandState
         let collapsed = islandState == .collapsed
+        let bodyRect = toLocal(rect(for: islandState))
         island.setIsland(
-            toLocal(rect(for: islandState)),
+            bodyRect,
             cornerRadius: collapsed ? 11 : 16,
             visible: !collapsed || geometry.hasHardwareNotch
         )
         island.setHandleVisible(collapsed && geometry.showsHandle)
-        setMascotInIsland(!collapsed)
+        display.notchHeight = geometry.notchHeight
+        display.topBandHeight = geometry.topBandHeight
+        display.notchGap = geometry.hasHardwareNotch ? geometry.notchWidth : 0
+        display.state = islandState
+        hosting.frame = bodyRect
+        hosting.isHidden = collapsed
         mascot.isHidden = collapsed
-        label.isHidden = collapsed
-        if !collapsed { layOutContent() }
-    }
-
-    /// A `MascotView` runs its display-link ticker for as long as it is in a window, hidden or not,
-    /// so a collapsed island that merely hid the face would go on animating an invisible one all
-    /// day. Taking it out of the view stops the ticker (`viewDidMoveToWindow` tears it down) and
-    /// putting it back rebases the clock, so the face resumes where it left off.
-    ///
-    /// The mascot goes in after the body and the handle, and the label is re-added after it, so the
-    /// z-order the island was built with — body and handle underneath, face, then word — survives
-    /// every round trip.
-    private func setMascotInIsland(_ inIsland: Bool) {
-        if inIsland {
-            guard mascot.superview == nil else { return }
-            island.addSubview(mascot)
-            island.addSubview(label)
-        } else {
-            mascot.removeFromSuperview()
-        }
+        ignoresMouseEvents = collapsed
+        hosting.layoutSubtreeIfNeeded()
     }
 
     static func isBusy(_ state: CompanionState) -> Bool {
@@ -223,27 +229,19 @@ public final class NotchPanel: NSPanel {
     }
 
     private func layOutForScreen() {
-        setFrame(geometry.islandRect(width: Self.openWidth, contentHeight: Self.openContentHeight), display: true)
+        setFrame(Self.openRect(geometry), display: true)
         island.frame = NSRect(origin: .zero, size: frame.size)
         island.setHandleRect(toLocal(geometry.handleRect))
         apply(islandState)
     }
 
-    /// The face and the word live in the band below the notch, which is the part that is actually
-    /// on show; whatever is behind the notch itself cannot be seen.
-    private func layOutContent() {
-        let body = toLocal(rect(for: islandState))
-        let content = CGRect(
-            x: body.minX,
-            y: body.minY,
-            width: body.width,
-            height: max(0, body.height - geometry.notchHeight)
-        )
-        let inset: CGFloat = 14
-        let side: CGFloat = 44
-        mascot.frame = NSRect(x: content.minX + inset, y: content.midY - side / 2, width: side, height: side)
-        let textX = mascot.frame.maxX + 10
-        label.frame = NSRect(x: textX, y: content.midY - 9, width: max(0, content.maxX - inset - textX), height: 18)
+    /// The open island: 512 wide, and tall enough that its body always extends `topBandHeight +
+    /// openContentHeight` from the top of the screen — on a hardware notch that is exactly
+    /// `notchHeight + openContentHeight`, as before; where the (real or virtual) notch is shorter
+    /// than a comfortable top band, the extra height is folded into the content rect so
+    /// `NotchGeometry.islandRect`'s own `notchHeight + contentHeight` still lands on the same total.
+    private static func openRect(_ geometry: NotchGeometry) -> CGRect {
+        geometry.islandRect(width: openWidth, contentHeight: openContentHeight + (geometry.topBandHeight - geometry.notchHeight))
     }
 
     /// Screen coordinates into the panel's own.
