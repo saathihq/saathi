@@ -519,6 +519,7 @@ public final class AppController {
         applyConfigurationToIsland()
         notch.model.companionVisible = true
         notch.model.tab = Self.openingTab(for: configuration)
+        notch.model.language = configuration.language ?? ""
         // Seed both verdicts from what is already on disk — otherwise every launch shows `.empty`
         // regardless of what is stored, and the `isValid && !effectiveKey.isEmpty` gate never sees
         // a stored key as valid. Only for a vendor the config actually names; see `seededKeyStates`.
@@ -582,6 +583,22 @@ public final class AppController {
                         openAIField: openAIField, anthropicField: anthropicField)
                 }
             }
+        }
+
+        actions.onLanguage = { [weak self] tag in
+            guard let self, let notch = self.notch else { return }
+            notch.model.language = tag
+            var updated = self.configuration
+            updated.language = tag.isEmpty ? nil : tag
+            do {
+                try ConfigurationStore.save(updated, to: ConfigurationStore.defaultPath())
+            } catch {
+                self.handle(.failure("could not save the language: \(error.localizedDescription)"))
+                return
+            }
+            // The language is baked into the session's instructions, so it only takes effect on a
+            // fresh session — the same reconfigure a saved key goes through.
+            Task { await self.reconfigure(updated) }
         }
 
         actions.onSaveKeys = { [weak self] openAIKey, anthropicKey in

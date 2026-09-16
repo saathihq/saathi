@@ -195,7 +195,7 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
             request.setValue(header.value, forHTTPHeaderField: header.name)
         }
 
-        var messages: [[String: Any]] = [["role": "system", "content": RealtimeVoiceSession.instructions]]
+        var messages: [[String: Any]] = [["role": "system", "content": RealtimeVoiceSession.instructions(language: configuration.resolvedLanguage)]]
         messages.append(contentsOf: history)
 
         request.httpBody = try JSONSerialization.data(withJSONObject: [

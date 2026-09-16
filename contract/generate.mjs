@@ -216,6 +216,14 @@ function swift() {
   out.push("        let trimmed = voice?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
   out.push("        return trimmed.isEmpty ? providerRow.defaultVoice : trimmed");
   out.push("    }\n");
+  out.push("    /// The language Saathi speaks. Unset follows this machine's own language, because a");
+  out.push("    /// companion that guesses picks one at random — and being answered in a language you");
+  out.push("    /// do not read is worse than being answered plainly in the wrong one you do.");
+  out.push("    public var resolvedLanguage: String {");
+  out.push("        let trimmed = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
+  out.push("        if !trimmed.isEmpty { return trimmed }");
+  out.push("        return Locale.preferredLanguages.first.flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? \"en\"");
+  out.push("    }\n");
   out.push("    /// The credential for a provider: its own vendor field first, then the legacy shared");
   out.push("    /// `apiKey`. Vendor-specific wins, so a config holding both an OpenAI and an Anthropic");
   out.push("    /// key is unambiguous — which is the whole reason the two fields exist. Providers that");
@@ -379,6 +387,11 @@ function csharp() {
   out.push("        string.IsNullOrWhiteSpace(VoiceModel) ? ProviderRow.DefaultVoiceModel : VoiceModel!.Trim();\n");
   out.push("    public string ResolvedVoice =>");
   out.push("        string.IsNullOrWhiteSpace(Voice) ? ProviderRow.DefaultVoice : Voice!.Trim();\n");
+  out.push("    /// <summary>The language Saathi speaks. Unset follows this machine's own language.</summary>");
+  out.push("    public string ResolvedLanguage =>");
+  out.push("        string.IsNullOrWhiteSpace(Language)");
+  out.push("            ? (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName ?? \"en\")");
+  out.push("            : Language!.Trim();\n");
   out.push("    /// <summary>The credential for a provider: its own vendor field first, then the legacy");
   out.push("    /// shared ApiKey. Providers needing no key of their own get null.</summary>");
   out.push("    public string? Credential(ProviderKind kind)");

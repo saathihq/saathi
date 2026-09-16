@@ -13,6 +13,36 @@ import SaathiKit
 
 /// Which face of the island is showing. Two, deliberately: a panel that grows a third tab is a
 /// panel that has become a settings window, which this is not.
+/// The languages the Setup tab offers, and the tag each one sends.
+///
+/// A short list rather than every language OpenAI supports: this is a picker in a small panel, not
+/// a locale browser, and the realtime model handles anything the learner actually speaks to it. The
+/// point of the setting is to stop it *guessing* — it answered a Delhi user in Korean — so what
+/// matters is that a definite answer can be given, and that "follow this Mac" is the default.
+public struct IslandLanguage: Identifiable, Equatable, Sendable {
+    public let tag: String
+    public let title: String
+    public var id: String { tag }
+
+    public static let all: [IslandLanguage] = [
+        IslandLanguage(tag: "", title: "Follow this Mac"),
+        IslandLanguage(tag: "en", title: "English"),
+        IslandLanguage(tag: "hi", title: "हिन्दी"),
+        IslandLanguage(tag: "ta", title: "தமிழ்"),
+        IslandLanguage(tag: "te", title: "తెలుగు"),
+        IslandLanguage(tag: "bn", title: "বাংলা"),
+        IslandLanguage(tag: "mr", title: "मराठी"),
+        IslandLanguage(tag: "kn", title: "ಕನ್ನಡ"),
+        IslandLanguage(tag: "ml", title: "മലയാളം"),
+        IslandLanguage(tag: "es", title: "Español"),
+        IslandLanguage(tag: "fr", title: "Français"),
+        IslandLanguage(tag: "de", title: "Deutsch"),
+        IslandLanguage(tag: "ja", title: "日本語"),
+        IslandLanguage(tag: "ko", title: "한국어"),
+        IslandLanguage(tag: "zh", title: "中文"),
+    ]
+}
+
 public enum IslandTab: Equatable, Sendable {
     case home
     case setup
@@ -61,6 +91,8 @@ public final class IslandModel: ObservableObject {
     @Published public var planExplanation: String = ""
     /// Says out loud that a stored key is not being used. Empty when every stored key is in play.
     @Published public var unusedKeyNote: String = ""
+    /// The language Saathi speaks, as a BCP-47 tag. Empty means follow this Mac.
+    @Published public var language: String = ""
     /// True once a permission has been granted that this process still cannot pick up. The island
     /// then offers to relaunch rather than leaving someone holding keys that do nothing.
     @Published public var needsRestart = false
@@ -93,6 +125,8 @@ public struct IslandActions {
     public var onCheckKey: (ProviderKind, String, String) -> Void = { _, _, _ in }
     /// Save both keys and reconfigure. Called only when at least one field is valid.
     public var onSaveKeys: (String, String) -> Void = { _, _ in }
+    /// Change the language Saathi answers in. Empty means follow this Mac.
+    public var onLanguage: (String) -> Void = { _ in }
     /// Relaunch Saathi so a permission grant this process could not pick up takes effect.
     public var onRestart: () -> Void = {}
 
@@ -111,4 +145,28 @@ final class IslandDisplay: ObservableObject {
     @Published var topBandHeight: CGFloat = 0
     /// How much room to leave in the middle of that band, so nothing hides under a real notch.
     @Published var notchGap: CGFloat = 0
+
+    // The island's own geometry, published so SwiftUI can draw and animate the backdrop itself.
+    //
+    // It used to be an AppKit layer that Core Animation sprang while the SwiftUI content inside it
+    // simply appeared — so the text arrived before the black had finished growing, which is what
+    // made the open feel unfinished. OpenClicky puts the shape and the content in one `ZStack`
+    // under one `.animation`, so they move as a single object; these are the numbers that lets
+    // Saathi do the same.
+    @Published var collapsedSize: CGSize = .zero
+    @Published var compactSize: CGSize = .zero
+    @Published var openSize: CGSize = .zero
+    /// Nothing is drawn while collapsed on a display without a notch — only the handle marks the spot.
+    @Published var hasHardwareNotch = false
+
+    /// The backdrop's size for the state showing now.
+    var islandSize: CGSize {
+        switch state {
+        case .collapsed: return collapsedSize
+        case .compact: return compactSize
+        case .open: return openSize
+        }
+    }
+
+    var islandCornerRadius: CGFloat { state == .collapsed ? 11 : 16 }
 }

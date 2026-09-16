@@ -8,6 +8,7 @@
   "anthropicKey": "not-a-real-anthropic-key",
   "voiceModel": "not-a-real-voice-model",
   "voice": "not-a-real-voice",
+  "language": "ta",
   "backendUrl": "https://backend.example.test",
   "token": "not-a-real-token"
 }

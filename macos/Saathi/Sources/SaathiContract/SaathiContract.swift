@@ -171,12 +171,14 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var voiceModel: String?
     /// The realtime voice's name. Defaults to the provider row's.
     public var voice: String?
+    /// The language Saathi speaks, as a BCP-47 tag ("en", "hi", "ta", "ko"). Unset means follow this machine's language rather than let the model guess.
+    public var language: String?
     /// Overrides the hosted backend URL. Only used in hosted mode.
     public var backendUrl: String?
     /// Account token for the hosted backend. Only used in hosted mode.
     public var token: String?
 
-    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, backendUrl: String? = nil, token: String? = nil) {
+    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, language: String? = nil, backendUrl: String? = nil, token: String? = nil) {
         self.provider = provider
         self.providerBaseUrl = providerBaseUrl
         self.model = model
@@ -185,6 +187,7 @@ public struct SaathiConfiguration: Codable, Sendable {
         self.anthropicKey = anthropicKey
         self.voiceModel = voiceModel
         self.voice = voice
+        self.language = language
         self.backendUrl = backendUrl
         self.token = token
     }
@@ -217,6 +220,15 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var resolvedVoice: String {
         let trimmed = voice?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? providerRow.defaultVoice : trimmed
+    }
+
+    /// The language Saathi speaks. Unset follows this machine's own language, because a
+    /// companion that guesses picks one at random — and being answered in a language you
+    /// do not read is worse than being answered plainly in the wrong one you do.
+    public var resolvedLanguage: String {
+        let trimmed = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty { return trimmed }
+        return Locale.preferredLanguages.first.flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
     }
 
     /// The credential for a provider: its own vendor field first, then the legacy shared

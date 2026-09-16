@@ -39,6 +39,7 @@ public class SharedFixtureTests
         Assert.Equal("not-a-real-anthropic-key", configuration.AnthropicKey);
         Assert.Equal("not-a-real-voice-model", configuration.VoiceModel);
         Assert.Equal("not-a-real-voice", configuration.Voice);
+        Assert.Equal("ta", configuration.Language);
         Assert.Equal("https://backend.example.test", configuration.BackendUrl);
         Assert.Equal("not-a-real-token", configuration.Token);
     }

@@ -23,6 +23,8 @@ export type SaathiConfiguration = {
   voiceModel?: string;
   /** The realtime voice's name. Defaults to the provider row's. */
   voice?: string;
+  /** The language Saathi speaks, as a BCP-47 tag ("en", "hi", "ta", "ko"). Unset means follow this machine's language rather than let the model guess. */
+  language?: string;
   /** Overrides the hosted backend URL. Only used in hosted mode. */
   backendUrl?: string;
   /** Account token for the hosted backend. Only used in hosted mode. */

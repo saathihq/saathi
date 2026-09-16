@@ -13,6 +13,7 @@
 //
 
 import AppKit
+import Combine
 import QuartzCore
 import SaathiKit
 import SaathiMascot
@@ -25,10 +26,29 @@ public final class NotchPanel: NSPanel {
     static let compactWidth: CGFloat = 240
     static let compactContentHeight: CGFloat = 56
     /// The island the pointer opens: OpenClicky's Home panel, sized the same.
-    static let openWidth: CGFloat = 512
-    static let openContentHeight: CGFloat = 200
+    static let openWidth: CGFloat = 588
+    /// Each face gets its own height. One shared number clipped whichever face was taller — and
+    /// the Setup tab, with two labelled key fields, a verdict line each and an explanation that
+    /// wraps to two lines, is a great deal taller than Home.
+    static let homeContentHeight: CGFloat = 196
+    static let setupContentHeight: CGFloat = 330
+
+    static func openContentHeight(for tab: IslandTab) -> CGFloat {
+        switch tab {
+        case .home: return homeContentHeight
+        case .setup: return setupContentHeight
+        }
+    }
     /// How often the pointer is checked against the island's hover rect.
     static let pollInterval: TimeInterval = 0.05
+
+    /// Long enough for `IslandRootView.spring` to come to rest.
+    ///
+    /// The window shrinks only after this, so a closing island is never clipped by a window that got
+    /// smaller before the content finished moving. SwiftUI does not publish a settling time for
+    /// `.spring(response:dampingFraction:)`, and slightly long is the safe direction to be wrong in:
+    /// too long leaves an invisible transparent window a moment longer, too short cuts the animation.
+    static let springSettleDuration: TimeInterval = 0.9
 
     public let mascot: MascotView
     /// What the Home panel shows; the shell fills it in.
@@ -37,6 +57,12 @@ public final class NotchPanel: NSPanel {
     public var actions = IslandActions() {
         didSet { hosting.rootView = IslandRootView(display: display, model: model, mascot: mascot, actions: actions) }
     }
+    /// Watches the tab so switching Home ⇄ Setup re-lays the island at the new face's height.
+    /// Without this the island keeps whichever height it opened at and the taller face is clipped.
+    private var tabObserver: AnyCancellable?
+    /// Whoever had the keyboard before Setup took it, so they get it back. Following OpenClicky,
+    /// which does the same around its text composer.
+    private var applicationActiveBeforeSetup: NSRunningApplication?
     public private(set) var islandState: IslandState = .collapsed
     public var word: String { model.state.word }
 
@@ -77,6 +103,16 @@ public final class NotchPanel: NSPanel {
         hosting.wantsLayer = true
         island.addSubview(hosting)
         contentView = island
+
+        // A tab switch changes how tall the island needs to be. Re-applying the current state is
+        // enough: `rect(for:)` reads `model.tab`, so it lands on the new face's height with the
+        // same spring the open used.
+        tabObserver = model.$tab
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { self.apply(self.islandState) }
+            }
         mascot.setAccessibilityElement(true)
         mascot.setAccessibilityRole(.image)
 
@@ -149,7 +185,22 @@ public final class NotchPanel: NSPanel {
     /// The island's own view, and whether its content is on show — what the tests read to tell the
     /// two collapsed looks apart without a display of each kind to hand.
     var contents: IslandView { island }
-    var isContentVisible: Bool { !hosting.isHidden }
+    /// Whether the island is showing anything at all.
+    ///
+    /// It used to ask whether the hosting view was hidden. That stopped meaning anything when the
+    /// backdrop moved into SwiftUI: the hosted tree now fills the window in every state and simply
+    /// draws nothing while collapsed, so `isHidden` is always false. The question the tests are
+    /// actually asking is whether the island is showing content, which is the state itself.
+    var isContentVisible: Bool { islandState != .collapsed }
+
+    /// Whether the island's black shape is drawn at all.
+    ///
+    /// This is the same predicate `IslandRootView` draws its backdrop from, not a second opinion —
+    /// the shape moved into SwiftUI so it could spring together with the content, and a test that
+    /// asserted on the old AppKit layer would now be asserting about a view that draws nothing.
+    /// Collapsed on a display without a notch, Saathi puts nothing over the menu bar: there is no
+    /// notch to pretend to be, and only the thin handle marks where to reach.
+    var drawsIslandBackdrop: Bool { islandState != .collapsed || geometry.hasHardwareNotch }
     /// The hosting view's own frame, in the panel's local coordinates — what the tests read to
     /// check the open island is actually 512 pt wide and not just the (always-largest) window.
     var bodyRect: CGRect { toLocal(rect(for: islandState)) }
@@ -163,7 +214,7 @@ public final class NotchPanel: NSPanel {
         case .compact:
             return geometry.islandRect(width: Self.compactWidth, contentHeight: Self.compactContentHeight)
         case .open:
-            return Self.openRect(geometry)
+            return Self.openRect(geometry, tab: model.tab)
         }
     }
 
@@ -176,6 +227,35 @@ public final class NotchPanel: NSPanel {
         if next != islandState { apply(next) }
     }
 
+    /// Takes or returns the keyboard, and only for the Setup tab.
+    ///
+    /// Saathi is an accessory app and the island is a `.nonactivatingPanel`, so while another app is
+    /// frontmost it is that app — not Saathi — that receives ⌘V. Every key equivalent typed at the
+    /// Setup tab went to whatever was behind it. Activating is therefore not optional if a key is
+    /// ever to be pasted rather than typed by hand.
+    ///
+    /// Only for Setup, deliberately. Home is something you glance at on the way past; stealing the
+    /// keyboard to show someone a status panel would be obnoxious, and OpenClicky draws the line in
+    /// the same place — it activates for its composer and nothing else.
+    func setKeyboardFocus(_ wanted: Bool) {
+        if wanted {
+            guard !NSApp.isActive else { makeKeyAndOrderFront(nil); return }
+            let front = NSWorkspace.shared.frontmostApplication
+            if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                applicationActiveBeforeSetup = front
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            makeKeyAndOrderFront(nil)
+        } else {
+            guard let previous = applicationActiveBeforeSetup else { return }
+            applicationActiveBeforeSetup = nil
+            // Giving the keyboard back matters more than taking it: someone who opened Setup from
+            // the middle of writing something should land back in what they were writing.
+            resignKey()
+            previous.activate()
+        }
+    }
+
     /// Put the island layer where the state says, and show or hide what belongs to that state.
     ///
     /// The hosted SwiftUI tree switches on `display.state`: collapsed draws nothing, so the
@@ -184,25 +264,47 @@ public final class NotchPanel: NSPanel {
     /// discipline the hand-laid island used to get by calling `removeFromSuperview()` itself.
     /// `layoutSubtreeIfNeeded()` forces that SwiftUI diff to run now rather than on the next real
     /// display pass, so the change is visible to the caller (and to the tests) immediately.
+    /// Set false by the tests, which need the settled state now rather than after a spring.
+    var animatesIsland = true
+
     func apply(_ islandState: IslandState) {
+        if animatesIsland {
+            withAnimation(IslandRootView.spring) { applyNow(islandState) }
+        } else {
+            applyNow(islandState)
+        }
+    }
+
+    private func applyNow(_ islandState: IslandState) {
         self.islandState = islandState
         let collapsed = islandState == .collapsed
-        let bodyRect = toLocal(rect(for: islandState))
-        island.setIsland(
-            bodyRect,
-            cornerRadius: collapsed ? 11 : 16,
-            visible: !collapsed || geometry.hasHardwareNotch
-        )
-        island.setHandleVisible(collapsed && geometry.showsHandle)
+
+        // Everything the SwiftUI tree needs to draw the island itself. The backdrop is no longer an
+        // AppKit layer being sprung by Core Animation — SwiftUI owns the shape now, so it and the
+        // content move under one animation instead of racing each other.
         display.notchHeight = geometry.notchHeight
         display.topBandHeight = geometry.topBandHeight
         display.notchGap = geometry.hasHardwareNotch ? geometry.notchWidth : 0
+        display.hasHardwareNotch = geometry.hasHardwareNotch
+        display.collapsedSize = rect(for: .collapsed).size
+        display.compactSize = rect(for: .compact).size
+        display.openSize = rect(for: .open).size
         display.state = islandState
-        hosting.frame = bodyRect
-        hosting.isHidden = collapsed
-        mascot.isHidden = collapsed
+
+        // The window has to be big enough BEFORE the spring runs, or the island is clipped by its
+        // own window on the way out; on the way back it shrinks only once the spring has settled.
+        let target = rect(for: islandState)
+        let windowTarget = rect(for: .open).union(target)
+        resizeWindow(to: windowTarget, growing: windowTarget.height >= frame.height)
+
+        island.setContentFrame(toLocal(windowTarget))
+        // The hosted tree fills the window and draws the island top-aligned inside it, so SwiftUI
+        // can spring the shape and the content together without the window clipping either.
+        hosting.frame = toLocal(windowTarget)
+        island.setHandleVisible(collapsed && geometry.showsHandle)
         ignoresMouseEvents = collapsed
-        hosting.layoutSubtreeIfNeeded()
+        setKeyboardFocus(islandState == .open && model.tab == .setup)
+        contentView?.layoutSubtreeIfNeeded()
     }
 
     static func isBusy(_ state: CompanionState) -> Bool {
@@ -240,8 +342,27 @@ public final class NotchPanel: NSPanel {
     /// `notchHeight + openContentHeight`, as before; where the (real or virtual) notch is shorter
     /// than a comfortable top band, the extra height is folded into the content rect so
     /// `NotchGeometry.islandRect`'s own `notchHeight + contentHeight` still lands on the same total.
-    private static func openRect(_ geometry: NotchGeometry) -> CGRect {
-        geometry.islandRect(width: openWidth, contentHeight: openContentHeight + (geometry.topBandHeight - geometry.notchHeight))
+    private static func openRect(_ geometry: NotchGeometry, tab: IslandTab = .home) -> CGRect {
+        geometry.islandRect(
+            width: openWidth,
+            contentHeight: openContentHeight(for: tab) + (geometry.topBandHeight - geometry.notchHeight))
+    }
+
+    /// The window has to be at least as big as the island it will hold, or the island is clipped by
+    /// its own window. Growing it *before* the spring runs and shrinking it *after* is the trick
+    /// OpenClicky uses; doing it the other way round clips the content mid-animation, which is
+    /// exactly what the fixed-height window did on the Setup tab.
+    private func resizeWindow(to target: CGRect, growing: Bool) {
+        guard frame != target else { return }
+        if growing {
+            setFrame(target, display: true)
+        } else {
+            let settle = Self.springSettleDuration
+            DispatchQueue.main.asyncAfter(deadline: .now() + settle) { [weak self] in
+                guard let self, self.frame != target else { return }
+                self.setFrame(target, display: true)
+            }
+        }
     }
 
     /// Screen coordinates into the panel's own.
@@ -270,11 +391,10 @@ final class IslandView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
 
+        // Transparent. The island's black shape is drawn by SwiftUI, inside the same `ZStack` as the
+        // content and under the same spring, which is the whole point: an AppKit layer sprung by
+        // Core Animation cannot carry the content with it, so the text landed before the black did.
         body.wantsLayer = true
-        body.layer?.backgroundColor = NSColor.black.cgColor
-        // Bottom corners only: the top edge is flush with the screen and never shows a curve.
-        body.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        body.layer?.cornerRadius = 11
 
         handle.wantsLayer = true
         handle.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
@@ -292,25 +412,13 @@ final class IslandView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    /// The open and close: a quarter of a second, easing out, which is long enough to read as the
-    /// island coming down and short enough not to lag the pointer that asked for it. The frame is
-    /// written straight through — a backing layer runs no implicit animations, so the move is
-    /// added explicitly and the settled value is the one anything reading the view sees.
-    func setIsland(_ rect: CGRect, cornerRadius: CGFloat, visible: Bool) {
-        body.isHidden = !visible
-        guard let layer = body.layer else {
-            body.frame = rect
-            return
-        }
-        let wasBounds = layer.bounds
-        let wasPosition = layer.position
-        let wasCornerRadius = layer.cornerRadius
+    /// The island's backdrop is drawn by SwiftUI now, so this only places the hosted tree. It used
+    /// to fill a layer black and spring its bounds, which is precisely what made the content arrive
+    /// ahead of the black: Core Animation moved the rectangle, SwiftUI knew nothing about it, and
+    /// the text inside simply snapped to where it was going.
+    func setContentFrame(_ rect: CGRect) {
         body.frame = rect
-        layer.cornerRadius = cornerRadius
-        guard visible, wasBounds.size != layer.bounds.size || wasPosition != layer.position else { return }
-        Self.animate(layer, key: "islandBounds", path: "bounds", from: NSValue(rect: wasBounds), to: NSValue(rect: layer.bounds))
-        Self.animate(layer, key: "islandPosition", path: "position", from: NSValue(point: wasPosition), to: NSValue(point: layer.position))
-        Self.animate(layer, key: "islandCorner", path: "cornerRadius", from: wasCornerRadius, to: cornerRadius)
+        body.isHidden = false
     }
 
     func setHandleRect(_ rect: CGRect) {
@@ -322,12 +430,5 @@ final class IslandView: NSView {
         handle.isHidden = !visible
     }
 
-    private static func animate(_ layer: CALayer, key: String, path: String, from: Any, to: Any) {
-        let move = CABasicAnimation(keyPath: path)
-        move.fromValue = from
-        move.toValue = to
-        move.duration = 0.25
-        move.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.add(move, forKey: key)
-    }
+
 }

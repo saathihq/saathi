@@ -444,6 +444,7 @@ final class SharedFixtureTests: XCTestCase {
         XCTAssertEqual(configuration.anthropicKey, "not-a-real-anthropic-key")
         XCTAssertEqual(configuration.voiceModel, "not-a-real-voice-model")
         XCTAssertEqual(configuration.voice, "not-a-real-voice")
+        XCTAssertEqual(configuration.language, "ta")
         XCTAssertEqual(configuration.backendUrl, "https://backend.example.test")
         XCTAssertEqual(configuration.token, "not-a-real-token")
     }

@@ -93,6 +93,12 @@
         "doc": "The realtime voice's name. Defaults to the provider row's."
       },
       {
+        "name": "language",
+        "type": "string",
+        "optional": true,
+        "doc": "The language Saathi speaks, as a BCP-47 tag (\"en\", \"hi\", \"ta\", \"ko\"). Unset means follow this machine's language rather than let the model guess."
+      },
+      {
         "name": "backendUrl",
         "type": "string",
         "optional": true,

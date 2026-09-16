@@ -143,7 +143,13 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
 
         var request = URLRequest(url: connection.url)
         request.setValue("Bearer \(connection.credential)", forHTTPHeaderField: "Authorization")
-        request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
+        // No `OpenAI-Beta: realtime=v1`. That header came across with the port from OpenClicky and
+        // asks for the beta wire shape, which OpenAI has retired: the socket still opens — a clean
+        // 101 — and the server then rejects the FIRST message with `beta_api_shape_disabled` and
+        // closes with code 4000. `receiveLoop` sets `connected = false`, and the next press of the
+        // keys says "not connected", which points at the network rather than at the header that
+        // actually caused it. Sending no version header at all selects the GA shape, which is what
+        // `sessionUpdate()` below already speaks.
 
         let socket = urlSession.webSocketTask(with: request)
         state.socket = socket
@@ -295,7 +301,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
             "type": "session.update",
             "session": [
                 "type": "realtime",
-                "instructions": Self.instructions,
+                "instructions": Self.instructions(language: configuration.resolvedLanguage),
                 "audio": [
                     "input": input,
                     "output": [
@@ -315,15 +321,38 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     /// asserted on without opening a socket — the two things that make a session silent if wrong.
     func sessionUpdateForTesting() -> [String: Any] { sessionUpdate() }
 
-    static let instructions = """
-    You are Saathi, a companion helping someone learn and play with something new. Speak the \
-    language the learner speaks. Keep spoken replies short — one or two sentences — and never read \
+    /// The prompt, with the language named rather than guessed.
+    ///
+    /// The old text said "Speak the language the learner speaks" and left it there. With nothing to
+    /// go on the model simply picks one — it answered a Delhi user in Korean — and being replied to
+    /// in a language you cannot read is a worse failure than any wording. So the language is stated,
+    /// and where the config does not name one it comes from the machine's own language rather than
+    /// from the model's imagination.
+    static func instructions(language: String) -> String {
+        let named = Locale.current.localizedString(forLanguageCode: language) ?? language
+        return base + """
+
+        Always speak and write in \(named) (\(language)). If the learner speaks to you in a \
+        different language, you may answer in that language instead — but never switch to a third \
+        language, and never guess.
+        """
+    }
+
+    static let base = """
+    You are Saathi, a companion helping someone learn and play with something new. Keep spoken replies short — one or two sentences — and never read \
     a long list aloud. You are not doing the task for them; you are keeping them company while \
     they do it, so prefer a question or a nudge over an instruction. When you walk someone through \
     something, call show_step once per step, in order, and keep talking between the calls so the \
     silence never feels like a hang. Say what is happening before it happens. If you did not \
     understand, say so plainly and ask again rather than guessing — a wrong guess acted on is much \
     worse here than an honest "say that once more".
+
+    You cannot see. You have no camera and no view of the screen, the window, or anything the \
+    learner is looking at — sound is your only sense. When you are asked about something visual, \
+    say plainly that you cannot see it and ask them to describe it or read it out. Never describe \
+    a screen, a photograph, a room, or anything else as though you could see it. Inventing what is \
+    in front of someone is the worst thing you can do here: they will believe you, act on it, and \
+    the mistake will be theirs to discover.
     """
 
     // MARK: Transport

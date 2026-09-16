@@ -47,17 +47,45 @@ struct IslandSetupView: View {
                 state: model.anthropicKeyState,
                 kind: .anthropic)
 
-            if !model.planExplanation.isEmpty {
-                Text(model.planExplanation)
+            // The language row sits with the keys because it is the same kind of decision: something
+            // Saathi would otherwise guess, and guessed wrong loudly enough to be reported.
+            HStack(spacing: 8) {
+                Text("Language")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.85))
+                Picker("", selection: Binding(
+                    get: { model.language },
+                    set: { actions.onLanguage($0) }
+                )) {
+                    ForEach(IslandLanguage.all) { language in
+                        Text(language.title).tag(language.tag)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 160)
+                Text("what it answers in")
                     .font(.system(size: 10.5))
-                    .foregroundColor(Color.white.opacity(0.65))
+                    .foregroundColor(Color.white.opacity(0.62))
+                Spacer()
+            }
+
+            if !model.planExplanation.isEmpty {
+                // This sentence tells someone where their voice is about to go. It was 10.5pt at
+                // 65% white, which on a dark panel is below the 4.5:1 contrast most people need to
+                // read comfortably — a promise nobody can read is not a promise.
+                Text(model.planExplanation)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.white.opacity(0.92))
                     .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(1.5)
             }
 
             if !model.unusedKeyNote.isEmpty {
                 Text(model.unusedKeyNote)
-                    .font(.system(size: 10))
-                    .foregroundColor(Color.white.opacity(0.45))
+                    .font(.system(size: 11))
+                    .foregroundColor(Color.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
@@ -92,8 +120,8 @@ struct IslandSetupView: View {
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundColor(Color.white.opacity(0.85))
                 Text(note)
-                    .font(.system(size: 9.5))
-                    .foregroundColor(Color.white.opacity(0.4))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(Color.white.opacity(0.62))
             }
             HStack(spacing: 6) {
                 // SecureField so a key is not on screen while it is typed, and not in a screenshot.
@@ -143,21 +171,21 @@ struct IslandSetupView: View {
             switch check {
             case .valid:
                 Text("✓ that key works")
-                    .font(.system(size: 9.5)).foregroundColor(.green)
+                    .font(.system(size: 11)).foregroundColor(.green)
             case let .rejected(message):
                 Text(message)
-                    .font(.system(size: 9.5)).foregroundColor(.red)
+                    .font(.system(size: 11)).foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
                     .fixedSize(horizontal: false, vertical: true)
             case let .unreachable(message):
                 // Deliberately not red. Being offline is not the same as being wrong, and colouring
                 // it like a failure sends people off to make a new key.
                 Text(message)
-                    .font(.system(size: 9.5)).foregroundColor(.orange)
+                    .font(.system(size: 11)).foregroundColor(Color(red: 1.0, green: 0.72, blue: 0.32))
                     .fixedSize(horizontal: false, vertical: true)
             }
         case let .saved(masked):
             Text("saved · \(masked)")
-                .font(.system(size: 9.5)).foregroundColor(Color.white.opacity(0.5))
+                .font(.system(size: 11)).foregroundColor(Color.white.opacity(0.72))
         }
     }
 }

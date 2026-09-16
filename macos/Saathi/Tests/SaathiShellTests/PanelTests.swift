@@ -94,13 +94,21 @@ final class PanelTests: XCTestCase {
 
     // MARK: the island
 
+    /// Built with the island's spring switched off. The open and close are animated in the app —
+    /// the backdrop and the content move together under one `withAnimation` — but a transition in
+    /// flight means the outgoing layer is still in the view tree, so an assertion that the mascot
+    /// left the window would be racing the animation rather than testing anything.
     private func island() throws -> (NotchPanel, NSScreen) {
         let screen = try XCTUnwrap(NSScreen.main, "needs a display")
-        return (NotchPanel(data: try data(), color: blue, screen: screen), screen)
+        let panel = NotchPanel(data: try data(), color: blue, screen: screen)
+        panel.animatesIsland = false
+        return (panel, screen)
     }
 
     private func island(_ geometry: NotchGeometry) throws -> NotchPanel {
-        NotchPanel(data: try data(), color: blue, geometry: geometry)
+        let panel = NotchPanel(data: try data(), color: blue, geometry: geometry)
+        panel.animatesIsland = false
+        return panel
     }
 
     /// A 14-inch MacBook Pro's built-in display.
@@ -133,7 +141,7 @@ final class PanelTests: XCTestCase {
     func testNothingIsOnShowUntilSomethingAsksForIt() throws {
         let (panel, _) = try island()
         XCTAssertEqual(panel.islandState, .collapsed)
-        XCTAssertTrue(panel.mascot.isHidden)
+        XCTAssertNil(panel.mascot.superview, "the face leaves the tree, which is what stops its ticker")
     }
 
     func testBeingBusyOpensTheCompactStripByItself() throws {
@@ -142,7 +150,7 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.islandState, .compact)
         XCTAssertEqual(panel.word, "Listening")
         XCTAssertEqual(panel.mascot.expression, .listening)
-        XCTAssertFalse(panel.mascot.isHidden)
+        XCTAssertNotNil(panel.mascot.superview)
         XCTAssertEqual(panel.rect(for: .compact).width, NotchPanel.compactWidth)
     }
 
@@ -155,7 +163,7 @@ final class PanelTests: XCTestCase {
         let away = CGPoint(x: screen.frame.minX + 5, y: screen.frame.minY + 5)
         panel.pollHover(mouse: away, now: now + 1)
         XCTAssertEqual(panel.islandState, .collapsed)
-        XCTAssertTrue(panel.mascot.isHidden)
+        XCTAssertNil(panel.mascot.superview, "the face leaves the tree, which is what stops its ticker")
     }
 
     func testReachingTheTopOfTheScreenBringsTheIslandDown() throws {
@@ -164,7 +172,7 @@ final class PanelTests: XCTestCase {
         panel.pollHover(mouse: atTheNotch, now: CACurrentMediaTime())
         XCTAssertEqual(panel.islandState, .open)
         XCTAssertEqual(panel.rect(for: .open).width, NotchPanel.openWidth)
-        XCTAssertFalse(panel.mascot.isHidden)
+        XCTAssertNotNil(panel.mascot.superview)
         XCTAssertEqual(panel.rect(for: .open).maxY, screen.frame.maxY, accuracy: 0.5)
     }
 
@@ -191,9 +199,9 @@ final class PanelTests: XCTestCase {
     func testOnADisplayWithoutANotchCollapsedIsNothingButTheHandle() throws {
         let panel = try island(secondary)
         panel.apply(.collapsed)
-        XCTAssertFalse(panel.contents.isBodyVisible, "no black pill under the menu bar")
+        XCTAssertFalse(panel.drawsIslandBackdrop, "no black pill under the menu bar")
         XCTAssertTrue(panel.contents.isHandleVisible)
-        XCTAssertTrue(panel.mascot.isHidden)
+        XCTAssertNil(panel.mascot.superview, "the face leaves the tree, which is what stops its ticker")
         XCTAssertFalse(panel.isContentVisible)
         XCTAssertEqual(panel.frame.maxY, 1080, accuracy: 0.5)
         XCTAssertEqual(panel.frame.midX, 1512 + 960, accuracy: 0.5)
@@ -210,7 +218,7 @@ final class PanelTests: XCTestCase {
         let panel = try island(hiddenMenuBar)
         panel.apply(.collapsed)
         XCTAssertFalse(panel.contents.isHandleVisible, "nowhere to sit but over the content")
-        XCTAssertFalse(panel.contents.isBodyVisible)
+        XCTAssertFalse(panel.drawsIslandBackdrop)
     }
 
     func testOnADisplayWithoutANotchTheIslandStillComesDownWhenYouReachForIt() throws {
@@ -218,22 +226,28 @@ final class PanelTests: XCTestCase {
         panel.apply(.collapsed)
         panel.pollHover(mouse: CGPoint(x: 1512 + 960, y: 1079), now: CACurrentMediaTime())
         XCTAssertEqual(panel.islandState, .open)
-        XCTAssertTrue(panel.contents.isBodyVisible)
+        XCTAssertTrue(panel.drawsIslandBackdrop)
         XCTAssertFalse(panel.contents.isHandleVisible, "the handle gives way to the island")
-        XCTAssertFalse(panel.mascot.isHidden)
+        XCTAssertNotNil(panel.mascot.superview)
     }
 
     func testOnANotchedDisplayCollapsedIsTheNotchItselfAndNoHandle() throws {
         let panel = try island(notched)
         panel.apply(.collapsed)
-        XCTAssertTrue(panel.contents.isBodyVisible, "black over black hardware: invisible")
+        XCTAssertTrue(panel.drawsIslandBackdrop, "black over black hardware: invisible")
         XCTAssertFalse(panel.contents.isHandleVisible)
-        XCTAssertTrue(panel.mascot.isHidden)
+        XCTAssertNil(panel.mascot.superview, "the face leaves the tree, which is what stops its ticker")
         XCTAssertEqual(panel.rect(for: .collapsed), notched.notchRect)
     }
 
     /// A `MascotView` tickers on a display link for as long as it is in a window, hidden or not,
     /// so the collapsed island takes it out of the view rather than hiding it.
+    ///
+    /// This used to be asserted through `mascot.isHidden`, which `apply` set by hand. That flag is
+    /// gone: the island's open and close are a SwiftUI transition now, and hiding the view outright
+    /// would make the face vanish instantly while the black was still springing shut. Leaving the
+    /// tree is the guarantee that matters — it is what actually stops the ticker — so that is what
+    /// these assertions check.
     func testACollapsedIslandTakesTheMascotOutOfTheWindowSoItStopsAnimating() throws {
         let (panel, _) = try island()
         panel.apply(.collapsed)
@@ -242,7 +256,7 @@ final class PanelTests: XCTestCase {
 
         panel.apply(.open)
         XCTAssertTrue(panel.mascot.window === panel, "back in the island when it comes down")
-        XCTAssertFalse(panel.mascot.isHidden)
+        XCTAssertNotNil(panel.mascot.superview)
 
         panel.apply(.collapsed)
         XCTAssertNil(panel.mascot.window)
@@ -266,7 +280,7 @@ final class PanelTests: XCTestCase {
         panel.setState(.poweringDown)
         XCTAssertEqual(panel.islandState, .compact)
         XCTAssertEqual(panel.word, "Bye")
-        XCTAssertFalse(panel.mascot.isHidden)
+        XCTAssertNotNil(panel.mascot.superview)
     }
 
     // MARK: the Home panel

@@ -33,14 +33,57 @@ struct IslandRootView: View {
     let mascot: MascotView
     let actions: IslandActions
 
+    /// OpenClicky's exact numbers, and — more to the point — its exact structure.
+    ///
+    /// The backdrop and the content are siblings in one `ZStack` under one `.animation`, so the
+    /// black shape growing and the text arriving are the same movement. Animating the shape on an
+    /// AppKit layer instead, as this did, means SwiftUI knows nothing about the change: the content
+    /// snaps to its final place while the black is still on its way, and the open reads as two
+    /// things happening near each other rather than one thing opening.
+    /// Driven from `NotchPanel.apply` with an explicit `withAnimation` rather than an
+    /// `.animation(value:)` modifier. Explicit because the panel has to be able to make the change
+    /// *without* animating — a test that asserts the mascot left the window cannot wait out a
+    /// spring, and a tree change that only lands when a transition finishes is untestable.
+    static let spring = Animation.spring(response: 0.42, dampingFraction: 0.84)
+    /// Content fades and scales up from the top edge, so it appears to unfold out of the notch
+    /// rather than cross-fade in place.
+    static let contentTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.94, anchor: .top))
+
     var body: some View {
+        ZStack(alignment: .top) {
+            content
+                .background(backdrop)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// The black shape sits *behind* the content rather than beside it at a hand-set size, so the
+    /// two are the same rectangle by construction — the backdrop cannot lag the text, and no
+    /// constant has to be kept in step with what the content actually needs.
+    @ViewBuilder
+    private var backdrop: some View {
+        if display.state != .collapsed || display.hasHardwareNotch {
+            RoundedRectangle(cornerRadius: display.islandCornerRadius, style: .continuous)
+                .fill(Color.black)
+        }
+    }
+
+    /// Only the live layer is in the tree. A hidden sibling would keep the mascot in the window and
+    /// its display-link ticker running, which is what taking it out of the tree exists to stop.
+    @ViewBuilder
+    private var content: some View {
         switch display.state {
         case .collapsed:
             Color.clear
+                .frame(width: display.collapsedSize.width, height: display.collapsedSize.height)
         case .compact:
             IslandCompactView(display: display, model: model, mascot: mascot)
+                .frame(width: display.compactSize.width, height: display.compactSize.height)
+                .transition(Self.contentTransition)
         case .open:
             IslandHomeView(display: display, model: model, mascot: mascot, actions: actions)
+                .frame(width: display.openSize.width)
+                .transition(Self.contentTransition)
         }
     }
 }
@@ -85,7 +128,7 @@ struct IslandHomeView: View {
                 tabStrip
                 switch model.tab {
                 case .home:
-                    HStack(alignment: .top, spacing: 18) {
+                    HStack(alignment: .top, spacing: 22) {
                         leftColumn
                         rightColumn
                     }
@@ -94,8 +137,8 @@ struct IslandHomeView: View {
                 }
                 bottomRow
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -108,7 +151,7 @@ struct IslandHomeView: View {
             tabButton("Setup", .setup)
             Spacer()
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 6)
     }
 
     private func tabButton(_ title: String, _ tab: IslandTab) -> some View {
@@ -158,28 +201,36 @@ struct IslandHomeView: View {
     // MARK: left column — where it thinks
 
     private var leftColumn: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            MascotHostView(mascot: mascot).frame(width: 72, height: 72)
-            Text("Where I think")
-                .font(.system(size: 13.5, weight: .bold))
-                .foregroundColor(.white)
-                .padding(.top, 4)
-            Text(model.providerTitle)
-                .font(.system(size: 10.5))
-                .foregroundColor(Color.white.opacity(0.55))
-            Text(model.privacyLine)
-                .font(.system(size: 10.5))
-                .foregroundColor(Color.white.opacity(0.55))
+        // The face sits beside the heading rather than on a plinth above it. Stacked, a 72pt mascot
+        // and a `maxWidth: .infinity` column pushed the two halves to opposite edges and left a band
+        // of dead space down the middle of the panel; side by side, the same information reads as
+        // one block and the island gets materially shorter.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                MascotHostView(mascot: mascot).frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Where I think")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(model.providerTitle)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.white.opacity(0.72))
+                        .lineLimit(1)
+                    Text(model.privacyLine)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.white.opacity(0.72))
+                        .lineLimit(1)
+                }
+            }
             capsuleButton("Provider…", action: actions.onProvider)
-                .padding(.top, 6)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(width: 244, alignment: .leading)
     }
 
     // MARK: right column — how to talk to it, and what to fix
 
     private var rightColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             sectionHeader("command", "Shortcuts")
             shortcutRow(title: "Talk", keys: ["⌃ control", "⌥ option"], note: "hold")
             shortcutRow(title: "Talk from the menu", keys: ["menu bar ▸ Talk"])
@@ -204,7 +255,7 @@ struct IslandHomeView: View {
                     .foregroundColor(Color.white.opacity(0.45))
             }
         }
-        .frame(width: 180, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sectionHeader(_ systemImage: String, _ title: String) -> some View {
@@ -268,7 +319,7 @@ struct IslandHomeView: View {
             Spacer()
             capsuleButton("Quit", action: actions.onQuit)
         }
-        .padding(.top, 6)
+        .padding(.top, 8)
     }
 
     private func capsuleButton(_ title: String, action: @escaping () -> Void) -> some View {

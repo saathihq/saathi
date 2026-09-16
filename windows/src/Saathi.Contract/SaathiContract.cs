@@ -184,6 +184,10 @@ public sealed class SaathiConfiguration
     [JsonPropertyName("voice")]
     public string? Voice { get; set; }
 
+    /// <summary>The language Saathi speaks, as a BCP-47 tag ("en", "hi", "ta", "ko"). Unset means follow this machine's language rather than let the model guess.</summary>
+    [JsonPropertyName("language")]
+    public string? Language { get; set; }
+
     /// <summary>Overrides the hosted backend URL. Only used in hosted mode.</summary>
     [JsonPropertyName("backendUrl")]
     public string? BackendUrl { get; set; }
@@ -212,6 +216,12 @@ public sealed class SaathiConfiguration
 
     public string ResolvedVoice =>
         string.IsNullOrWhiteSpace(Voice) ? ProviderRow.DefaultVoice : Voice!.Trim();
+
+    /// <summary>The language Saathi speaks. Unset follows this machine's own language.</summary>
+    public string ResolvedLanguage =>
+        string.IsNullOrWhiteSpace(Language)
+            ? (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName ?? "en")
+            : Language!.Trim();
 
     /// <summary>The credential for a provider: its own vendor field first, then the legacy
     /// shared ApiKey. Providers needing no key of their own get null.</summary>
