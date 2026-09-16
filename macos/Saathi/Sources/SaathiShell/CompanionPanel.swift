@@ -21,6 +21,15 @@ public final class CompanionPanel: NSPanel {
     private var follower: PointerFollower
     private var timer: Timer?
     private var lastStep: TimeInterval = CACurrentMediaTime()
+    private var lastPointer: CGPoint?
+
+    /// How close to its place beside the pointer counts as arrived: below a quarter point the
+    /// ease has nothing left to show on any display.
+    static let settledDistance: CGFloat = 0.25
+
+    /// How many times the window has actually been moved. The tests read it to tell a still
+    /// buddy from one that is being re-placed sixty times a second where it already is.
+    private(set) var moves = 0
 
     public private(set) var isShowing = false
 
@@ -95,9 +104,25 @@ public final class CompanionPanel: NSPanel {
     }
 
     /// One frame of following. Internal so tests can drive it without a timer.
+    ///
+    /// Moving a window is not free — it goes to the window server and redraws — and the buddy is
+    /// asked to step sixty times a second whether or not the pointer went anywhere. So a still
+    /// pointer that the ease has already caught up with costs nothing at all, and an ease whose
+    /// remaining fraction of a point rounds to the origin the panel is already at is not written.
     func step(pointer: CGPoint, dt: TimeInterval) {
+        if pointer == lastPointer, remainingDistance(to: pointer) < Self.settledDistance { return }
+        lastPointer = pointer
         follower.follow(pointer, dt: dt)
-        setFrameOrigin(Self.integral(follower.origin(forPanelOf: frame.size)))
+        let origin = Self.integral(follower.origin(forPanelOf: frame.size))
+        if origin == frame.origin, remainingDistance(to: pointer) < Self.settledDistance { return }
+        moves += 1
+        setFrameOrigin(origin)
+    }
+
+    /// How far the eased position still has to travel to the buddy's place beside the pointer.
+    private func remainingDistance(to pointer: CGPoint) -> CGFloat {
+        hypot(pointer.x + follower.offset.dx - follower.position.x,
+              pointer.y + follower.offset.dy - follower.position.y)
     }
 
     /// AppKit snaps a window's frame to the backing pixel grid, which can grow `side` × `side`

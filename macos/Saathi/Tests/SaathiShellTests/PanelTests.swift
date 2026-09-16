@@ -41,6 +41,24 @@ final class PanelTests: XCTestCase {
         XCTAssertGreaterThan(panel.frame.origin.y, before.y)
     }
 
+    /// Sixty steps a second on a pointer that has not moved used to be sixty window moves a
+    /// second, each one going to the window server for nothing.
+    func testTheBuddyMovesNoWindowWhileThePointerIsStill() throws {
+        let screen = try XCTUnwrap(NSScreen.main, "needs a display")
+        let panel = CompanionPanel()
+        let pointer = CGPoint(x: screen.frame.midX, y: screen.frame.midY)
+        for _ in 0..<120 { panel.step(pointer: pointer, dt: 1.0 / 60) }
+
+        let settled = panel.frame.origin
+        let moves = panel.moves
+        panel.step(pointer: pointer, dt: 1.0 / 60)
+        XCTAssertEqual(panel.frame.origin, settled, "the buddy had already arrived")
+        XCTAssertEqual(panel.moves, moves, "a still pointer moves no window")
+
+        panel.step(pointer: CGPoint(x: pointer.x + 300, y: pointer.y), dt: 1.0 / 60)
+        XCTAssertGreaterThan(panel.moves, moves, "and it follows again the moment the pointer does")
+    }
+
     func testTheBuddyIsASixteenPointOrangeTriangleWithAGlow() {
         let panel = CompanionPanel()
         XCTAssertEqual(PointerBuddyView.triangleSide, 16)
