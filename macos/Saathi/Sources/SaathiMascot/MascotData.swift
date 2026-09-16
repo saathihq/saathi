@@ -7,6 +7,7 @@
 //  bundle by scripts/port-mascot.py; nothing here is hand-typed.
 //
 
+import CoreGraphics
 import Foundation
 
 public struct MascotData: Decodable, Sendable {
@@ -76,5 +77,12 @@ public struct MascotData: Decodable, Sendable {
             throw LoadError.missingResource
         }
         return try JSONDecoder().decode(MascotData.self, from: Data(contentsOf: url))
+    }
+
+    /// The body outline as a path in the body's own square (0…2·eyeRefX), ready to draw.
+    public func bodyOutline() throws -> CGPath {
+        var transform = bodyTransform.affine
+        let raw = try SVGPath.cgPath(from: bodyPath)
+        return raw.copy(using: &transform) ?? raw
     }
 }

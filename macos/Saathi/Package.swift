@@ -16,6 +16,8 @@ let package = Package(
         .library(name: "SaathiKit", targets: ["SaathiKit"]),
         .library(name: "SaathiMascot", targets: ["SaathiMascot"]),
         .executable(name: "saathi", targets: ["saathi"]),
+        .library(name: "SaathiShell", targets: ["SaathiShell"]),
+        .executable(name: "SaathiApp", targets: ["SaathiApp"]),
     ],
     targets: [
         // Generated from contract/schema/saathi.json. Never edited by hand; `npm run generate -w
@@ -36,6 +38,16 @@ let package = Package(
         .executableTarget(name: "MascotPreview", dependencies: ["SaathiMascot"]),
 
         .testTarget(name: "SaathiMascotTests", dependencies: ["SaathiMascot"]),
+
+        // The app shell: everything with a window in it, as a library so it can be tested. The
+        // only target that sees both the voice side (SaathiKit) and the character (SaathiMascot).
+        .target(name: "SaathiShell", dependencies: ["SaathiKit", "SaathiMascot"]),
+
+        // The bundle's main executable. Three lines: it exists so LaunchServices has something
+        // to launch and TCC has something to attribute permissions to.
+        .executableTarget(name: "SaathiApp", dependencies: ["SaathiShell"]),
+
+        .testTarget(name: "SaathiShellTests", dependencies: ["SaathiShell"]),
 
         .testTarget(name: "SaathiKitTests", dependencies: ["SaathiKit"]),
     ]
