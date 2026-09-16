@@ -43,8 +43,6 @@ public enum CompanionEvent: Equatable, Sendable {
     case keysHeld
     /// Either key lifted.
     case keysReleased
-    /// The menu's Talk item, for people who cannot hold keys: press to start, press to stop.
-    case talkPressed
     /// A lane's free-text status line ("listening…", "thinking…", "did not catch that", …).
     case status(String)
     case userSpoke(String)
@@ -101,8 +99,6 @@ public struct CompanionStateMachine: Equatable, Sendable {
             state = .listening
         case .keysReleased:
             state = .thinking
-        case .talkPressed:
-            state = state == .listening ? .thinking : .listening
         case let .status(text):
             state = Self.state(forStatus: text, current: state)
             if case .alert = state { settleAt = now + idleDelay }

@@ -23,11 +23,6 @@ final class CompanionStateTests: XCTestCase {
         XCTAssertEqual(machine.apply(.keysReleased, now: 1_001), .idle)
     }
 
-    func testTheTalkMenuItemToggles() {
-        XCTAssertEqual(machine.apply(.talkPressed, now: 1_001), .listening)
-        XCTAssertEqual(machine.apply(.talkPressed, now: 1_002), .thinking)
-    }
-
     func testTheLanesStatusLinesDriveTheState() {
         XCTAssertEqual(machine.apply(.status("listening…"), now: 1_001), .listening)
         XCTAssertEqual(machine.apply(.status("thinking…"), now: 1_002), .thinking)

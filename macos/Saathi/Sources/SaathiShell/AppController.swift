@@ -30,9 +30,10 @@ public final class AppController {
     private var speaker: ObservedSpeaker!
     private var performer: ActionPerformer!
     private var session: (any VoiceSession)?
-    private var turnOpen = false
+    private var turns: TurnCoordinator!
     private var monitor: HoldToTalkMonitor?
     private var ticker: Timer?
+    private var permissionPoll: Timer?
 
     public init() throws {
         configuration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
@@ -61,7 +62,7 @@ public final class AppController {
         render(force: true)
         startTicking()
         startVoice()
-        startHoldToTalk()
+        startHoldToTalkIfPossible()
         refreshPermissions()
     }
 
@@ -99,6 +100,10 @@ public final class AppController {
         do {
             let session = try VoiceSessionFactory.make(configuration: configuration, speaker: speaker)
             self.session = session
+            turns = TurnCoordinator(
+                begin: { try await session.beginTurn() },
+                end: { try await session.endTurn() },
+                onFailure: { [weak self] message in self?.handle(.failure(message)) })
             let callbacks = VoiceSessionCallbacks(
                 onUserTranscript: { [weak self] text in Task { @MainActor in self?.handle(.userSpoke(text)) } },
                 onSaathiTranscript: { [weak self] text in Task { @MainActor in self?.handle(.saathiSpoke(text)) } },
@@ -106,7 +111,13 @@ public final class AppController {
                     Task { @MainActor in
                         guard let self else { return }
                         self.handle(.action(action))
-                        Task { try? await self.performer.perform(action) }
+                        Task {
+                            do {
+                                try await self.performer.perform(action)
+                            } catch {
+                                await MainActor.run { self.handle(.failure(error.localizedDescription)) }
+                            }
+                        }
                     }
                 },
                 onStatus: { [weak self] status in Task { @MainActor in self?.handle(.status(status)) } }
@@ -123,43 +134,30 @@ public final class AppController {
         }
     }
 
-    private func beginTurn() {
-        guard let session, !turnOpen else { return }
-        turnOpen = true
-        Task {
-            do { try await session.beginTurn() } catch { await MainActor.run { self.handle(.failure(error.localizedDescription)) } }
-        }
-    }
-
-    private func endTurn() {
-        guard let session, turnOpen else { return }
-        turnOpen = false
-        Task {
-            do { try await session.endTurn() } catch { await MainActor.run { self.handle(.failure(error.localizedDescription)) } }
-        }
-    }
-
     // MARK: hold to talk
 
-    private func startHoldToTalk() {
+    /// A no-op when a monitor is already installed or Input Monitoring is not yet granted. Called
+    /// from `start()`, from the Talk item (a granted-while-running permission takes effect there
+    /// too), and from the Fix permissions poll below — so the tap is retried wherever the grant
+    /// might land, with no relaunch needed.
+    private func startHoldToTalkIfPossible() {
+        guard monitor == nil, HoldToTalkMonitor.isPermitted() else { return }
         let monitor = HoldToTalkMonitor { [weak self] event in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let turns = self.turns else { return }
                 switch event {
                 case .began:
-                    self.beginTurn()
-                    self.handle(.keysHeld)
+                    if turns.open() { self.handle(.keysHeld) }
                 case .ended:
-                    self.endTurn()
-                    self.handle(.keysReleased)
+                    if turns.close() { self.handle(.keysReleased) }
                 }
             }
         }
         do {
             try monitor.start()
             self.monitor = monitor
+            refreshPermissions()
         } catch {
-            // Not permitted: the menu's Fix permissions item opens the pane; the Talk item still works.
             self.monitor = nil
         }
     }
@@ -173,9 +171,13 @@ public final class AppController {
 
     private func wireMenu() {
         menu.onTalk = { [weak self] in
-            guard let self else { return }
-            if self.turnOpen { self.endTurn() } else { self.beginTurn() }
-            self.handle(.talkPressed)
+            guard let self, let turns = self.turns else { return }
+            if turns.isOpen {
+                turns.close(); self.handle(.keysReleased)
+            } else {
+                turns.open(); self.handle(.keysHeld)
+            }
+            self.startHoldToTalkIfPossible()   // a granted-while-running permission takes effect here too
         }
         menu.onToggleCompanion = { [weak self] visible in
             guard let self else { return }
@@ -201,7 +203,18 @@ public final class AppController {
             if Permissions.status(of: .inputMonitoring) != .granted, self.monitor == nil {
                 _ = HoldToTalkMonitor.requestPermission()
                 NSWorkspace.shared.open(Permission.inputMonitoring.settingsURL)
-                // If the grant arrives while we run, the tap can be installed next time Talk is used.
+                // The poll below and the Talk item both retry installing the tap, so the grant
+                // takes effect without a relaunch.
+                self.permissionPoll?.invalidate()
+                var remaining = 120
+                self.permissionPoll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
+                    Task { @MainActor in
+                        guard let self else { timer.invalidate(); return }
+                        remaining -= 1
+                        self.startHoldToTalkIfPossible()
+                        if self.monitor != nil || remaining <= 0 { timer.invalidate(); self.permissionPoll = nil }
+                    }
+                }
             } else if let first = Permission.allCases.first(where: { Permissions.status(of: $0) != .granted }) {
                 NSWorkspace.shared.open(first.settingsURL)
             }
