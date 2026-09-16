@@ -174,7 +174,7 @@ public final class NotchPanel: NSPanel {
             cornerRadius: collapsed ? 11 : 16,
             visible: !collapsed || geometry.hasHardwareNotch
         )
-        island.setHandleVisible(collapsed && !geometry.hasHardwareNotch)
+        island.setHandleVisible(collapsed && geometry.showsHandle)
         setMascotInIsland(!collapsed)
         mascot.isHidden = collapsed
         label.isHidden = collapsed

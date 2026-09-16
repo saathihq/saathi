@@ -199,6 +199,20 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.frame.midX, 1512 + 960, accuracy: 0.5)
     }
 
+    func testWithNoMenuBarBandTheCollapsedIslandShowsNoHandle() throws {
+        let hiddenMenuBar = NotchGeometry.forScreen(
+            frame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            safeAreaTop: 0,
+            leftAuxiliary: nil,
+            rightAuxiliary: nil
+        )
+        let panel = try island(hiddenMenuBar)
+        panel.apply(.collapsed)
+        XCTAssertFalse(panel.contents.isHandleVisible, "nowhere to sit but over the content")
+        XCTAssertFalse(panel.contents.isBodyVisible)
+    }
+
     func testOnADisplayWithoutANotchTheIslandStillComesDownWhenYouReachForIt() throws {
         let panel = try island(secondary)
         panel.apply(.collapsed)

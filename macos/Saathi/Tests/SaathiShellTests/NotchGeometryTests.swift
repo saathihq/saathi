@@ -64,6 +64,14 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertEqual(handle.size, NotchGeometry.handleSize)
     }
 
+    /// A hidden menu bar (or full screen) leaves no band to tuck the handle into, and a handle
+    /// over somebody's content explains nothing.
+    func testWithNoMenuBarBandThereIsNoHandle() {
+        XCTAssertFalse(virtual(visibleTop: 982).showsHandle, "no band, no handle")
+        XCTAssertTrue(virtual(visibleTop: 958).showsHandle, "a 24 pt band has room for it")
+        XCTAssertFalse(notched().showsHandle, "a hardware notch needs no marker")
+    }
+
     func testAuxiliaryAreasThatDoNotStraddleANotchAreNotOne() {
         // A display that reports a safe area but no gap between the two areas has no notch to hang
         // anything in; the virtual one is the honest answer.
