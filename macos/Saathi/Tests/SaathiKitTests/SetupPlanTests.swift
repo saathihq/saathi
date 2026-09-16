@@ -100,4 +100,51 @@ final class SetupPlanTests: XCTestCase {
         let config = plan.applied(to: SaathiConfiguration(), openAIKey: "sk-o", anthropicKey: "sk-bad")
         XCTAssertNil(config.anthropicKey)
     }
+
+    /// Keys pasted from many sources arrive with trailing whitespace or newlines. Trimming is
+    /// non-negotiable; if skipped, the key is refused as malformed on the next launch, which looks
+    /// like the key suddenly stopped working.
+    func testAKeyWithLeadingTrailingWhitespaceIsTrimmedBeforeStorage() {
+        let plan = SetupPlan.make(openAIKeyValid: true, anthropicKeyValid: true)
+        let config = plan.applied(
+            to: SaathiConfiguration(),
+            openAIKey: "  sk-o  \n",
+            anthropicKey: "  sk-a  \n"
+        )
+
+        XCTAssertEqual(config.openaiKey, "sk-o", "leading and trailing whitespace must be trimmed")
+        XCTAssertEqual(
+            config.anthropicKey,
+            "sk-a",
+            "unused key is still stored, also trimmed"
+        )
+    }
+
+    /// A key that is only whitespace is not stored as an empty string — it is not stored at all.
+    /// Empty strings would be indistinguishable from "not present" and would clutter config.
+    func testAWhitespaceOnlyKeyIsStoredAsNilNotEmptyString() {
+        let plan = SetupPlan.make(openAIKeyValid: true, anthropicKeyValid: true)
+        let config = plan.applied(
+            to: SaathiConfiguration(),
+            openAIKey: "sk-o",
+            anthropicKey: "   \n\t   "
+        )
+
+        XCTAssertEqual(
+            config.openaiKey,
+            "sk-o"
+        )
+        XCTAssertNil(config.anthropicKey, "whitespace-only key becomes nil, not empty string")
+    }
+
+    /// When a key did not validate, an existing stored key for that provider is kept — it was
+    /// good once. Clearing it would erase a working credential just because this attempt failed,
+    /// which is worse than keeping a stale one that the user can see and update.
+    func testAnExistingKeyIsPreservedWhenNewAttemptDidNotValidate() {
+        let existing = SaathiConfiguration(anthropicKey: "sk-a-old")
+        let plan = SetupPlan.make(openAIKeyValid: false, anthropicKeyValid: false)
+        let config = plan.applied(to: existing, openAIKey: "", anthropicKey: "sk-a-bad")
+
+        XCTAssertEqual(config.anthropicKey, "sk-a-old", "existing valid key preserved when new attempt fails")
+    }
 }
