@@ -37,7 +37,7 @@ public enum ProviderReport {
 
     private static func keyLine(row: SaathiProvider, configuration: SaathiConfiguration) -> String {
         guard row.requiresKey else { return "not needed" }
-        let present = !(configuration.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let present = configuration.credential(for: row.kind) != nil
         // Never the key itself, and never a prefix of it: a logged prefix is still a logged secret.
         return present ? "set" : "MISSING — this mode cannot run without it"
     }

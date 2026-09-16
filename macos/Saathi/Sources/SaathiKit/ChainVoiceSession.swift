@@ -190,7 +190,7 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         // The credential and how to present it both come from the contract row, so adding a
         // provider stays a row in the schema rather than a branch here.
-        let credential = (row.requiresToken ? configuration.token : configuration.apiKey) ?? ""
+        let credential = (row.requiresToken ? configuration.token : configuration.credential(for: row.kind)) ?? ""
         if let header = row.authorizationHeader(credential: credential) {
             request.setValue(header.value, forHTTPHeaderField: header.name)
         }

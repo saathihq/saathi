@@ -66,7 +66,7 @@ public enum VoiceSessionFactory {
     ) throws -> any VoiceSession {
         let row = configuration.providerRow
 
-        if row.requiresKey, (configuration.apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if row.requiresKey, configuration.credential(for: row.kind) == nil {
             throw VoiceError.notConfigured(
                 "\(row.kind.rawValue) needs your own API key in ~/.saathi/shell.json before it can be spoken to.")
         }

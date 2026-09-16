@@ -355,6 +355,68 @@ final class RealtimeConnectionTests: XCTestCase {
             XCTAssertTrue("\(error)".contains("account token"), "got: \(error)")
         }
     }
+
+    // MARK: The socket is opened with a voice model, not the thinking model
+    //
+    // The bug this guards: `resolveConnection` built its URL from `resolvedModel`, which falls back
+    // to the provider row's `defaultModel` — `gpt-4o-mini` for OpenAI — and is therefore never
+    // empty, so the `.isEmpty ? "gpt-realtime" : …` guard meant to catch it was dead code.
+    // Bring-your-own-key voice could never connect, and the failure arrived from the provider as an
+    // opaque socket close.
+
+    func testTheSocketCarriesTheVoiceModel() async throws {
+        let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
+        let session = RealtimeVoiceSession(configuration: configuration)
+        let connection = try await session.resolveConnection()
+
+        XCTAssertEqual(connection.model, "gpt-realtime")
+        XCTAssertTrue(
+            connection.url.absoluteString.contains("model=gpt-realtime"),
+            "opened with \(connection.url.absoluteString)")
+        XCTAssertFalse(
+            connection.url.absoluteString.contains("gpt-4o-mini"),
+            "the thinking model must never reach the socket")
+    }
+
+    /// Someone pinning a thinking model must not silently re-break the socket.
+    func testPinningTheThinkingModelDoesNotChangeTheSocket() async throws {
+        let configuration = SaathiConfiguration(provider: .openai, model: "gpt-4o", openaiKey: "sk-o")
+        let session = RealtimeVoiceSession(configuration: configuration)
+        let connection = try await session.resolveConnection()
+
+        XCTAssertEqual(connection.model, "gpt-realtime")
+        XCTAssertFalse(connection.url.absoluteString.contains("gpt-4o&"))
+    }
+
+    func testTheVoiceModelCanBePinnedOnItsOwn() async throws {
+        let configuration = SaathiConfiguration(
+            provider: .openai, openaiKey: "sk-o", voiceModel: "gpt-realtime-mini")
+        let session = RealtimeVoiceSession(configuration: configuration)
+        let connection = try await session.resolveConnection()
+
+        XCTAssertEqual(connection.model, "gpt-realtime-mini")
+    }
+
+    /// The vendor field must be what the socket presents, or a config holding two keys would open
+    /// OpenAI's socket with an Anthropic key.
+    func testTheSocketPresentsTheOpenAIKeyNotTheOtherOne() async throws {
+        let configuration = SaathiConfiguration(
+            provider: .openai, openaiKey: "sk-openai", anthropicKey: "sk-ant")
+        let session = RealtimeVoiceSession(configuration: configuration)
+        let connection = try await session.resolveConnection()
+
+        XCTAssertEqual(connection.credential, "sk-openai")
+    }
+
+    func testAMissingKeySaysSoRatherThanOpeningAnUnauthenticatedSocket() async {
+        let session = RealtimeVoiceSession(configuration: SaathiConfiguration(provider: .openai))
+        do {
+            _ = try await session.resolveConnection()
+            XCTFail("an unauthenticated socket must never be opened")
+        } catch {
+            XCTAssertTrue("\(error)".contains("key"), "got: \(error)")
+        }
+    }
 }
 
 // MARK: - A URLSession that answers without a network
@@ -383,5 +445,72 @@ private extension URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+// MARK: - A voice is actually asked for
+
+/// A companion whose premise is sounding like a person should not accept whatever the provider
+/// happens to default to this month.
+final class RealtimeVoiceNameTests: XCTestCase {
+
+    func testTheSessionAsksForTheConfiguredVoice() throws {
+        let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
+        let session = RealtimeVoiceSession(configuration: configuration)
+        let update = session.sessionUpdateForTesting()
+
+        let sessionObject = try XCTUnwrap(update["session"] as? [String: Any])
+        let audio = try XCTUnwrap(sessionObject["audio"] as? [String: Any])
+        let output = try XCTUnwrap(audio["output"] as? [String: Any])
+        XCTAssertEqual(output["voice"] as? String, "cedar")
+    }
+
+    func testTheVoiceCanBeChanged() throws {
+        let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o", voice: "marin")
+        let session = RealtimeVoiceSession(configuration: configuration)
+        let update = session.sessionUpdateForTesting()
+
+        let sessionObject = try XCTUnwrap(update["session"] as? [String: Any])
+        let audio = try XCTUnwrap(sessionObject["audio"] as? [String: Any])
+        let output = try XCTUnwrap(audio["output"] as? [String: Any])
+        XCTAssertEqual(output["voice"] as? String, "marin")
+    }
+
+    /// The format has to survive adding the voice beside it, or every session goes silent.
+    func testTheOutputFormatIsStillThere() throws {
+        let session = RealtimeVoiceSession(
+            configuration: SaathiConfiguration(provider: .openai, openaiKey: "sk-o"))
+        let update = session.sessionUpdateForTesting()
+
+        let sessionObject = try XCTUnwrap(update["session"] as? [String: Any])
+        let audio = try XCTUnwrap(sessionObject["audio"] as? [String: Any])
+        let output = try XCTUnwrap(audio["output"] as? [String: Any])
+        let format = try XCTUnwrap(output["format"] as? [String: Any])
+        XCTAssertEqual(format["type"] as? String, "audio/pcm")
+    }
+}
+
+// MARK: - The factory and the report read the vendor field
+
+final class VendorKeyPlumbingTests: XCTestCase {
+
+    /// The factory's own key check is a separate code path from the session's, and a config holding
+    /// only a vendor key must not be refused before the session is ever built.
+    func testTheFactoryAcceptsAVendorKey() throws {
+        let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
+        XCTAssertNoThrow(
+            try VoiceSessionFactory.make(configuration: configuration, speaker: RecordingSpeaker()))
+    }
+
+    func testTheFactoryStillRefusesWhenThereIsNoKeyAtAll() {
+        let configuration = SaathiConfiguration(provider: .openai)
+        XCTAssertThrowsError(
+            try VoiceSessionFactory.make(configuration: configuration, speaker: RecordingSpeaker()))
+    }
+
+    func testTheReportSeesAVendorKey() {
+        let configuration = SaathiConfiguration(provider: .anthropic, anthropicKey: "sk-ant")
+        let report = ProviderReport.describe(configuration)
+        XCTAssertTrue(report.contains("your key   set"), "got:\n\(report)")
     }
 }

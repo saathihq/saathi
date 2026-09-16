@@ -186,11 +186,19 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         let row = configuration.providerRow
 
         if !row.requiresToken {
-            guard let key = configuration.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !key.isEmpty else {
+            // The vendor field first, then the legacy shared one. A config holding both an OpenAI
+            // and an Anthropic key must present the OpenAI one here, not whichever was written last.
+            guard let key = configuration.credential(for: row.kind) else {
                 throw VoiceError.notConfigured("\(row.kind.rawValue) mode needs an API key in ~/.saathi/shell.json")
             }
-            let model = configuration.resolvedModel.isEmpty ? "gpt-realtime" : configuration.resolvedModel
+            // The VOICE model, never `resolvedModel`. A realtime socket opened with the thinking
+            // model is refused by the provider, and the refusal arrives as an opaque socket close
+            // that looks like a network problem — which is how this went unnoticed.
+            let model = configuration.resolvedVoiceModel
+            guard !model.isEmpty else {
+                throw VoiceError.notConfigured(
+                    "\(row.kind.rawValue) names no realtime voice model, so it has no socket to open")
+            }
             guard let url = Self.socketURL(baseURL: configuration.resolvedProviderBaseURL, model: model) else {
                 throw VoiceError.transport("cannot build a realtime URL for model \"\(model)\"")
             }
@@ -290,13 +298,22 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
                 "instructions": Self.instructions,
                 "audio": [
                     "input": input,
-                    "output": ["format": ["type": "audio/pcm", "rate": Int(VoiceAudioEngine.sampleRate)]],
+                    "output": [
+                        "format": ["type": "audio/pcm", "rate": Int(VoiceAudioEngine.sampleRate)],
+                        // Chosen rather than defaulted. A companion whose whole premise is sounding
+                        // like a person should not inherit whatever the provider picks this month.
+                        "voice": configuration.resolvedVoice,
+                    ],
                 ],
                 "tools": tools,
                 "tool_choice": "auto",
             ],
         ]
     }
+
+    /// The session update as it would be sent. Exists so the voice and the audio format can be
+    /// asserted on without opening a socket — the two things that make a session silent if wrong.
+    func sessionUpdateForTesting() -> [String: Any] { sessionUpdate() }
 
     static let instructions = """
     You are Saathi, a companion helping someone learn and play with something new. Speak the \
