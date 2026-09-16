@@ -296,12 +296,75 @@ public final class AppController {
     }
 
     /// Whether a key counts as usable for `SetupPlan`: a verdict that says so, *and* an effective
-    /// key actually behind it. `onSaveKeys` and `refreshPlanExplanation` both preview the same plan
-    /// and must agree on it, so this is the one place either of them consults — a `.saved` or
-    /// `.checked(.valid)` verdict with no effective key (nothing on disk, an empty field) must not
-    /// count in either.
+    /// key actually behind it. A `.saved` or `.checked(.valid)` verdict with no effective key
+    /// (nothing on disk, an empty field) must not count.
     static func isUsable(_ state: KeyFieldState, effectiveKey: String) -> Bool {
         state.isValid && !effectiveKey.isEmpty
+    }
+
+    /// What a Save would do: the plan, and the two keys it would be applied with.
+    struct SetupDecision: Equatable {
+        let plan: SetupPlan
+        let openAIKey: String
+        let anthropicKey: String
+    }
+
+    /// The one place the Setup tab decides anything.
+    ///
+    /// **The invariant: the sentence shown under the key fields must describe exactly the plan that
+    /// pressing Save would produce, at every point.** It is the most consequential text in the app —
+    /// it tells someone whether their voice leaves this machine — so a preview that is merely
+    /// *usually* right is a lie waiting to happen.
+    ///
+    /// Sharing a rule was not enough: `refreshPlanExplanation` used to default the field that had
+    /// not just changed to `""` and fall back to `configuration.openaiKey`/`anthropicKey`, so on a
+    /// fresh install checking a second key judged the first one against an empty string, flipped the
+    /// plan to Anthropic and promised "your voice stays here" — and then Save, which saw both real
+    /// fields, streamed audio to OpenAI. So both callers pass *both* live field values through here
+    /// and read the same answer. The stored fallback is `credential(for:)`, not the vendor field, so
+    /// a legacy shared `apiKey` counts here exactly as it counts everywhere else that asks for a
+    /// key; reading the vendor fields directly made Save see no key at all on a legacy config and
+    /// demote a working install to `.local`.
+    static func setupDecision(
+        openAIField: String,
+        anthropicField: String,
+        openAIState: KeyFieldState,
+        anthropicState: KeyFieldState,
+        configuration: SaathiConfiguration
+    ) -> SetupDecision {
+        let openAI = effectiveKey(field: openAIField, stored: configuration.credential(for: .openai))
+        let anthropic = effectiveKey(
+            field: anthropicField, stored: configuration.credential(for: .anthropic))
+        return SetupDecision(
+            plan: SetupPlan.make(
+                openAIKeyValid: isUsable(openAIState, effectiveKey: openAI),
+                anthropicKeyValid: isUsable(anthropicState, effectiveKey: anthropic)),
+            openAIKey: openAI,
+            anthropicKey: anthropic)
+    }
+
+    /// The verdicts Setup opens with, read from what is on disk so a stored key counts before
+    /// anything has been checked this launch.
+    ///
+    /// A vendor field seeds its own vendor and nothing else. The legacy shared `apiKey` seeds only
+    /// the vendor the config actually names as its provider: it is one key that could belong to
+    /// either vendor, and `credential(for:)` hands it to both, so seeding both would have the panel
+    /// assert an Anthropic key exists on a config that never mentioned Anthropic — showing that key
+    /// masked under Anthropic, and lighting up Save with two empty fields. A config with a legacy
+    /// key and no provider named says nothing about whose key it is, so it seeds neither.
+    static func seededKeyStates(
+        for configuration: SaathiConfiguration
+    ) -> (openAI: KeyFieldState, anthropic: KeyFieldState) {
+        func seed(_ kind: ProviderKind, vendorKey: String?) -> KeyFieldState {
+            let vendor = vendorKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !vendor.isEmpty { return .saved(masked: IslandModel.masked(vendor)) }
+            guard configuration.provider == kind,
+                  let legacy = configuration.credential(for: kind) else { return .empty }
+            return .saved(masked: IslandModel.masked(legacy))
+        }
+        return (
+            openAI: seed(.openai, vendorKey: configuration.openaiKey),
+            anthropic: seed(.anthropic, vendorKey: configuration.anthropicKey))
     }
 
     // MARK: hold to talk
@@ -456,15 +519,12 @@ public final class AppController {
         applyConfigurationToIsland()
         notch.model.companionVisible = true
         notch.model.tab = Self.openingTab(for: configuration)
-        // Seed both verdicts from what is already on disk, not just the fields' values fixed in
-        // Task 6 — otherwise every launch shows `.empty` regardless of what is stored, and
-        // `onSaveKeys`'s `isValid && !effectiveKey.isEmpty` gate never sees a stored key as valid.
-        if let key = configuration.credential(for: .openai) {
-            notch.model.openAIKeyState = .saved(masked: IslandModel.masked(key))
-        }
-        if let key = configuration.credential(for: .anthropic) {
-            notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(key))
-        }
+        // Seed both verdicts from what is already on disk — otherwise every launch shows `.empty`
+        // regardless of what is stored, and the `isValid && !effectiveKey.isEmpty` gate never sees
+        // a stored key as valid. Only for a vendor the config actually names; see `seededKeyStates`.
+        let seeded = Self.seededKeyStates(for: configuration)
+        notch.model.openAIKeyState = seeded.openAI
+        notch.model.anthropicKeyState = seeded.anthropic
         if notch.model.tab == .setup {
             refreshPlanExplanation()
         }
@@ -496,25 +556,30 @@ public final class AppController {
             // `AppRelauncher.relaunch` is itself `@MainActor`.
             Task { await AppRelauncher.relaunch(bundleURL: Bundle.main.bundleURL) }
         }
-        actions.onCheckKey = { [weak self] kind, key in
+        // Both fields arrive, not just the one being checked: the verdict that lands changes the
+        // plan, and the plan is decided by both keys at once. See `setupDecision`.
+        actions.onCheckKey = { [weak self] kind, openAIField, anthropicField in
             guard let self, let notch = self.notch else { return }
+            let key: String
             switch kind {
-            case .openai: notch.model.openAIKeyState = .checking
-            case .anthropic: notch.model.anthropicKeyState = .checking
+            case .openai:
+                key = openAIField
+                notch.model.openAIKeyState = .checking
+            case .anthropic:
+                key = anthropicField
+                notch.model.anthropicKeyState = .checking
             default: return
             }
             Task {
                 let result = await self.validator.check(kind, key: key)
                 await MainActor.run {
                     switch kind {
-                    case .openai:
-                        notch.model.openAIKeyState = .checked(result)
-                        self.refreshPlanExplanation(openAIField: key)
-                    case .anthropic:
-                        notch.model.anthropicKeyState = .checked(result)
-                        self.refreshPlanExplanation(anthropicField: key)
-                    default: break
+                    case .openai: notch.model.openAIKeyState = .checked(result)
+                    case .anthropic: notch.model.anthropicKeyState = .checked(result)
+                    default: return
                     }
+                    self.refreshPlanExplanation(
+                        openAIField: openAIField, anthropicField: anthropicField)
                 }
             }
         }
@@ -530,15 +595,19 @@ public final class AppController {
                 return
             }
 
-            // The field's text if there is any, the key already on disk otherwise — see
-            // `effectiveKey`'s doc comment for why an empty field must not mean "no key".
-            let effectiveOpenAI = Self.effectiveKey(field: openAIKey, stored: self.configuration.openaiKey)
-            let effectiveAnthropic = Self.effectiveKey(field: anthropicKey, stored: self.configuration.anthropicKey)
-            let plan = SetupPlan.make(
-                openAIKeyValid: Self.isUsable(notch.model.openAIKeyState, effectiveKey: effectiveOpenAI),
-                anthropicKeyValid: Self.isUsable(notch.model.anthropicKeyState, effectiveKey: effectiveAnthropic))
+            // The same call the sentence under the fields is drawn from, with the same inputs, so
+            // what was promised there is what is written here.
+            let decision = Self.setupDecision(
+                openAIField: openAIKey,
+                anthropicField: anthropicKey,
+                openAIState: notch.model.openAIKeyState,
+                anthropicState: notch.model.anthropicKeyState,
+                configuration: self.configuration)
+            let plan = decision.plan
             let updated = plan.applied(
-                to: self.configuration, openAIKey: effectiveOpenAI, anthropicKey: effectiveAnthropic)
+                to: self.configuration,
+                openAIKey: decision.openAIKey,
+                anthropicKey: decision.anthropicKey)
 
             do {
                 try ConfigurationStore.save(updated, to: ConfigurationStore.defaultPath())
@@ -551,10 +620,10 @@ public final class AppController {
             // back into a field. Masked from the effective key, not the field, so a retained
             // stored key still shows its real suffix instead of the empty field's generic mask.
             if plan.provider == .openai || plan.storedButUnused.contains(.openai) {
-                notch.model.openAIKeyState = .saved(masked: IslandModel.masked(effectiveOpenAI))
+                notch.model.openAIKeyState = .saved(masked: IslandModel.masked(decision.openAIKey))
             }
             if plan.provider == .anthropic || plan.storedButUnused.contains(.anthropic) {
-                notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(effectiveAnthropic))
+                notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(decision.anthropicKey))
             }
             notch.model.planExplanation = plan.explanation
             notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)
@@ -569,18 +638,19 @@ public final class AppController {
     /// The plan changes as each check lands, so the sentence under the fields follows it rather than
     /// appearing only after a save. Someone should be able to see what they are about to get.
     ///
-    /// `openAIField`/`anthropicField` are the live text of whichever field just changed — empty for
-    /// the one that did not, which falls back to what is already on disk via `isUsable`. That is
-    /// exactly right for a verdict seeded from disk (a `.saved` state with an empty field, until the
-    /// user types in it) and for a verdict this call was not about (its field has not moved either).
+    /// `openAIField`/`anthropicField` are the live text of *both* fields, as the panel holds them
+    /// right now — not just the one that changed. Empty means the field really is empty, and then
+    /// the key on disk stands in. Both default to empty for the one call that has no panel behind it
+    /// yet: the seed from `wireNotch`, before the Setup view has been built.
     private func refreshPlanExplanation(openAIField: String = "", anthropicField: String = "") {
         guard let notch else { return }
-        let effectiveOpenAI = Self.effectiveKey(field: openAIField, stored: configuration.openaiKey)
-        let effectiveAnthropic = Self.effectiveKey(field: anthropicField, stored: configuration.anthropicKey)
-        let plan = SetupPlan.make(
-            openAIKeyValid: Self.isUsable(notch.model.openAIKeyState, effectiveKey: effectiveOpenAI),
-            anthropicKeyValid: Self.isUsable(notch.model.anthropicKeyState, effectiveKey: effectiveAnthropic))
-        notch.model.planExplanation = plan.explanation
-        notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)
+        let decision = Self.setupDecision(
+            openAIField: openAIField,
+            anthropicField: anthropicField,
+            openAIState: notch.model.openAIKeyState,
+            anthropicState: notch.model.anthropicKeyState,
+            configuration: configuration)
+        notch.model.planExplanation = decision.plan.explanation
+        notch.model.unusedKeyNote = Self.unusedKeyNote(for: decision.plan)
     }
 }

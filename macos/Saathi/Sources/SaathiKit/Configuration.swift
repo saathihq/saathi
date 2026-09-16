@@ -8,16 +8,24 @@
 import Foundation
 import SaathiContract
 
-public enum ConfigurationError: Error, CustomStringConvertible, Equatable {
+public enum ConfigurationError: LocalizedError, CustomStringConvertible, Equatable {
     case unreadable(path: String, reason: String)
+    /// A save that could not be written: no temporary file, or the move into place failed.
+    case unwritable(path: String, reason: String)
     case malformed(path: String, reason: String)
 
     public var description: String {
         switch self {
         case let .unreadable(path, reason): return "cannot read \(path): \(reason)"
+        case let .unwritable(path, reason): return "cannot save \(path): \(reason)"
         case let .malformed(path, reason): return "\(path) is not valid Saathi config: \(reason)"
         }
     }
+
+    /// `localizedDescription` reads this, and only `LocalizedError` puts `description` there. A bare
+    /// `Error` renders as "The operation couldn't be completed. (SaathiKit.ConfigurationError error
+    /// 0.)" — which is what the Setup panel showed someone whose keys had just failed to save.
+    public var errorDescription: String? { description }
 }
 
 public enum ConfigurationStore {
@@ -85,8 +93,8 @@ public enum ConfigurationStore {
             attributes: [.posixPermissions: 0o600]
         )
         guard created else {
-            throw ConfigurationError.unreadable(
-                path: temporaryURL.path, reason: "could not create temporary file for save")
+            throw ConfigurationError.unwritable(
+                path: url.path, reason: "could not create a temporary file in \(directory.path)")
         }
 
         do {
@@ -95,7 +103,7 @@ public enum ConfigurationStore {
             _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL, options: .usingNewMetadataOnly)
         } catch {
             try? FileManager.default.removeItem(at: temporaryURL)
-            throw error
+            throw ConfigurationError.unwritable(path: url.path, reason: error.localizedDescription)
         }
     }
 }

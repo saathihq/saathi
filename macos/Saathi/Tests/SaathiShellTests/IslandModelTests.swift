@@ -105,8 +105,188 @@ final class IslandSetupModelTests: XCTestCase {
 
     func testTheActionsDefaultToDoingNothing() {
         let actions = IslandActions()
-        actions.onCheckKey(.openai, "sk-o")
+        actions.onCheckKey(.openai, "sk-o", "sk-a")
         actions.onSaveKeys("sk-o", "sk-a")
+    }
+}
+
+// MARK: - The sentence under the fields, and the save it promises
+
+/// The invariant these cover: the plan the panel describes is the plan Save would produce. Both
+/// used to be computed separately, from different inputs, and the two answers could disagree about
+/// where someone's voice was going.
+@MainActor
+final class SetupDecisionTests: XCTestCase {
+
+    private func decide(
+        openAIField: String = "",
+        anthropicField: String = "",
+        openAI: KeyFieldState = .empty,
+        anthropic: KeyFieldState = .empty,
+        configuration: SaathiConfiguration = SaathiConfiguration()
+    ) -> AppController.SetupDecision {
+        AppController.setupDecision(
+            openAIField: openAIField,
+            anthropicField: anthropicField,
+            openAIState: openAI,
+            anthropicState: anthropic,
+            configuration: configuration)
+    }
+
+    /// The regression, exactly as it happened: a fresh install, an OpenAI key checked, then an
+    /// Anthropic key checked. Judging OpenAI against an empty string flipped the plan to Anthropic
+    /// and the panel said "your voice stays here" — while Save, which saw both fields, sent audio
+    /// to OpenAI. Both keys are live in the panel, so both must count in the preview.
+    func testTwoCheckedKeysOnAFreshInstallStillChooseOpenAI() {
+        let decision = decide(
+            openAIField: "sk-o", anthropicField: "sk-a",
+            openAI: .checked(.valid), anthropic: .checked(.valid))
+        XCTAssertEqual(decision.plan.provider, .openai)
+        XCTAssertTrue(
+            decision.plan.explanation.contains("leaves this machine"),
+            "the sentence must not promise the voice stays here: \(decision.plan.explanation)")
+        XCTAssertEqual(decision.plan.storedButUnused, [.anthropic])
+        XCTAssertEqual(decision.openAIKey, "sk-o")
+        XCTAssertEqual(decision.anthropicKey, "sk-a")
+    }
+
+    /// The sentence and the file, checked against each other across every combination of verdicts
+    /// and fields: whenever the explanation says the voice leaves as audio, the configuration Save
+    /// would write must actually name OpenAI, and whenever it says the voice stays here, it must
+    /// not. This is the invariant itself, not the code path that happens to implement it.
+    func testTheSentenceAlwaysDescribesTheConfigurationSaveWouldWrite() {
+        let states: [KeyFieldState] = [
+            .empty, .editing, .checking, .checked(.valid), .checked(.rejected("no")),
+            .checked(.unreachable("offline")), .saved(masked: "sk-…abcd"),
+        ]
+        let fields = ["", "   ", "sk-typed"]
+        let configurations = [
+            SaathiConfiguration(),
+            SaathiConfiguration(provider: .openai, apiKey: "sk-legacy"),
+            SaathiConfiguration(provider: .anthropic, apiKey: "sk-legacy"),
+            SaathiConfiguration(provider: .openai, openaiKey: "sk-stored-o"),
+            SaathiConfiguration(provider: .anthropic, anthropicKey: "sk-stored-a"),
+            SaathiConfiguration(provider: .openai, openaiKey: "sk-stored-o", anthropicKey: "sk-stored-a"),
+        ]
+        for configuration in configurations {
+            for openAI in states {
+                for anthropic in states {
+                    for openAIField in fields {
+                        for anthropicField in fields {
+                            let decision = decide(
+                                openAIField: openAIField, anthropicField: anthropicField,
+                                openAI: openAI, anthropic: anthropic, configuration: configuration)
+                            let written = decision.plan.applied(
+                                to: configuration,
+                                openAIKey: decision.openAIKey,
+                                anthropicKey: decision.anthropicKey)
+                            let sentence = decision.plan.explanation
+                            let context = "\(sentence) → \(String(describing: written.provider))"
+                            if sentence.contains("leaves this machine") {
+                                XCTAssertEqual(written.provider, .openai, context)
+                                XCTAssertFalse((written.openaiKey ?? "").isEmpty, context)
+                            }
+                            if sentence.contains("Your voice stays here") {
+                                XCTAssertNotEqual(written.provider, .openai, context)
+                            }
+                            XCTAssertEqual(written.provider, decision.plan.provider, context)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A legacy config holds one shared `apiKey` and no vendor key. Reading the vendor fields
+    /// directly made both effective keys empty, so Save produced the local plan and demoted a
+    /// working install to "look for Ollama". `credential(for:)` is what everything else asks.
+    func testALegacyApiKeyCountsAsTheKeyItIs() {
+        let legacy = SaathiConfiguration(provider: .openai, apiKey: "sk-legacy-key")
+        let decision = decide(openAI: .saved(masked: "sk-…y"), configuration: legacy)
+        XCTAssertEqual(decision.openAIKey, "sk-legacy-key")
+        XCTAssertEqual(decision.plan.provider, .openai, "a legacy key must not be demoted to local")
+    }
+
+    /// Nothing typed and nothing stored is genuinely no key, however confident the verdict is.
+    func testAValidVerdictWithNoKeyBehindItCountsForNothing() {
+        let decision = decide(openAI: .checked(.valid), anthropic: .checked(.valid))
+        XCTAssertEqual(decision.plan.provider, .local)
+    }
+
+    /// Typing invalidates the verdict, and an invalidated verdict must not keep its key in play.
+    func testAnEditedFieldDropsOutOfThePlan() {
+        let decision = decide(
+            openAIField: "sk-o-half-typed", anthropicField: "sk-a",
+            openAI: .editing, anthropic: .checked(.valid))
+        XCTAssertEqual(decision.plan.provider, .anthropic)
+    }
+}
+
+// MARK: - What Setup opens showing
+
+@MainActor
+final class SeededKeyStateTests: XCTestCase {
+
+    func testAVendorKeySeedsItsOwnVendorOnly() {
+        let seeded = AppController.seededKeyStates(
+            for: SaathiConfiguration(provider: .openai, openaiKey: "sk-openai-1234"))
+        XCTAssertEqual(seeded.openAI, .saved(masked: "sk-…1234"))
+        XCTAssertEqual(seeded.anthropic, .empty, "no Anthropic key is stored, so none may be shown")
+    }
+
+    func testBothVendorKeysSeedBothFields() {
+        let seeded = AppController.seededKeyStates(
+            for: SaathiConfiguration(provider: .openai, openaiKey: "sk-openai-1234", anthropicKey: "sk-ant-5678"))
+        XCTAssertEqual(seeded.openAI, .saved(masked: "sk-…1234"))
+        XCTAssertEqual(seeded.anthropic, .saved(masked: "sk-…5678"))
+    }
+
+    /// The regression: `credential(for:)` hands the legacy shared key to both vendors, so seeding
+    /// from it showed the key masked under Anthropic on a config that never mentioned Anthropic —
+    /// and lit up Save with two empty fields. It seeds only the vendor the config names.
+    func testALegacyKeySeedsOnlyTheProviderTheConfigNames() {
+        let seeded = AppController.seededKeyStates(
+            for: SaathiConfiguration(provider: .openai, apiKey: "sk-legacy-1234"))
+        XCTAssertEqual(seeded.openAI, .saved(masked: "sk-…1234"))
+        XCTAssertEqual(seeded.anthropic, .empty)
+
+        let anthropic = AppController.seededKeyStates(
+            for: SaathiConfiguration(provider: .anthropic, apiKey: "sk-legacy-1234"))
+        XCTAssertEqual(anthropic.openAI, .empty)
+        XCTAssertEqual(anthropic.anthropic, .saved(masked: "sk-…1234"))
+    }
+
+    /// A legacy key with no provider named says nothing about whose key it is. Claiming it for
+    /// either vendor would be the panel inventing a fact the file does not hold.
+    func testALegacyKeyWithNoProviderNamedSeedsNothing() {
+        let seeded = AppController.seededKeyStates(for: SaathiConfiguration(apiKey: "sk-legacy-1234"))
+        XCTAssertEqual(seeded.openAI, .empty)
+        XCTAssertEqual(seeded.anthropic, .empty)
+    }
+
+    func testAnEmptyConfigSeedsNothing() {
+        let seeded = AppController.seededKeyStates(for: SaathiConfiguration())
+        XCTAssertEqual(seeded.openAI, .empty)
+        XCTAssertEqual(seeded.anthropic, .empty)
+    }
+
+    /// Seeding and deciding must read the same config the same way, or Setup opens showing a key
+    /// the plan does not count — which is the same class of lie by a different route.
+    func testWhatIsSeededIsWhatSaveWouldUse() {
+        let legacy = SaathiConfiguration(provider: .openai, apiKey: "sk-legacy-1234")
+        let seeded = AppController.seededKeyStates(for: legacy)
+        let decision = AppController.setupDecision(
+            openAIField: "", anthropicField: "",
+            openAIState: seeded.openAI, anthropicState: seeded.anthropic,
+            configuration: legacy)
+        XCTAssertEqual(decision.plan.provider, .openai)
+        XCTAssertEqual(decision.openAIKey, "sk-legacy-1234")
+        // `credential(for:)` still hands the legacy key to Anthropic too, but with no verdict
+        // behind it nothing counts it, and the config Save would write gains no Anthropic key.
+        let written = decision.plan.applied(
+            to: legacy, openAIKey: decision.openAIKey, anthropicKey: decision.anthropicKey)
+        XCTAssertEqual(written.openaiKey, "sk-legacy-1234")
+        XCTAssertNil(written.anthropicKey, "the legacy key must not be re-filed as an Anthropic key")
     }
 }
 

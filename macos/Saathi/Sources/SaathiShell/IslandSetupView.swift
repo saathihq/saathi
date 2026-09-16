@@ -111,7 +111,7 @@ struct IslandSetupView: View {
                         setState(kind, .editing)
                     }
 
-                Button(action: { actions.onCheckKey(kind, text.wrappedValue) }) {
+                Button(action: { actions.onCheckKey(kind, openAIKey, anthropicKey) }) {
                     Text(state.isBusy ? "Checking…" : "Check")
                         .font(.system(size: 9.5, weight: .semibold))
                         .foregroundColor(.white)

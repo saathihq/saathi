@@ -85,8 +85,12 @@ public struct IslandActions {
     public var onFixPermission: (Permission) -> Void = { _ in }
     public var onToggleCompanion: () -> Void = {}
     public var onQuit: () -> Void = {}
-    /// Ask the vendor whether this key works. The panel never validates anything itself.
-    public var onCheckKey: (ProviderKind, String) -> Void = { _, _ in }
+    /// Ask the vendor whether one key works: which vendor to check, then the live text of *both*
+    /// fields. The other field comes along because a verdict changes the plan, and the plan is
+    /// decided by both keys at once — judging the field that did not change against an empty string
+    /// is how the panel came to promise one thing and Save do another. The panel never validates
+    /// anything itself.
+    public var onCheckKey: (ProviderKind, String, String) -> Void = { _, _, _ in }
     /// Save both keys and reconfigure. Called only when at least one field is valid.
     public var onSaveKeys: (String, String) -> Void = { _, _ in }
     /// Relaunch Saathi so a permission grant this process could not pick up takes effect.

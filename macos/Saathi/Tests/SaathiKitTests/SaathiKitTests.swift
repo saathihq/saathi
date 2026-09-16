@@ -176,6 +176,23 @@ final class ConfigurationTests: XCTestCase {
         }
     }
 
+    /// Every case must survive `localizedDescription`, which is the only form the panel ever shows.
+    func testEveryConfigurationErrorReadsAsASentence() {
+        let cases: [ConfigurationError] = [
+            .unreadable(path: "/tmp/shell.json", reason: "no such file"),
+            .unwritable(path: "/tmp/shell.json", reason: "disk full"),
+            .malformed(path: "/tmp/shell.json", reason: "unexpected token"),
+        ]
+        for error in cases {
+            XCTAssertEqual(error.localizedDescription, error.description)
+            XCTAssertTrue(error.localizedDescription.contains("/tmp/shell.json"))
+            XCTAssertFalse(error.localizedDescription.contains("couldn't be completed"))
+        }
+        XCTAssertEqual(
+            ConfigurationError.unwritable(path: "/tmp/shell.json", reason: "disk full").description,
+            "cannot save /tmp/shell.json: disk full")
+    }
+
     func testTheConfigPathCanBeOverriddenForTestsAndCI() {
         let url = ConfigurationStore.defaultPath(
             environment: ["SAATHI_CONFIG": "/tmp/elsewhere.json"],
@@ -206,7 +223,21 @@ final class ConfigurationTests: XCTestCase {
         // Read-and-execute only: `save` can still stat the directory but cannot create its
         // temporary file inside it, so the write must fail before `url` is ever touched.
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
-        XCTAssertThrowsError(try ConfigurationStore.save(original, to: url))
+        XCTAssertThrowsError(try ConfigurationStore.save(original, to: url)) { error in
+            guard case let ConfigurationError.unwritable(path, _) = error else {
+                return XCTFail("a failed write must say it could not write, got \(error)")
+            }
+            XCTAssertEqual(path, url.path, "the path named must be the config, not a temporary file")
+            // The panel shows this through `localizedDescription`. Without `LocalizedError` it read
+            // "The operation couldn't be completed. (SaathiKit.ConfigurationError error 0.)", which
+            // tells someone whose keys just failed to save precisely nothing.
+            XCTAssertTrue(
+                error.localizedDescription.contains(url.path),
+                "got: \(error.localizedDescription)")
+            XCTAssertFalse(
+                error.localizedDescription.contains("couldn't be completed"),
+                "got: \(error.localizedDescription)")
+        }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
 
         let reloaded = try ConfigurationStore.load(from: url)
