@@ -194,9 +194,11 @@ public final class AppController {
         if let turns, turns.isOpen {
             _ = turns.close()
             handle(.keysReleased)
-            // One beat for the turn to finish landing. Longer than this and a person notices;
-            // shorter and the close races the teardown it exists to prevent.
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            // The coordinator already knows when the queued end call has actually finished, so
+            // wait on that rather than guess at a duration: a timed sleep is wrong in both
+            // directions — a stall on a turn that closed instantly, and a race with the teardown
+            // below on a turn that took longer than the guess.
+            await turns.settle()
         }
 
         speaker.stop()

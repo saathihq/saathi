@@ -62,7 +62,9 @@ public final class TurnCoordinator {
         return true
     }
 
-    /// Waits for every queued session call to finish. Tests use it; the app does not need to.
+    /// Waits for every queued session call to finish. Tests use it, and so does a reconfigure: it
+    /// must not tear a session down while the end call `close()` just queued is still in flight,
+    /// and this is the exact wait for that, rather than a guessed duration.
     public func settle() async {
         await work?.value
     }
