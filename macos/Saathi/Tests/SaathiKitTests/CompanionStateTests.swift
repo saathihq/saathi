@@ -95,4 +95,19 @@ final class CompanionStateTests: XCTestCase {
         XCTAssertEqual(CompanionState.alert("no model reachable").word, "no model reachable")
         XCTAssertEqual(CompanionState.poweringDown.word, "Bye")
     }
+
+    func testAStrayKeyReleaseDoesNotStrandTheFaceInSpeaking() {
+        machine.apply(.speakingChanged(true), now: 1_000)
+        machine.apply(.speakingChanged(false), now: 1_005)
+        XCTAssertEqual(machine.apply(.keysReleased, now: 1_006), .speaking, "a no-op")
+        XCTAssertEqual(machine.tick(now: 1_007), .idle, "the settle survived the no-op")
+        XCTAssertEqual(machine.tick(now: 1_186), .asleep, "and so did falling asleep afterwards")
+    }
+
+    func testAReadinessNoteDuringAnAlertDoesNotShortenIt() {
+        machine.apply(.failure("no model reachable"), now: 1_000)
+        XCTAssertEqual(machine.apply(.status("ready — on-device speech recognition (en_US)"), now: 1_001), .alert("no model reachable"))
+        XCTAssertEqual(machine.tick(now: 1_003.9), .alert("no model reachable"))
+        XCTAssertEqual(machine.tick(now: 1_004), .idle)
+    }
 }

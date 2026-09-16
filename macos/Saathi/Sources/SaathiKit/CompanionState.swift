@@ -76,6 +76,21 @@ public struct CompanionStateMachine: Equatable, Sendable {
     @discardableResult
     public mutating func apply(_ event: CompanionEvent, now: TimeInterval) -> CompanionState {
         guard state != .poweringDown else { return state }
+
+        // Events that change nothing must not disturb a pending settle: a stray key release or a
+        // readiness note arriving mid-reply would otherwise strand the face outside idle for good.
+        switch event {
+        case .keysReleased where state != .listening,
+             .action(.say), .action(.openUrl):
+            lastActivity = now
+            return state
+        case let .status(text) where Self.state(forStatus: text, current: state) == state:
+            lastActivity = now
+            return state
+        default:
+            break
+        }
+
         lastActivity = now
         settleAt = nil
 
@@ -85,7 +100,7 @@ public struct CompanionStateMachine: Equatable, Sendable {
         case .keysHeld:
             state = .listening
         case .keysReleased:
-            if state == .listening { state = .thinking }
+            state = .thinking
         case .talkPressed:
             state = state == .listening ? .thinking : .listening
         case let .status(text):
@@ -97,13 +112,10 @@ public struct CompanionStateMachine: Equatable, Sendable {
             if !isShowingStep { state = .speaking }
             settleAt = now + idleDelay
         case let .action(action):
-            switch action {
-            case let .showStep(step):
+            if case let .showStep(step) = action {
                 state = step.index >= step.total
                     ? .celebrating
                     : .showingStep(index: step.index, total: step.total)
-            case .say, .openUrl:
-                break   // the speaker reports when it starts
             }
         case let .speakingChanged(speaking):
             if speaking {
