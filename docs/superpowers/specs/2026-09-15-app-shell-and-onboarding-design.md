@@ -40,8 +40,9 @@ things to fit its own promises:
 | Target | Kind | Depends on | Purpose |
 |---|---|---|---|
 | `SaathiContract` | library | — | Generated. Gains the new config fields and the trial route. |
-| `SaathiKit` | library | Contract | Unchanged in role. Gains `CompanionState`, the state-to-expression table, the hold-to-talk monitor, permission checks, the trial client, and the onboarding model. All testable without a window. |
+| `SaathiKit` | library | Contract | Unchanged in role. Gains `CompanionState`, the state-to-expression table, the hold-to-talk monitor, permission checks, the trial client, and the onboarding model. All testable without a window. The state-to-expression table lives in `SaathiShell`, a new library between the kit and the character, because the kit cannot see `MascotExpression`. |
 | `SaathiMascot` | library | — | Draws the character with Core Animation from `mascot.json`. Knows nothing about voice or Saathi. |
+| `SaathiShell` | library | Kit, Mascot | The app's testable pieces: state-to-face table, panel geometry, the panels, the menu, the controller. |
 | `SaathiApp` | executable | Kit, Mascot | The shell: menu bar, notch panel, companion panel, onboarding windows. AppKit, no storyboard. |
 | `saathi` | executable | Kit | The existing CLI, unchanged. Ships inside the bundle next to `SaathiApp`. |
 
@@ -81,8 +82,9 @@ public enum CompanionState: Equatable {
 - `expression(for: CompanionState) -> MascotExpression` is a table: asleep → sleeping, idle → idle,
   listening → listening, thinking → thinking, speaking → dictating, showingStep → working,
   celebrating → celebrate, alert → alerting, poweringDown → powering-down.
-- The `Speaker` protocol gains `onSpeakingChanged: ((Bool) -> Void)?` so the state machine can
-  see speech start and stop. `SystemSpeaker` becomes delegate-driven (see the bug below).
+- An `ObservedSpeaker` wrapper reports speech start and stop around any speaker, so the state
+  machine can see it without the `Speaker` protocol changing. `SystemSpeaker` becomes
+  delegate-driven (see the bug below).
 
 ### Push-to-talk (`SaathiKit`)
 
