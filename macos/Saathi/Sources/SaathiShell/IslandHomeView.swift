@@ -188,6 +188,21 @@ struct IslandHomeView: View {
             ForEach(Permission.allCases, id: \.title) { permission in
                 permissionRow(permission)
             }
+            if model.needsRestart {
+                Button(action: actions.onRestart) {
+                    Text("Restart Saathi")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+                Text("The grant needs a fresh start to take effect.")
+                    .font(.system(size: 8.5))
+                    .foregroundColor(Color.white.opacity(0.45))
+            }
         }
         .frame(width: 180, alignment: .leading)
     }

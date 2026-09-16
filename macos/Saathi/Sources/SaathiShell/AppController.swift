@@ -397,7 +397,18 @@ public final class AppController {
                         guard let self else { timer.invalidate(); return }
                         remaining -= 1
                         self.startHoldToTalkIfPossible()
-                        if self.monitor != nil || remaining <= 0 { timer.invalidate(); self.permissionPoll = nil }
+                        if self.monitor != nil {
+                            timer.invalidate()
+                            self.permissionPoll = nil
+                            self.notch?.model.needsRestart = false
+                        } else if remaining <= 0 {
+                            timer.invalidate()
+                            self.permissionPoll = nil
+                            // Two minutes of retrying and the tap still will not install. Either the
+                            // grant never happened, or macOS is not going to hand it to this process
+                            // without a fresh start. Offer the restart rather than saying nothing.
+                            self.notch?.model.needsRestart = Permissions.status(of: .inputMonitoring) == .granted
+                        }
                     }
                 }
                 RunLoop.main.add(poll, forMode: .common)
@@ -455,6 +466,10 @@ public final class AppController {
             self.setCompanionVisible(!notch.model.companionVisible)
         }
         actions.onQuit = menu.onQuit
+        actions.onRestart = { [weak self] in
+            guard self != nil else { return }
+            Task { await AppRelauncher.relaunch(bundleURL: Bundle.main.bundleURL) }
+        }
         actions.onCheckKey = { [weak self] kind, key in
             guard let self, let notch = self.notch else { return }
             switch kind {

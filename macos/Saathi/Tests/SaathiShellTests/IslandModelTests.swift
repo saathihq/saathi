@@ -182,3 +182,40 @@ final class SetupPresentationTests: XCTestCase {
         XCTAssertEqual(AppController.effectiveKey(field: "  ", stored: ""), "")
     }
 }
+
+// MARK: - Relaunching ourselves
+
+@MainActor
+final class RestartTests: XCTestCase {
+
+    func testTheIslandDoesNotAskForARestartUntilSomethingNeedsOne() {
+        XCTAssertFalse(IslandModel().needsRestart)
+    }
+
+    /// The bug this exists for: macOS asks an app requesting Input Monitoring to quit and reopen,
+    /// then relaunches it through LaunchServices by code signature. An ad-hoc signed app has no
+    /// stable identity to bring back, so it is quit and never reopened.
+    func testTerminateHappensOnlyAfterTheNewInstanceIsConfirmedLaunched() async {
+        var terminated = false
+        let launched = await AppRelauncher.relaunch(
+            bundleURL: URL(fileURLWithPath: "/System/Applications/Calculator.app"),
+            launch: { _ in true },
+            terminate: { terminated = true })
+
+        XCTAssertTrue(launched)
+        XCTAssertTrue(terminated)
+    }
+
+    /// A terminate that races the spawn is a quit with no reopen — which is the exact failure this
+    /// code exists to replace, so it must not be reintroduced here.
+    func testAFailedLaunchDoesNotTerminate() async {
+        var terminated = false
+        let launched = await AppRelauncher.relaunch(
+            bundleURL: URL(fileURLWithPath: "/nonexistent/Nothing.app"),
+            launch: { _ in false },
+            terminate: { terminated = true })
+
+        XCTAssertFalse(launched)
+        XCTAssertFalse(terminated, "quitting after a failed relaunch leaves the person with nothing")
+    }
+}

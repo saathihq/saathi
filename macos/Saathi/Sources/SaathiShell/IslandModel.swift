@@ -61,6 +61,9 @@ public final class IslandModel: ObservableObject {
     @Published public var planExplanation: String = ""
     /// Says out loud that a stored key is not being used. Empty when every stored key is in play.
     @Published public var unusedKeyNote: String = ""
+    /// True once a permission has been granted that this process still cannot pick up. The island
+    /// then offers to relaunch rather than leaving someone holding keys that do nothing.
+    @Published public var needsRestart = false
 
     public init() {}
 
@@ -86,6 +89,8 @@ public struct IslandActions {
     public var onCheckKey: (ProviderKind, String) -> Void = { _, _ in }
     /// Save both keys and reconfigure. Called only when at least one field is valid.
     public var onSaveKeys: (String, String) -> Void = { _, _ in }
+    /// Relaunch Saathi so a permission grant this process could not pick up takes effect.
+    public var onRestart: () -> Void = {}
 
     public init() {}
 }
