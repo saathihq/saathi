@@ -132,7 +132,11 @@ final class PanelTests: XCTestCase {
         let (panel, screen) = try island()
         XCTAssertEqual(panel.level, .popUpMenu)
         XCTAssertEqual(panel.frame.maxY, screen.frame.maxY, accuracy: 0.5)
-        XCTAssertEqual(panel.frame.width, NotchPanel.openWidth)
+        XCTAssertEqual(
+            panel.frame.width,
+            NotchPanel.openWidth + IslandRootView.topCornerFlare * 2,
+            "the window is the island plus its flare: the top corners curve outward past the body, "
+                + "and a window exactly the body's width clips that curve away")
         XCTAssertFalse(panel.isOpaque)
         XCTAssertFalse(panel.hasShadow)
         XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
@@ -190,7 +194,11 @@ final class PanelTests: XCTestCase {
         let (panel, screen) = try island()
         panel.moveTo(screen: screen)
         XCTAssertEqual(panel.frame.maxY, screen.frame.maxY, accuracy: 0.5)
-        XCTAssertEqual(panel.frame.width, NotchPanel.openWidth)
+        XCTAssertEqual(
+            panel.frame.width,
+            NotchPanel.openWidth + IslandRootView.topCornerFlare * 2,
+            "the window is the island plus its flare: the top corners curve outward past the body, "
+                + "and a window exactly the body's width clips that curve away")
         XCTAssertEqual(panel.islandState, .collapsed)
     }
 

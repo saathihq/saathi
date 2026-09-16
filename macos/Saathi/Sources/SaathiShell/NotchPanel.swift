@@ -22,21 +22,24 @@ import SwiftUI
 @MainActor
 public final class NotchPanel: NSPanel {
 
-    /// The busy strip.
-    static let compactWidth: CGFloat = 240
-    static let compactContentHeight: CGFloat = 56
-    /// The island the pointer opens: OpenClicky's Home panel, sized the same.
-    static let openWidth: CGFloat = 588
-    /// Each face gets its own height. One shared number clipped whichever face was taller — and
-    /// the Setup tab, with two labelled key fields, a verdict line each and an explanation that
-    /// wraps to two lines, is a great deal taller than Home.
-    static let homeContentHeight: CGFloat = 196
-    static let setupContentHeight: CGFloat = 330
+    // OpenClicky's island, to the point. These are its numbers rather than approximations of them:
+    // `NotchHUDModel.compactWidth` / `compactContentHeight` / `fullWidth` / `homeTotalHeight`, and
+    // its `fullHeight` rule — `max(homeTotalHeight, topBandHeight + 195)`, a floor for the whole
+    // island and a floor for the content under the band, whichever is larger.
+    static let compactWidth: CGFloat = 300
+    static let compactContentHeight: CGFloat = 54
+    static let openWidth: CGFloat = 512
+    static let homeTotalHeight: CGFloat = 232
+    /// The content under the band. Home is OpenClicky's 195; Setup is Saathi's own tab and is sized
+    /// the same way — a number for the content, not for the island as a whole.
+    static let homeContentUnderBand: CGFloat = 195
+    static let setupContentUnderBand: CGFloat = 214
 
-    static func openContentHeight(for tab: IslandTab) -> CGFloat {
+    /// The island's total height for a tab, by OpenClicky's rule.
+    static func openHeight(for tab: IslandTab, topBandHeight: CGFloat) -> CGFloat {
         switch tab {
-        case .home: return homeContentHeight
-        case .setup: return setupContentHeight
+        case .home: return max(homeTotalHeight, topBandHeight + homeContentUnderBand)
+        case .setup: return topBandHeight + setupContentUnderBand
         }
     }
     /// How often the pointer is checked against the island's hover rect.
@@ -269,13 +272,17 @@ public final class NotchPanel: NSPanel {
 
     func apply(_ islandState: IslandState) {
         if animatesIsland {
-            withAnimation(IslandRootView.spring) { applyNow(islandState) }
+            withAnimation(IslandRootView.spring) { applyNow(islandState, settlingNow: false) }
         } else {
-            applyNow(islandState)
+            applyNow(islandState, settlingNow: true)
         }
     }
 
-    private func applyNow(_ islandState: IslandState) {
+    /// `settlingNow` forces the layout through immediately, which is what a test needs and what an
+    /// animation must never do: laying out synchronously inside `withAnimation` lands every value on
+    /// its final position in the same frame, so the spring is created and then instantly finished.
+    /// Measured before and after — the close went from one frame to about twenty.
+    private func applyNow(_ islandState: IslandState, settlingNow: Bool) {
         self.islandState = islandState
         let collapsed = islandState == .collapsed
 
@@ -294,7 +301,11 @@ public final class NotchPanel: NSPanel {
         // The window has to be big enough BEFORE the spring runs, or the island is clipped by its
         // own window on the way out; on the way back it shrinks only once the spring has settled.
         let target = rect(for: islandState)
-        let windowTarget = rect(for: .open).union(target)
+        // Widened by the flare on each side. The island's top corners curve *outward* past the body,
+        // and a window exactly the body's width clipped that curve away — the signature detail of
+        // the shape, drawn and then cut off, which is why the top edge came out perfectly straight.
+        let flare = IslandRootView.topCornerFlare
+        let windowTarget = rect(for: .open).union(target).insetBy(dx: -flare, dy: 0)
         resizeWindow(to: windowTarget, growing: windowTarget.height >= frame.height)
 
         island.setContentFrame(toLocal(windowTarget))
@@ -304,7 +315,7 @@ public final class NotchPanel: NSPanel {
         island.setHandleVisible(collapsed && geometry.showsHandle)
         ignoresMouseEvents = collapsed
         setKeyboardFocus(islandState == .open && model.tab == .setup)
-        contentView?.layoutSubtreeIfNeeded()
+        if settlingNow { contentView?.layoutSubtreeIfNeeded() }
     }
 
     static func isBusy(_ state: CompanionState) -> Bool {
@@ -342,10 +353,11 @@ public final class NotchPanel: NSPanel {
     /// `notchHeight + openContentHeight`, as before; where the (real or virtual) notch is shorter
     /// than a comfortable top band, the extra height is folded into the content rect so
     /// `NotchGeometry.islandRect`'s own `notchHeight + contentHeight` still lands on the same total.
+    /// `islandRect` adds the notch's own height to whatever content height it is handed, so the
+    /// notch is taken back out here and the total lands exactly on OpenClicky's `fullHeight`.
     private static func openRect(_ geometry: NotchGeometry, tab: IslandTab = .home) -> CGRect {
-        geometry.islandRect(
-            width: openWidth,
-            contentHeight: openContentHeight(for: tab) + (geometry.topBandHeight - geometry.notchHeight))
+        let total = openHeight(for: tab, topBandHeight: geometry.topBandHeight)
+        return geometry.islandRect(width: openWidth, contentHeight: total - geometry.notchHeight)
     }
 
     /// The window has to be at least as big as the island it will hold, or the island is clipped by
@@ -355,7 +367,9 @@ public final class NotchPanel: NSPanel {
     private func resizeWindow(to target: CGRect, growing: Bool) {
         guard frame != target else { return }
         if growing {
-            setFrame(target, display: true)
+            // `display: false`: a synchronous display pass here has the same effect as forcing
+            // layout — it drags the SwiftUI content to its final frame before the spring can move it.
+            setFrame(target, display: false)
         } else {
             let settle = Self.springSettleDuration
             DispatchQueue.main.asyncAfter(deadline: .now() + settle) { [weak self] in

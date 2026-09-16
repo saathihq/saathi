@@ -45,45 +45,62 @@ struct IslandRootView: View {
     /// *without* animating — a test that asserts the mascot left the window cannot wait out a
     /// spring, and a tree change that only lands when a transition finishes is untestable.
     static let spring = Animation.spring(response: 0.42, dampingFraction: 0.84)
-    /// Content fades and scales up from the top edge, so it appears to unfold out of the notch
-    /// rather than cross-fade in place.
-    static let contentTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.94, anchor: .top))
+    /// How far the top corners curve outward into the menu bar. OpenClicky measured ~6pt off
+    /// HeyClicky; the island is drawn `flare` wider on each side so the body keeps its stated width.
+    static let topCornerFlare: CGFloat = 6
+    /// OpenClicky's two transitions: the compact strip scales from 0.92, the full panel from 0.96 —
+    /// a bigger panel travelling the same visual distance needs a smaller scale delta or it reads
+    /// as a lurch.
+    static let compactTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.92, anchor: .top))
+    static let openTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.96, anchor: .top))
 
     var body: some View {
         ZStack(alignment: .top) {
-            content
-                .background(backdrop)
+            // Nothing is drawn while collapsed on a display with no notch: there is no notch to be,
+            // and a black rectangle over the menu bar would just be in the way. The handle marks it.
+            if display.state != .collapsed || display.hasHardwareNotch {
+                NotchIslandShape(
+                    bottomCornerRadius: display.islandCornerRadius,
+                    topCornerFlare: Self.topCornerFlare
+                )
+                .fill(Color.black)
+                .frame(
+                    width: display.islandSize.width + Self.topCornerFlare * 2,
+                    height: display.islandSize.height)
+            }
+
+            // Only the live layer is in the tree: a hidden sibling at a fixed frame would inflate
+            // the fitting size, and it would keep the mascot in the window with its ticker running.
+            switch display.state {
+            case .collapsed:
+                Color.clear.frame(width: 1, height: 1)
+            case .compact:
+                IslandCompactView(display: display, model: model, mascot: mascot)
+                    .frame(width: display.compactSize.width, height: display.compactSize.height)
+                    .transition(Self.compactTransition)
+            case .open:
+                IslandHomeView(display: display, model: model, mascot: mascot, actions: actions)
+                    .frame(width: display.openSize.width, height: display.openSize.height)
+                    .transition(Self.openTransition)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    /// The black shape sits *behind* the content rather than beside it at a hand-set size, so the
-    /// two are the same rectangle by construction — the backdrop cannot lag the text, and no
-    /// constant has to be kept in step with what the content actually needs.
-    @ViewBuilder
-    private var backdrop: some View {
-        if display.state != .collapsed || display.hasHardwareNotch {
-            RoundedRectangle(cornerRadius: display.islandCornerRadius, style: .continuous)
-                .fill(Color.black)
-        }
-    }
-
-    /// Only the live layer is in the tree. A hidden sibling would keep the mascot in the window and
-    /// its display-link ticker running, which is what taking it out of the tree exists to stop.
-    @ViewBuilder
-    private var content: some View {
-        switch display.state {
-        case .collapsed:
-            Color.clear
-                .frame(width: display.collapsedSize.width, height: display.collapsedSize.height)
-        case .compact:
-            IslandCompactView(display: display, model: model, mascot: mascot)
-                .frame(width: display.compactSize.width, height: display.compactSize.height)
-                .transition(Self.contentTransition)
-        case .open:
-            IslandHomeView(display: display, model: model, mascot: mascot, actions: actions)
-                .frame(width: display.openSize.width)
-                .transition(Self.contentTransition)
+        // Clipped to the island itself, so the content is revealed and concealed by the shape as it
+        // springs rather than merely fading on top of it.
+        //
+        // Without this the two come apart in the middle of the movement: a closing island shrinks
+        // its black down to the notch while the panel's text is still laid out at full size, so for
+        // a few frames the words sit on the wallpaper outside the island. Masking makes it behave
+        // like one solid object opening and closing — which is what reads as polished, rather more
+        // than the spring constants do.
+        .mask(alignment: .top) {
+            NotchIslandShape(
+                bottomCornerRadius: display.islandCornerRadius,
+                topCornerFlare: Self.topCornerFlare
+            )
+            .frame(
+                width: display.islandSize.width + Self.topCornerFlare * 2,
+                height: display.islandSize.height)
         }
     }
 }
@@ -119,64 +136,43 @@ struct IslandHomeView: View {
     let mascot: MascotView
     let actions: IslandActions
 
+    /// OpenClicky's `NotchFullPanelView`, structurally: the tab bar lives *in* the menu-bar band on
+    /// either side of the physical notch, and the panel's content begins six points below it.
+    ///
+    /// Saathi used to stack a title band and then a tab strip under it — two bands where OpenClicky
+    /// has one — which is most of why the island was taller than its content and had a strip of dead
+    /// space across the top. The status dot keeps its place on the right of the notch, where the
+    /// band is otherwise empty.
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(spacing: 0) {
             topBand
+                .frame(height: 24)
                 .padding(.horizontal, 14)
-                .frame(height: display.topBandHeight)
-            VStack(alignment: .leading, spacing: 0) {
-                tabStrip
+                .padding(.top, 5)
+                .frame(height: display.topBandHeight, alignment: .top)
+
+            Group {
                 switch model.tab {
-                case .home:
-                    HStack(alignment: .top, spacing: 22) {
-                        leftColumn
-                        rightColumn
-                    }
-                case .setup:
-                    IslandSetupView(display: display, model: model, actions: actions)
+                case .home: homeBody
+                case .setup: IslandSetupView(display: display, model: model, actions: actions)
                 }
-                bottomRow
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, 6)
+            // OpenClicky's NotchHomeView padding, applied to whichever face is showing rather than
+            // to Home alone — the Setup tab was running its text into the island's left edge.
+            .padding(.horizontal, 20)
+            .padding(.bottom, 14)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: the two faces
-
-    private var tabStrip: some View {
-        HStack(spacing: 6) {
-            tabButton("Home", .home)
-            tabButton("Setup", .setup)
-            Spacer()
-        }
-        .padding(.bottom, 6)
-    }
-
-    private func tabButton(_ title: String, _ tab: IslandTab) -> some View {
-        Button(action: { model.tab = tab }) {
-            Text(title)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundColor(model.tab == tab ? .white : Color.white.opacity(0.45))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(model.tab == tab ? Color.white.opacity(0.16) : .clear))
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: top band — who is talking, split around the notch
+    // MARK: the band — tabs to the left of the notch, state to the right
 
     private var topBand: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Path(PointerBuddyView.trianglePath(side: 10))
-                    .fill(Color(PointerBuddyView.tint))
-                    .frame(width: 10, height: 10)
-                Text("Saathi")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
+            HStack(spacing: 8) {
+                tabButton("Home", .home)
+                tabButton("Setup", .setup)
             }
             Spacer(minLength: display.notchGap)
             HStack(spacing: 6) {
@@ -186,7 +182,33 @@ struct IslandHomeView: View {
                 Text(model.state.word)
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundColor(Color.white.opacity(0.85))
+                    .lineLimit(1)
             }
+        }
+    }
+
+    private func tabButton(_ title: String, _ tab: IslandTab) -> some View {
+        Button(action: { model.tab = tab }) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(model.tab == tab ? .white : Color.white.opacity(0.5))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(model.tab == tab ? Color.white.opacity(0.16) : .clear))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: the Home tab — OpenClicky's NotchHomeView, with Saathi's content
+
+    private var homeBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 18) {
+                leftColumn
+                rightColumn
+            }
+            Spacer(minLength: 6)
+            bottomRow
         }
     }
 
@@ -200,40 +222,43 @@ struct IslandHomeView: View {
 
     // MARK: left column — where it thinks
 
+    /// OpenClicky's left column exactly: a bold title, a dim subtitle, then a row of tiles nine
+    /// points below. Saathi's tile row is the face and what the choice means for the learner's
+    /// voice, which is the thing worth looking at on this panel.
     private var leftColumn: some View {
-        // The face sits beside the heading rather than on a plinth above it. Stacked, a 72pt mascot
-        // and a `maxWidth: .infinity` column pushed the two halves to opposite edges and left a band
-        // of dead space down the middle of the panel; side by side, the same information reads as
-        // one block and the island gets materially shorter.
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
-                MascotHostView(mascot: mascot).frame(width: 48, height: 48)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Where I think")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                    Text(model.providerTitle)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color.white.opacity(0.72))
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Where I think")
+                .font(.system(size: 13.5, weight: .bold))
+                .foregroundColor(.white)
+            Text(model.providerTitle)
+                .font(.system(size: 10.5))
+                .foregroundColor(Color.white.opacity(0.55))
+            HStack(spacing: 10) {
+                MascotHostView(mascot: mascot).frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 4) {
                     Text(model.privacyLine)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10.5))
                         .foregroundColor(Color.white.opacity(0.72))
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
+                    capsuleButton("Provider…", action: actions.onProvider)
                 }
+                Spacer(minLength: 0)
             }
-            capsuleButton("Provider…", action: actions.onProvider)
+            .padding(.top, 9)
         }
-        .frame(width: 244, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: right column — how to talk to it, and what to fix
 
     private var rightColumn: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionHeader("command", "Shortcuts")
             shortcutRow(title: "Talk", keys: ["⌃ control", "⌥ option"], note: "hold")
-            shortcutRow(title: "Talk from the menu", keys: ["menu bar ▸ Talk"])
+            // Short enough to sit in OpenClicky's 180pt column without eliding. The long form
+            // ("Talk from the menu" / "menu bar ▸ Talk") truncated to an ellipsis at this width,
+            // which tells a reader less than the short form does.
+            shortcutRow(title: "From the menu", keys: ["Talk"])
             sectionHeader("checkmark.shield", "Permissions")
                 .padding(.top, 4)
             ForEach(Permission.allCases, id: \.title) { permission in
@@ -255,7 +280,7 @@ struct IslandHomeView: View {
                     .foregroundColor(Color.white.opacity(0.45))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(width: 180, alignment: .leading)
     }
 
     private func sectionHeader(_ systemImage: String, _ title: String) -> some View {
