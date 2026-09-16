@@ -40,7 +40,7 @@ public final class AppController {
         data = try MascotData.load()
         color = MascotColor(paletteName: "blue", in: data) ?? MascotColor(hex: "#377FE6")
         machine = CompanionStateMachine(now: CACurrentMediaTime())
-        companion = CompanionPanel(data: data, color: color)
+        companion = CompanionPanel()
         if let screen = NSScreen.main {
             notch = NotchPanel(data: data, color: color, screen: screen)
         } else {

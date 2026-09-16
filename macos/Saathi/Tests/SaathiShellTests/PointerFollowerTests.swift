@@ -29,11 +29,17 @@ final class PointerFollowerTests: XCTestCase {
         let follower = PointerFollower(start: .zero)
         XCTAssertGreaterThan(follower.offset.dx, 0, "right")
         XCTAssertLessThan(follower.offset.dy, 0, "below — screen y goes up")
+        XCTAssertEqual(follower.offset.dx, 35, "OpenClicky's buddy offset")
+        XCTAssertEqual(follower.offset.dy, -25)
     }
 
     func testThePanelOriginCentresThePanelOnThePosition() {
         var follower = PointerFollower(start: CGPoint(x: 100, y: 100))
-        _ = follower.follow(CGPoint(x: 100 - follower.offset.dx, y: 100 - follower.offset.dy), dt: 10)
-        XCTAssertEqual(follower.origin(forPanelOf: CGSize(width: 72, height: 72)), CGPoint(x: 64, y: 64))
+        // The pointer that parks the buddy on (100, 100) is 35 pt to its left and 25 pt above it.
+        _ = follower.follow(CGPoint(x: 65, y: 125), dt: 10)
+        XCTAssertEqual(follower.position.x, 100, accuracy: 0.000_1)
+        XCTAssertEqual(follower.position.y, 100, accuracy: 0.000_1)
+        // The buddy panel is 48 pt square, so its bottom-left is 24 pt below and left of centre.
+        XCTAssertEqual(follower.origin(forPanelOf: CGSize(width: 48, height: 48)), CGPoint(x: 76, y: 76))
     }
 }
