@@ -28,7 +28,7 @@
     <key>CFBundleIdentifier</key>
     <string>dev.saathi.Saathi</string>
     <key>CFBundleExecutable</key>
-    <string>saathi</string>
+    <string>SaathiApp</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -42,9 +42,8 @@
     <key>CFBundleIconFile</key>
     <string>Saathi</string>
 
-    <!-- No window and no Dock tile: this build is the CLI inside a bundle, and the bundle exists
-         for identity and permissions rather than for a user interface. The menu-bar shell will
-         change this to a real app; SaathiKit is written so it links against the same code. -->
+    <!-- No Dock tile: Saathi is a menu-bar item plus panels. The CLI still ships beside the app
+         as Contents/MacOS/saathi, which the Homebrew cask symlinks. -->
     <key>LSUIElement</key>
     <true/>
 

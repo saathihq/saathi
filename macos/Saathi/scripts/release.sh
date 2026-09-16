@@ -71,13 +71,23 @@ echo "  identity: $SIGN_IDENTITY${SIGN_IDENTITY:+ }${TEAM_ID}"
 # without re-notarizing, which is the kind of thing that is worth doing once at the start.
 echo "▸ building universal (arm64 + x86_64)"
 swift build -c release --arch arm64 --arch x86_64 >/dev/null
-BINARY="$PACKAGE_DIR/.build/apple/Products/Release/saathi"
-[[ -f "$BINARY" ]] || { echo "build produced no binary at $BINARY" >&2; exit 1; }
+PRODUCTS="$PACKAGE_DIR/.build/out/Products/Release"
+CLI="$PRODUCTS/saathi"
+APP_BINARY="$PRODUCTS/SaathiApp"
+MASCOT_BUNDLE="$PRODUCTS/Saathi_SaathiMascot.bundle"
+for needed in "$CLI" "$APP_BINARY" "$MASCOT_BUNDLE"; do
+  [[ -e "$needed" ]] || { echo "build produced nothing at $needed" >&2; exit 1; }
+done
 
 # ── assemble ─────────────────────────────────────────────────────────────────
+# Two executables in one bundle: SaathiApp is what LaunchServices launches and what permission
+# prompts are attributed to; saathi is the CLI the cask symlinks onto PATH. The mascot's data
+# travels as the SwiftPM resource bundle, found through Bundle.main.resourceURL.
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BINARY" "$APP/Contents/MacOS/saathi"
+cp "$APP_BINARY" "$APP/Contents/MacOS/SaathiApp"
+cp "$CLI" "$APP/Contents/MacOS/saathi"
+cp -R "$MASCOT_BUNDLE" "$APP/Contents/Resources/"
 
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUMBER/" \
   "$PACKAGE_DIR/Resources/Info.plist" > "$APP/Contents/Info.plist"
@@ -112,11 +122,17 @@ sign() {
   return 1
 }
 
+NESTED_BUNDLE="$APP/Contents/Resources/Saathi_SaathiMascot.bundle"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   echo "▸ signing ad-hoc (this Mac only, not distributable)"
+  codesign --force --sign - "$NESTED_BUNDLE"
+  codesign --force --sign - --entitlements "$PACKAGE_DIR/Resources/Saathi.entitlements" "$APP/Contents/MacOS/saathi"
   codesign --force --sign - --entitlements "$PACKAGE_DIR/Resources/Saathi.entitlements" "$APP"
 else
   echo "▸ signing"
+  # A resource bundle has no executable, so no hardened runtime or entitlements — just a seal.
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$NESTED_BUNDLE"
+  sign "$APP/Contents/MacOS/saathi"
   sign "$APP"
 fi
 
@@ -169,7 +185,8 @@ echo "  zip     $ZIP  ($(du -h "$ZIP" | cut -f1))"
 # if the number had to be recomputed by hand each time.
 echo "  sha256  $SHA"
 echo
-echo "  try it:  \"$APP/Contents/MacOS/saathi\" voice"
+echo "  try it:  open \"$APP\""
+echo "           \"$APP/Contents/MacOS/saathi\" voice"
 echo
 echo "  release: gh release create v$VERSION \"$ZIP\" --repo saathihq/saathi"
 echo "           then set version + sha256 in the tap's Casks/saathi.rb"
