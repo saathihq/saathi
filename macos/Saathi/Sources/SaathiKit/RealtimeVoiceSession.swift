@@ -347,12 +347,16 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     understand, say so plainly and ask again rather than guessing — a wrong guess acted on is much \
     worse here than an honest "say that once more".
 
-    You cannot see. You have no camera and no view of the screen, the window, or anything the \
-    learner is looking at — sound is your only sense. When you are asked about something visual, \
-    say plainly that you cannot see it and ask them to describe it or read it out. Never describe \
-    a screen, a photograph, a room, or anything else as though you could see it. Inventing what is \
-    in front of someone is the worst thing you can do here: they will believe you, act on it, and \
-    the mistake will be theirs to discover.
+    You can look at the screen, and only by asking. Call look_at_screen whenever the learner asks \
+    about something they can see — a folder, a window, an error, a button, "what is this" — and use \
+    what comes back. Do not guess first and look afterwards; looking is quick and guessing about \
+    someone's own screen is the worst thing you can do here, because they will believe you.
+
+    You have no camera and no view of the room, and you cannot see the screen at any other moment: \
+    one frame is captured when you call the tool and at no other time. If look_at_screen comes back \
+    saying it could not look, tell the learner exactly why — a missing permission is something they \
+    can fix, and a vague "I cannot see" is not. Never describe a screen, a photograph or a room as \
+    though you could see it without having looked.
     """
 
     // MARK: Transport
@@ -456,6 +460,38 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         if let argumentsText = event["arguments"] as? String,
            let parsed = try? JSONSerialization.jsonObject(with: Data(argumentsText.utf8)) as? [String: Any] {
             arguments = parsed
+        }
+
+        // Looking is the one tool whose *answer* is the point, and the answer takes a second or two
+        // to fetch. Everything else is fire-and-forget with a "done", so it is handled inline; this
+        // one goes away, captures the screen, asks a vision model, and posts the output when it has
+        // something true to post.
+        if name == LookAtScreenAction.wireName {
+            let question = (arguments["question"] as? String) ?? "What is on the screen?"
+            state.callbacks.onStatus?("looking at the screen…")
+            Task { [weak self] in
+                guard let self else { return }
+                let answer: String
+                do {
+                    answer = try await ScreenSight(configuration: self.configuration).look(question: question)
+                } catch {
+                    // The model is told what went wrong so it can say something true — "I need
+                    // Screen Recording permission" is a useful sentence; silence is not.
+                    answer = "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
+                }
+                try? self.send([
+                    "type": "conversation.item.create",
+                    "item": ["type": "function_call_output", "call_id": callId, "output": answer],
+                ])
+                // The response that asked for this has long since finished, so the continuation is
+                // requested directly rather than armed for `response.done`.
+                if !self.state.responseInProgress {
+                    try? self.send(["type": "response.create"])
+                } else {
+                    self.state.needsContinuation = true
+                }
+            }
+            return
         }
 
         let outputText: String

@@ -148,6 +148,23 @@ public enum SaathiTools {
         "url"
       ]
     }
+  },
+  {
+    "type": "function",
+    "name": "look_at_screen",
+    "description": "Look at what is on the learner's screen and answer a question about it. Call this whenever they ask about something they can see — a window, a folder, an error, a button — instead of guessing or saying you cannot see. One frame of the main display is sent to a vision model; nothing is captured at any other time.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "What to find out about the screen, in the learner's own words where possible."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
   }
 ]
 """#
@@ -336,21 +353,35 @@ public struct OpenUrlAction: Codable, Sendable, Equatable {
     }
 }
 
+/// Look at what is on the learner's screen and answer a question about it. Call this whenever they ask about something they can see — a window, a folder, an error, a button — instead of guessing or saying you cannot see. One frame of the main display is sent to a vision model; nothing is captured at any other time.
+public struct LookAtScreenAction: Codable, Sendable, Equatable {
+    public static let wireName = "look_at_screen"
+
+    /// What to find out about the screen, in the learner's own words where possible.
+    public var question: String
+
+    public init(question: String) {
+        self.question = question
+    }
+}
+
 /// Every action a Saathi client can be asked to perform. Closed on purpose: a mishearing
 /// can produce a wrong value inside one of these, never a command outside the set.
 public enum SaathiAction: Sendable, Equatable {
     case say(SayAction)
     case showStep(ShowStepAction)
     case openUrl(OpenUrlAction)
+    case lookAtScreen(LookAtScreenAction)
 
     public var wireName: String {
         switch self {
         case .say: return SayAction.wireName
         case .showStep: return ShowStepAction.wireName
         case .openUrl: return OpenUrlAction.wireName
+        case .lookAtScreen: return LookAtScreenAction.wireName
         }
     }
 
     /// The wire names, in schema order — for building a tool list or a smoke test.
-    public static let allWireNames: [String] = ["say", "show_step", "open_url"]
+    public static let allWireNames: [String] = ["say", "show_step", "open_url", "look_at_screen"]
 }

@@ -39,6 +39,15 @@ public enum Permission: CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// An SF Symbol for the permission, so it can be shown as a tile rather than a row of words.
+    public var symbolName: String {
+        switch self {
+        case .microphone: return "mic.fill"
+        case .speechRecognition: return "waveform"
+        case .inputMonitoring: return "keyboard"
+        }
+    }
+
     /// The System Settings pane that holds the switch.
     public var settingsURL: URL {
         let pane: String

@@ -144,6 +144,23 @@ public static class SaathiTools
         "url"
       ]
     }
+  },
+  {
+    "type": "function",
+    "name": "look_at_screen",
+    "description": "Look at what is on the learner's screen and answer a question about it. Call this whenever they ask about something they can see — a window, a folder, an error, a button — instead of guessing or saying you cannot see. One frame of the main display is sent to a vision model; nothing is captured at any other time.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "What to find out about the screen, in the learner's own words where possible."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
   }
 ]
 """;
@@ -393,6 +410,13 @@ public sealed record OpenUrlAction(string Url) : ISaathiAction
     public string WireName => Wire;
 }
 
+/// <summary>Look at what is on the learner's screen and answer a question about it. Call this whenever they ask about something they can see — a window, a folder, an error, a button — instead of guessing or saying you cannot see. One frame of the main display is sent to a vision model; nothing is captured at any other time.</summary>
+public sealed record LookAtScreenAction(string Question) : ISaathiAction
+{
+    public const string Wire = "look_at_screen";
+    public string WireName => Wire;
+}
+
 /// <summary>Every action a Saathi client can be asked to perform. Closed on purpose: a
 /// mishearing can produce a wrong value inside one of these, never a command outside the set.</summary>
 public interface ISaathiAction
@@ -404,5 +428,5 @@ public static class SaathiActions
 {
     /// <summary>The wire names, in schema order — for building a tool list or a smoke test.</summary>
     public static readonly string[] AllWireNames =
-    ["say", "show_step", "open_url"];
+    ["say", "show_step", "open_url", "look_at_screen"];
 }

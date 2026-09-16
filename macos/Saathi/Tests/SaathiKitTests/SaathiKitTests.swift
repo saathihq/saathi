@@ -260,7 +260,7 @@ final class ContractTests: XCTestCase {
     /// The generated contract is the only thing binding this client to the Windows one. If a wire
     /// name changes here without changing there, nothing else in either build would notice.
     func testWireNamesAreWhatTheSchemaSays() {
-        XCTAssertEqual(SaathiAction.allWireNames, ["say", "show_step", "open_url"])
+        XCTAssertEqual(SaathiAction.allWireNames, ["say", "show_step", "open_url", "look_at_screen"])
         XCTAssertEqual(SayAction.wireName, "say")
         XCTAssertEqual(ShowStepAction.wireName, "show_step")
         XCTAssertEqual(OpenUrlAction.wireName, "open_url")

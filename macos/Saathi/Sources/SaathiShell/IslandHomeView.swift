@@ -222,9 +222,14 @@ struct IslandHomeView: View {
 
     // MARK: left column — where it thinks
 
-    /// OpenClicky's left column exactly: a bold title, a dim subtitle, then a row of tiles nine
-    /// points below. Saathi's tile row is the face and what the choice means for the learner's
-    /// voice, which is the thing worth looking at on this panel.
+    /// OpenClicky's left column exactly: a bold title, a dim subtitle, then a block nine points
+    /// below where its skill tiles sit.
+    ///
+    /// Saathi's block is what it has instead of tiles — the face, and the three facts about a spoken
+    /// turn that are otherwise invisible: which language it answers in, which voice it uses, and
+    /// whether the turn is one open connection or three steps. They fill the column for the same
+    /// reason OpenClicky's tiles do, and unlike filler they are things a person actually wants to
+    /// check before they start talking.
     private var leftColumn: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("Where I think")
@@ -233,20 +238,41 @@ struct IslandHomeView: View {
             Text(model.providerTitle)
                 .font(.system(size: 10.5))
                 .foregroundColor(Color.white.opacity(0.55))
-            HStack(spacing: 10) {
-                MascotHostView(mascot: mascot).frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 4) {
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 10) {
+                    MascotHostView(mascot: mascot).frame(width: 44, height: 44)
                     Text(model.privacyLine)
                         .font(.system(size: 10.5))
                         .foregroundColor(Color.white.opacity(0.72))
                         .fixedSize(horizontal: false, vertical: true)
-                    capsuleButton("Provider…", action: actions.onProvider)
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                factRow("Answers in", model.languageTitle)
+                factRow("Voice", model.voiceTitle)
+                factRow("A turn", model.laneTitle)
+                capsuleButton("Provider…", action: actions.onProvider)
+                    .padding(.top, 1)
             }
             .padding(.top, 9)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One fact and its value, on a line. Same weights as the right column's shortcut rows so the
+    /// two halves of the panel read as one table rather than two lists.
+    private func factRow(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 10.5))
+                .foregroundColor(Color.white.opacity(0.55))
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.85))
+                .lineLimit(1)
+        }
+        .frame(width: 210)
     }
 
     // MARK: right column — how to talk to it, and what to fix

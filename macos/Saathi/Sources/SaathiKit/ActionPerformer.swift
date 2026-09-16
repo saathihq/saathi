@@ -20,12 +20,15 @@ public protocol UrlOpener: Sendable {
 }
 
 public enum ActionError: Error, CustomStringConvertible, Equatable {
+    case notPerformedHere(String)
     case unsupportedUrlScheme(String)
     case malformedUrl(String)
     case stepOutOfRange(index: Int, total: Int)
 
     public var description: String {
         switch self {
+        case let .notPerformedHere(reason):
+            return reason
         case let .unsupportedUrlScheme(scheme):
             return "refusing to open a \(schemeic: scheme) URL — Saathi opens http and https only"
         case let .malformedUrl(raw):
@@ -63,6 +66,19 @@ public struct ActionPerformer: Sendable {
 
         case let .openUrl(open):
             try await urlOpener.open(Self.validated(open.url))
+
+        case .lookAtScreen:
+            // Answered where the model can hear the answer, not here.
+            //
+            // Every other action is something Saathi *does* and then narrates. Looking is something
+            // it finds out, and the finding has to go back to the model as the tool call's output or
+            // the model has nothing to say about it — so the voice sessions intercept this one
+            // before it reaches the performer. Reaching here means a caller performed an action list
+            // without going through a session, and silently doing nothing would look like a screen
+            // that could not be read.
+            throw ActionError.notPerformedHere(
+                "look_at_screen is answered by the voice session, which hands the answer back to "
+                + "the model; it is not performed like an action.")
         }
     }
 

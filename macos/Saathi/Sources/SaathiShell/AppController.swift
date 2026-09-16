@@ -251,6 +251,10 @@ public final class AppController {
         guard let notch else { return }
         notch.model.providerTitle = Self.providerTitle(for: configuration)
         notch.model.privacyLine = Self.privacyLine(for: configuration)
+        notch.model.voiceTitle = configuration.resolvedVoice.isEmpty ? "—" : configuration.resolvedVoice
+        notch.model.laneTitle = configuration.providerRow.voice == .realtime
+            ? "one connection"
+            : "three steps"
     }
 
     // MARK: what the island says about a configuration

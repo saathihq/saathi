@@ -213,6 +213,18 @@
           "doc": "An absolute http or https URL."
         }
       ]
+    },
+    {
+      "name": "lookAtScreen",
+      "wireName": "look_at_screen",
+      "doc": "Look at what is on the learner's screen and answer a question about it. Call this whenever they ask about something they can see — a window, a folder, an error, a button — instead of guessing or saying you cannot see. One frame of the main display is sent to a vision model; nothing is captured at any other time.",
+      "parameters": [
+        {
+          "name": "question",
+          "type": "string",
+          "doc": "What to find out about the screen, in the learner's own words where possible."
+        }
+      ]
     }
   ],
   "providers": {

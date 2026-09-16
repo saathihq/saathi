@@ -93,6 +93,25 @@ public final class IslandModel: ObservableObject {
     @Published public var unusedKeyNote: String = ""
     /// The language Saathi speaks, as a BCP-47 tag. Empty means follow this Mac.
     @Published public var language: String = ""
+    /// The realtime voice's name, and whether a turn is one connection or three steps. Shown on
+    /// Home because they are otherwise invisible until you have already started talking.
+    @Published public var voiceTitle: String = ""
+    @Published public var laneTitle: String = ""
+
+    /// The language row's wording: the resolved language named in its own script where the picker
+    /// offers one, so "Follow this Mac" resolves to what it actually followed rather than staying
+    /// vague about it.
+    public var languageTitle: String {
+        if let match = IslandLanguage.all.first(where: { !$0.tag.isEmpty && $0.tag == language }) {
+            return match.title
+        }
+        let resolved = Locale.preferredLanguages.first
+            .flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
+        let named = IslandLanguage.all.first { $0.tag == resolved }?.title
+            ?? Locale.current.localizedString(forLanguageCode: resolved)
+            ?? resolved
+        return "\(named) · this Mac"
+    }
     /// True once a permission has been granted that this process still cannot pick up. The island
     /// then offers to relaunch rather than leaving someone holding keys that do nothing.
     @Published public var needsRestart = false
