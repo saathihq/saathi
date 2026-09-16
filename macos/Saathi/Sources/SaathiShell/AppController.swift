@@ -180,6 +180,14 @@ public final class AppController {
         handle(.failure(voiceStartFailure ?? "voice is not available"))
     }
 
+    /// A turn cannot open or close on a coordinator that a reconfigure is in the middle of tearing
+    /// down — opening one there is the same "two things holding the microphone" hazard the teardown
+    /// ordering exists to prevent, entered from the input side instead of the session side. Say so
+    /// rather than swallow the press: it is brief, but real.
+    private func reportReconfiguring() {
+        handle(.failure("switching over — try again in a moment"))
+    }
+
     /// Swaps in a new configuration without a relaunch.
     ///
     /// The order is not negotiable. A turn is closed before anything is torn down — `TurnCoordinator`
@@ -268,6 +276,10 @@ public final class AppController {
                 }
                 switch event {
                 case .began:
+                    if self.reconfiguring {
+                        self.reportReconfiguring()
+                        return
+                    }
                     if turns.open() { self.handle(.keysHeld) }
                 case .ended:
                     if turns.close() { self.handle(.keysReleased) }
@@ -303,6 +315,10 @@ public final class AppController {
         menu.onTalk = { [weak self] in
             guard let self else { return }
             self.startHoldToTalkIfPossible()   // a granted-while-running permission takes effect here too
+            if self.reconfiguring {
+                self.reportReconfiguring()
+                return
+            }
             guard let turns = self.turns else {
                 self.reportNoVoice()
                 return
