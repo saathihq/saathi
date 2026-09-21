@@ -339,7 +339,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
             "type": "session.update",
             "session": [
                 "type": "realtime",
-                "instructions": Self.instructions(language: configuration.resolvedLanguage),
+                "instructions": Self.instructions(for: configuration),
                 "audio": [
                     "input": input,
                     "output": [
@@ -366,6 +366,14 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     /// in a language you cannot read is a worse failure than any wording. So the language is stated,
     /// and where the config does not name one it comes from the machine's own language rather than
     /// from the model's imagination.
+    /// The prompt for a configuration: the language, and whatever first run learned about the
+    /// learner. Both lanes use this, so they are told the same things about the same person.
+    static func instructions(for configuration: SaathiConfiguration) -> String {
+        let learner = LearnerProfile.paragraph(for: configuration)
+        let prompt = instructions(language: configuration.resolvedLanguage)
+        return learner.isEmpty ? prompt : prompt + "\n\n" + learner
+    }
+
     static func instructions(language: String) -> String {
         let named = Locale.current.localizedString(forLanguageCode: language) ?? language
         return base + """

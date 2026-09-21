@@ -147,3 +147,46 @@ final class InputLevelTests: XCTestCase {
         XCTAssertEqual(InputLevel.level(of: buffer), 0)
     }
 }
+
+final class LearnerProfileTests: XCTestCase {
+
+    /// An install that never ran first run gets exactly the prompt it had before.
+    func testNothingLearnedMeansNothingAdded() {
+        XCTAssertEqual(LearnerProfile.paragraph(for: SaathiConfiguration()), "")
+        XCTAssertEqual(
+            RealtimeVoiceSession.instructions(for: SaathiConfiguration(language: "en")),
+            RealtimeVoiceSession.instructions(language: "en"))
+    }
+
+    func testWhatFirstRunLearnedReachesTheModel() {
+        let configuration = SaathiConfiguration(
+            language: "ta", name: "Asha", tone: .calm, pace: .slow, firstGoal: "the tabla")
+        let prompt = RealtimeVoiceSession.instructions(for: configuration)
+        XCTAssertTrue(prompt.hasPrefix(RealtimeVoiceSession.instructions(language: "ta")), "added to, not replaced")
+        XCTAssertTrue(prompt.contains("called Asha"))
+        XCTAssertTrue(prompt.contains("\"the tabla\""))
+        XCTAssertTrue(prompt.contains("calm"))
+        XCTAssertTrue(prompt.contains("Go slowly"))
+    }
+
+    func testEachMannerSaysSomethingDifferentAndNormalPaceSaysNothing() {
+        XCTAssertNil(LearnerProfile.manner(tone: nil, pace: nil))
+        XCTAssertNil(LearnerProfile.manner(tone: nil, pace: .normal))
+        let calm = LearnerProfile.manner(tone: .calm, pace: .slow)
+        let warm = LearnerProfile.manner(tone: .encouraging, pace: .normal)
+        let plain = LearnerProfile.manner(tone: .neutral, pace: .normal)
+        XCTAssertEqual(Set([calm, warm, plain]).count, 3)
+        XCTAssertFalse(warm?.contains("slowly") ?? true)
+    }
+
+    /// A transcript can be a paragraph, and it is the learner's text going into a system prompt:
+    /// one line, no quotes to close the sentence it sits in, and clipped.
+    func testTheLearnersWordsAreFlattenedAndClipped() {
+        XCTAssertEqual(LearnerProfile.tidied("  the\n tabla  "), "the tabla")
+        XCTAssertEqual(LearnerProfile.tidied("say \"hi\""), "say 'hi'")
+        XCTAssertNil(LearnerProfile.tidied("   "))
+        XCTAssertNil(LearnerProfile.tidied(nil))
+        let long = LearnerProfile.tidied(String(repeating: "a", count: 900))
+        XCTAssertEqual(long?.count, LearnerProfile.maxFieldLength + 1)
+    }
+}
