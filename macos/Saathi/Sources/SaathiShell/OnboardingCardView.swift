@@ -109,7 +109,8 @@ struct OnboardingCardView: View {
                 }
                 .buttonStyle(.plain)
                 .pointerCursor()
-                .keyboardShortcut(.cancelAction)
+                // No Escape shortcut: Escape is what people press to clear a text field, and on
+                // the question cards that would end first run from inside "Or type here".
                 .accessibilityLabel("Close")
                 Spacer()
             }
@@ -299,7 +300,9 @@ struct OnboardingCardView: View {
             heading()
             HStack(alignment: .center, spacing: 14) {
                 face(80)
-                speechBubble(coordinator.bubble, placeholder: "What I hear shows up here.")
+                speechBubble(
+                    coordinator.bubble,
+                    placeholder: showKeys || !coordinator.isListening ? "What I hear shows up here." : "I'm listening. Say anything.")
             }
             if showKeys {
                 HStack(spacing: 8) {
@@ -425,7 +428,16 @@ struct OnboardingCardView: View {
             }
         case .allSet:
             primary("Meet Saathi") { coordinator.next() }
-        case .demo(.micCheck), .demo(.holdToTalk):
+        case .demo(.micCheck):
+            HStack(spacing: 14) {
+                if coordinator.isListening {
+                    secondary("Listening…") {}
+                } else if !coordinator.isSpeaking {
+                    secondary("Listen again") { coordinator.listen() }
+                }
+                primary("Continue", enabled: model.canContinue) { coordinator.next() }
+            }
+        case .demo(.holdToTalk):
             primary("Continue", enabled: model.canContinue) { coordinator.next() }
         case .demo(.question):
             HStack(spacing: 12) {
@@ -483,7 +495,10 @@ struct OnboardingCardView: View {
                 .font(.system(size: 13))
                 .foregroundColor(.white)
                 .onSubmit {
-                    let answer = typed
+                    // Return on an empty field is a slip, not an answer: two of them would count
+                    // as "could not read it twice" and skip the question with its default.
+                    let answer = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !answer.isEmpty else { return }
                     typed = ""
                     coordinator.answer(answer)
                 }

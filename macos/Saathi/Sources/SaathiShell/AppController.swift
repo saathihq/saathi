@@ -131,6 +131,7 @@ public final class AppController {
             switch event {
             case let .userSpoke(text): onboarding.heard(text)
             case .keysHeld: onboarding.keysHeld()
+            case let .status(text) where text.lowercased().hasPrefix("did not catch"): onboarding.heardNothing()
             default: break
             }
         }

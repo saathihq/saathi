@@ -22,14 +22,24 @@ final class OnboardingCoordinatorTests: XCTestCase {
     private var permissionAnswers: [Permission: PermissionStatus] = [:]
     private var liveStatus: [Permission: PermissionStatus] = [:]
     private var trialError: Error?
+    private var trialDelay: UInt64 = 0
+    private var permissionDelay: UInt64 = 0
+    private var listening: [Bool] = []
 
     private func coordinator() -> OnboardingCoordinator {
         var effects = OnboardingEffects()
         effects.speak = { [weak self] text, _ in self?.spoken.append(text) }
-        effects.requestPermission = { [weak self] in self?.permissionAnswers[$0] ?? .granted }
+        effects.requestPermission = { [weak self] permission in
+            if let delay = self?.permissionDelay, delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            return self?.permissionAnswers[permission] ?? .granted
+        }
+        effects.setListening = { [weak self] in self?.listening.append($0) }
         effects.permissionStatus = { [weak self] in self?.liveStatus[$0] ?? .notDetermined }
         effects.openSettings = { [weak self] in self?.openedSettings.append($0) }
-        effects.enrollTrial = { [weak self] in if let error = self?.trialError { throw error } }
+        effects.enrollTrial = { [weak self] in
+            if let delay = self?.trialDelay, delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            if let error = self?.trialError { throw error }
+        }
         effects.save = { [weak self] _ in self?.saves += 1 }
         effects.trialChatChanged = { [weak self] in self?.trialChat.append($0) }
         effects.finish = { [weak self] in self?.finishes.append($0) }
@@ -229,6 +239,117 @@ final class OnboardingCoordinatorTests: XCTestCase {
 
         c.skipTrial(); await settle(c)
         XCTAssertEqual(c.model.availableProviderChoices, [.local, .ownKey])
+    }
+
+    /// The request takes seconds. Closing the card meanwhile must not leave Saathi streaming to the
+    /// hosted service with nothing on screen saying so and nothing to turn it off.
+    func testATrialThatArrivesAfterTheCardWasClosedTurnsNothingOn() async {
+        trialDelay = 80_000_000
+        let c = coordinator()
+        await toTrial(c)
+        c.startTrial()
+        await Task.yield()
+        c.close()
+        try? await Task.sleep(nanoseconds: 160_000_000)
+        await settle(c)
+        XCTAssertEqual(trialChat, [], "hosted voice was switched on for a card that no longer exists")
+        XCTAssertEqual(finishes.count, 1)
+    }
+
+    func testSkippingTheDemoWhileTheTrialIsBeingSetUpTurnsNothingOnEither() async {
+        trialDelay = 80_000_000
+        let c = coordinator()
+        await toTrial(c)
+        c.startTrial()
+        await Task.yield()
+        c.skipDemo()
+        try? await Task.sleep(nanoseconds: 160_000_000)
+        await settle(c)
+        XCTAssertEqual(trialChat, [])
+        XCTAssertEqual(c.model.step, .finished)
+    }
+
+    /// `false` only ever follows a `true`: leaving the card after a skip or a refusal must not tear
+    /// down and rebuild an identical session, during which a key press is refused.
+    func testLeavingTheTrialCardWithoutAChatSwapsNothing() async {
+        let c = coordinator()
+        await toTrial(c)
+        c.skipTrial(); await settle(c)
+        XCTAssertEqual(trialChat, [])
+    }
+
+    /// When first run ends from inside the chat, the app starts a fresh session anyway; a swap
+    /// back to listening would only race it, and a reconfigure that loses that race does nothing.
+    func testFinishingFromInsideTheChatDoesNotSwapBackFirst() async {
+        let c = coordinator()
+        await toTrial(c)
+        c.startTrial(); await settle(c)
+        XCTAssertEqual(trialChat, [true])
+        c.skipDemo(); await settle(c)
+        XCTAssertEqual(trialChat, [true])
+        XCTAssertEqual(finishes.count, 1)
+    }
+
+    func testAPermissionAnswerThatArrivesAfterClosingSaysAndChangesNothing() async {
+        permissionDelay = 80_000_000
+        let c = coordinator()
+        await toPermissions(c)
+        c.requestCurrentPermission()
+        await Task.yield()
+        c.close()
+        let said = spoken.count
+        try? await Task.sleep(nanoseconds: 160_000_000)
+        await settle(c)
+        XCTAssertEqual(c.model.step, .permission(.microphone))
+        XCTAssertEqual(spoken.count, said, "a line was spoken for a card nobody can see")
+    }
+
+    // MARK: the mic check listens by itself
+
+    private func toMicCheck(_ c: OnboardingCoordinator) async {
+        await toPermissions(c)
+        for _ in 0..<3 { c.requestCurrentPermission(); await settle(c) }
+        c.next(); await settle(c)
+        XCTAssertEqual(c.model.step, .demo(.micCheck))
+    }
+
+    /// The keys are taught on the *next* card, so this one has to open a turn itself — and only
+    /// once Saathi has stopped talking, or the first thing it hears is its own voice.
+    func testTheMicCheckListensOnceTheLineHasBeenSpokenAndStopsByItself() async {
+        let c = coordinator()
+        c.listenFor = 0.05
+        await toMicCheck(c)
+        XCTAssertEqual(listening, [true])
+        XCTAssertTrue(c.isListening)
+        XCTAssertEqual(spoken.last, "Can I hear you? Say anything, and I'll show you what I heard.")
+
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(listening, [true, false], "stopping is what makes the session hand over a transcript")
+        XCTAssertFalse(c.isListening)
+
+        c.heard("hello"); c.next(); await settle(c)
+        XCTAssertEqual(c.model.step, .demo(.holdToTalk))
+        XCTAssertEqual(listening, [true, false], "the next card is the keys' job")
+    }
+
+    func testLeavingTheMicCheckWhileListeningClosesTheTurn() async {
+        let c = coordinator()
+        c.listenFor = 5
+        await toMicCheck(c)
+        c.skipDemo(); await settle(c)
+        XCTAssertEqual(listening, [true, false])
+    }
+
+    /// A room too quiet to transcribe is not a locked door.
+    func testTwoEmptyListensStopInsisting() async {
+        let c = coordinator()
+        c.listenFor = 0.02
+        await toMicCheck(c)
+        XCTAssertFalse(c.model.canContinue)
+        c.heardNothing()
+        XCTAssertFalse(c.model.canContinue)
+        c.heardNothing()
+        XCTAssertTrue(c.model.canContinue)
     }
 
     // MARK: the end

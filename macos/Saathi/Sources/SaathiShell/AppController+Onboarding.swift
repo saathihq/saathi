@@ -46,8 +46,13 @@ extension AppController {
         // The spec's welcome card: Saathi registers itself to start at login and says so, with the
         // switch that undoes it right there. Only on a true first run — asking to see onboarding
         // again is not asking to have a login item put back.
-        if isFirstRun, SMAppService.mainApp.status != .enabled {
-            try? SMAppService.mainApp.register()
+        // Once, ever. `isFirstRun` is true on every launch until first run is finished, so without
+        // the flag someone who turned the switch off and then closed the card would be registered
+        // again at the next launch, against the one choice they had made.
+        let registeredKey = "didRegisterLoginItemOnFirstRun"
+        if isFirstRun, !UserDefaults.standard.bool(forKey: registeredKey) {
+            UserDefaults.standard.set(true, forKey: registeredKey)
+            if SMAppService.mainApp.status != .enabled { try? SMAppService.mainApp.register() }
             menu.setStartAtLogin(SMAppService.mainApp.status == .enabled)
         }
 
@@ -78,6 +83,11 @@ extension AppController {
         }
         effects.save = { [weak self] model in self?.onboardingChanged(model) }
         effects.trialChatChanged = { [weak self] active in self?.setTrialChat(active) }
+        effects.setListening = { [weak self] on in
+            // The menu's Talk is a toggle; only press it when it is not already where it should be.
+            guard let self, self.voice.isTurnOpen != on else { return }
+            self.voice.toggleTalk()
+        }
         effects.finish = { [weak self] model in self?.finishOnboarding(model) }
 
         let coordinator = OnboardingCoordinator(model: model, effects: effects)
@@ -127,6 +137,7 @@ extension AppController {
     }
 
     private func finishOnboarding(_ model: OnboardingModel) {
+        let coordinator = onboarding
         onboardingWindow?.close()
         onboardingWindow = nil
         onboarding = nil
@@ -140,6 +151,14 @@ extension AppController {
         // before the listening session ever started.
         let final = configuration
         Task {
+            // The closing line first: swapping the session stops the speaker, and "That's
+            // everything…" was being cut off by the very thing it announces.
+            await coordinator?.settle()
+            // And any swap already under way: a reconfigure that finds another in flight does
+            // nothing at all, which here would leave Saathi listening only, for good.
+            for _ in 0..<100 where self.voice.isReconfiguring {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
             if self.voice.hasSession {
                 await self.reconfigure(final)
             } else {

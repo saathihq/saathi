@@ -33,7 +33,12 @@ public struct OnboardingEffects {
     /// Writes what the model has learned so far into `shell.json`.
     public var save: @MainActor (OnboardingModel) -> Void = { _ in }
     /// The trial chat is about to start, or has ended: the app swaps the voice session to match.
+    /// `false` is only ever sent after a `true`, and never when first run is ending — the app
+    /// starts a fresh session then anyway, and two swaps racing is how one gets dropped.
     public var trialChatChanged: @MainActor (_ active: Bool) -> Void = { _ in }
+    /// Opens or closes a listening turn, for the one card that listens without the keys: the mic
+    /// check comes before the card that teaches them.
+    public var setListening: @MainActor (Bool) -> Void = { _ in }
     /// First run is over, by finishing or by skipping. Called exactly once.
     public var finish: @MainActor (OnboardingModel) -> Void = { _ in }
 
@@ -52,10 +57,18 @@ public final class OnboardingCoordinator: ObservableObject {
     /// A permission request or a trial request is in flight; buttons wait.
     @Published public private(set) var isBusy = false
     @Published public private(set) var isSpeaking = false
+    /// The mic check has a turn open: the card shows that it is listening.
+    @Published public private(set) var isListening = false
 
     private let effects: OnboardingEffects
     private var speech: Task<Void, Never>?
+    private var listening: Task<Void, Never>?
     private var finished = false
+    private var trialChatActive = false
+    private var emptyListens = 0
+
+    /// How long the mic check listens before it stops and shows what it heard.
+    public var listenFor: TimeInterval = 5
 
     public init(model: OnboardingModel, effects: OnboardingEffects) {
         self.model = model
@@ -95,6 +108,36 @@ public final class OnboardingCoordinator: ObservableObject {
 
     public func keysHeld() { send(.keysHeld) }
 
+    /// The session listened and got nothing. Once is a quiet moment; twice, the mic check stops
+    /// insisting — a room too quiet to transcribe must not be a locked door.
+    public func heardNothing() {
+        guard model.step == .demo(.micCheck) else { return }
+        emptyListens += 1
+        if emptyListens >= 2 { send(.couldNotHear) }
+    }
+
+    /// "Listen again" on the mic check, and what entering the card does by itself once Saathi has
+    /// finished speaking — not before, or the first thing it hears is its own voice.
+    public func listen() {
+        guard model.step == .demo(.micCheck), !finished, !isListening else { return }
+        listening?.cancel()
+        isListening = true
+        effects.setListening(true)
+        listening = Task { [listenFor] in
+            try? await Task.sleep(nanoseconds: UInt64(listenFor * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self.stopListening()
+        }
+    }
+
+    private func stopListening() {
+        listening?.cancel()
+        listening = nil
+        guard isListening else { return }
+        isListening = false
+        effects.setListening(false)
+    }
+
     /// "Allow" on a permission card.
     public func requestCurrentPermission() {
         guard case let .permission(permission) = model.step, !isBusy else { return }
@@ -102,6 +145,7 @@ public final class OnboardingCoordinator: ObservableObject {
         Task {
             let status = await effects.requestPermission(permission)
             isBusy = false
+            guard !finished else { return }
             if status == .granted {
                 send(.permissionResolved(permission, status))
             } else if permission == .inputMonitoring, status != .denied {
@@ -132,6 +176,12 @@ public final class OnboardingCoordinator: ObservableObject {
             do {
                 try await effects.enrollTrial()
                 isBusy = false
+                // The request takes seconds and the card can be left or closed meanwhile. Turning
+                // hosted voice on for a card that is no longer there would leave Saathi streaming
+                // to the hosted service with nothing on screen saying so, and nothing to turn it
+                // off again.
+                guard !finished, model.step == .demo(.trialChat) else { return }
+                trialChatActive = true
                 effects.trialChatChanged(true)
                 send(.trialIssued)
             } catch {
@@ -146,13 +196,20 @@ public final class OnboardingCoordinator: ObservableObject {
     // MARK: the loop
 
     private func send(_ event: OnboardingEvent) {
+        // A closed first run is closed: a permission answer or a trial reply arriving late must
+        // not advance a card nobody can see, or speak its line into an empty room.
+        guard !finished else { return }
         let before = model
         guard model.handle(event) else { return }
 
         effects.save(model)
 
-        if before.step == .demo(.trialChat), model.step != .demo(.trialChat) {
-            effects.trialChatChanged(false)
+        if before.step != model.step { stopListening() }
+        if before.step == .demo(.trialChat), model.step != .demo(.trialChat), trialChatActive {
+            trialChatActive = false
+            // Not when first run is ending: the app starts a fresh session then, and this swap
+            // would only be in its way.
+            if model.step != .finished { effects.trialChatChanged(false) }
         }
 
         // Speak when there is something new to say: a new step, a question being asked again, or
@@ -186,6 +243,9 @@ public final class OnboardingCoordinator: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
             await effects.speak(line.spoken, line.tone)
+            guard !Task.isCancelled else { return }
+            // The mic check listens by itself, once the question has been asked.
+            if self.model.step == .demo(.micCheck), !self.model.heardSomething { self.listen() }
         }
     }
 
@@ -199,7 +259,8 @@ public final class OnboardingCoordinator: ObservableObject {
     public func close() {
         speech?.cancel()
         effects.stopSpeaking()
-        if model.step == .demo(.trialChat) { effects.trialChatChanged(false) }
+        stopListening()
+        trialChatActive = false
         guard !finished else { return }
         finished = true
         effects.finish(model)

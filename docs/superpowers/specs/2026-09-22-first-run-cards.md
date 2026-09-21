@@ -45,12 +45,22 @@ heard, before any model exists to answer anything. The trial chat is the one rea
 hosted realtime lane, on a copy of the configuration with `provider = hosted` that is never
 written to disk, for exactly as long as that card is up.
 
+**The mic check opens its own turn.** The chain session only recognises between a begin and an
+end, and the keys that do that are taught on the *next* card. So on entering the mic check — once
+Saathi has finished its sentence, or the first thing it hears is itself — the coordinator opens a
+turn, closes it five seconds later, and shows what came back; "Listen again" repeats it. It is not
+a toll: without the microphone or the recogniser, or after two listens that heard nothing, Continue
+unlocks anyway. The alternative was Skip demo, which skips the questions and the provider choice
+with it.
+
 **Input Monitoring waits on the card.** No dialog can grant it; "Allow" opens System Settings and
 the card changes to "I've turned it on" / "Skip for now", both of which read what macOS says at
 that moment. A refused dialog (microphone, speech) is an answer and moves on at once.
 
 **The login item.** On a true first run Saathi registers itself and the welcome card says so beside
-the switch that undoes it, as the spec asks. "Run onboarding again" does not re-register.
+the switch that undoes it, as the spec asks. Once, ever (a `UserDefaults` flag): launch counts as
+"first run" until first run is finished, and someone who turned the switch off and then closed the
+card must not be registered again next launch. "Run onboarding again" does not re-register.
 
 **A title is printed once.** Saathi says "Can I hear you? Say anything…" as one breath; the card
 shows "Can I hear you?" and then "Say anything…". A question that *is* its title shows "Say it, or
@@ -67,6 +77,21 @@ type it." underneath.
 - **The floating "turn me on in the list" helper** beside System Settings. Its sentence is on the
   waiting card instead.
 - **The card-shrinks-into-the-notch animation.**
+
+## What a code review of it found (2026-09-22, fixed the same night)
+
+Closing the card during a slow trial request left Saathi on the hosted lane with the island still
+describing the old provider; the mic check could not hear anyone; the login item re-registered
+every launch; the closing sentence was cut off by the session swap it announces; leaving the trial
+card rebuilt an identical session; the final reconfigure could be silently dropped behind that
+swap; Escape in "Or type here" ended first run. Each has a test now, except the two that are
+ordering inside `AppController` (the closing line, the dropped reconfigure), which are fixed by
+waiting and can only be seen in a running app. `TrialEnrollment` also wrote back a stale copy of
+`shell.json`; it now writes the token onto what is on disk when the answer arrives.
+
+Onboarding answers — the name included — pass through `handle` like any other transcript and so
+land in `~/.saathi/conversation.log`. That is the log doing its job, on the user's own disk, but
+it is worth knowing.
 
 ## Known rough edges
 
