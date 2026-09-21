@@ -48,6 +48,11 @@ const app = createApp({
   SAATHI_REALTIME_BASE_URL: process.env.SAATHI_REALTIME_BASE_URL,
   SAATHI_REALTIME_MODEL: process.env.SAATHI_REALTIME_MODEL,
   SAATHI_REALTIME_VOICE: process.env.SAATHI_REALTIME_VOICE,
+  // Without these three `/skills/create` answers 503 on the hosted service, whatever is set in
+  // Vercel: the route reads them from here, not from `process.env`.
+  SAATHI_SKILL_KEY: process.env.SAATHI_SKILL_KEY,
+  SAATHI_SKILL_BASE_URL: process.env.SAATHI_SKILL_BASE_URL,
+  SAATHI_SKILL_MODEL: process.env.SAATHI_SKILL_MODEL,
 }, supabase ? { ledger: supabaseLedger(supabase) } : {});
 
 export default function handler(request: Request): Response | Promise<Response> {
