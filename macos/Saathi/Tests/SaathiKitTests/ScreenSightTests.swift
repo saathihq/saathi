@@ -57,4 +57,17 @@ final class ScreenSightTests: XCTestCase {
             .anthropic(model: "claude-haiku-4-5-20251001"))
         XCTAssertNil(ScreenSight.eye(for: .init(provider: .local)))
     }
+
+    /// What Accessibility says is under the pointer settles which thing "this" is; without it the
+    /// prompt is exactly what it was.
+    func testThePromptCarriesWhatAccessibilitySaysIsUnderThePointer() {
+        let context = PointerContext(
+            appName: "Spotify", windowTitle: "Liked Songs", role: "AXRow", caption: "",
+            nearbyCaptions: ["Tum Hi Ho", "Arijit Singh"])
+        let grounded = ScreenSight.systemPrompt(question: "how do I play this song", grounding: context)
+        XCTAssertTrue(grounded.contains(context.sentence))
+        XCTAssertTrue(grounded.contains("trust it for which"))
+        let plain = ScreenSight.systemPrompt(question: "how do I play this song")
+        XCTAssertFalse(plain.contains("Accessibility"))
+    }
 }

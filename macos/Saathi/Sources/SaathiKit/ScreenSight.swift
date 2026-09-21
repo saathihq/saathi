@@ -78,6 +78,9 @@ public struct ScreenCapture: Sendable {
     public struct Frames: Sendable {
         public let display: Data
         public let closeUp: Data
+        /// Where the pointer was when the frame was taken, in global top-left-origin coordinates,
+        /// so Accessibility is asked about the same spot the close-up is centred on.
+        public let pointer: CGPoint
     }
 
     /// The two regions of one look, in the global top-left-origin coordinates that `CGDisplayBounds`,
@@ -147,7 +150,10 @@ public struct ScreenCapture: Sendable {
               let data = try? Data(contentsOf: url), !data.isEmpty else {
             throw ScreenSightError.captureFailed(detail.isEmpty ? "screencapture exited \(process.terminationStatus)" : detail)
         }
-        return Frames(display: data, closeUp: try Self.crop(data, from: regions.display, to: regions.closeUp))
+        return Frames(
+            display: data,
+            closeUp: try Self.crop(data, from: regions.display, to: regions.closeUp),
+            pointer: pointer)
     }
 
     /// The close-up, cut from the frame rather than captured again: a second capture a moment
@@ -230,8 +236,22 @@ public struct ScreenSight: Sendable {
     /// product — so it asks for what a thing *is* and where it sits, not for a catalogue of pixels.
     /// It says what the second picture is, because "this" in the question is resolved there. The
     /// length cap is not decoration: this answer is about to be read aloud.
-    static func systemPrompt(question: String) -> String {
-        """
+    ///
+    /// `grounding` is what macOS Accessibility says is under the pointer, when it says anything.
+    /// It settles *which* thing is meant — the one question pixels answer badly, since forty rows
+    /// of a list look alike and a 20-pixel arrow does not survive downscaling — and the pictures
+    /// answer everything else.
+    static func systemPrompt(question: String, grounding: PointerContext? = nil) -> String {
+        let grounded = grounding.map {
+            """
+
+
+            \($0.sentence) This comes from the system, not from the pictures: trust it for which \
+            thing "this" is, and use the pictures for what that thing looks like, what is around \
+            it and how to act on it. Do not mention Accessibility in your answer.
+            """
+        } ?? ""
+        return """
         You are the eyes of a companion that is helping someone at their Mac. You are given two \
         pictures of their screen and something they asked about it: the whole display, and a \
         close-up of the area around the mouse pointer, with the pointer at its centre. "This", \
@@ -241,7 +261,7 @@ public struct ScreenSight: Sendable {
         Say what the thing actually is and where it is, in words someone who cannot see the screen \
         can act on — "the folder under your pointer is called Saathi Signing, on the right of the \
         desktop" rather than "a blue folder icon". If what they asked about is not on the screen, \
-        say so plainly rather than describing something else.
+        say so plainly rather than describing something else.\(grounded)
 
         Their question: \(question)
         """
@@ -252,16 +272,19 @@ public struct ScreenSight: Sendable {
         guard let eye = Self.eye(for: configuration) else { throw ScreenSightError.noVisionKey }
         let frames = try capture.capture()
         let pictures = [frames.display.base64EncodedString(), frames.closeUp.base64EncodedString()]
+        // Nil without the Accessibility grant or over an app with no tree; sight then works from
+        // the pictures alone, as it did before.
+        let system = Self.systemPrompt(question: question, grounding: PointerGrounding.context(at: frames.pointer))
 
         switch eye {
         case let .anthropic(model):
-            return try await askAnthropic(model: model, pictures: pictures, question: question)
+            return try await askAnthropic(model: model, pictures: pictures, system: system, question: question)
         case let .openai(model):
-            return try await askOpenAI(model: model, pictures: pictures, question: question)
+            return try await askOpenAI(model: model, pictures: pictures, system: system, question: question)
         }
     }
 
-    private func askAnthropic(model: String, pictures: [String], question: String) async throws -> String {
+    private func askAnthropic(model: String, pictures: [String], system: String, question: String) async throws -> String {
         guard let key = configuration.credential(for: .anthropic) else { throw ScreenSightError.noVisionKey }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
@@ -271,7 +294,7 @@ public struct ScreenSight: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model,
             "max_tokens": 300,
-            "system": Self.systemPrompt(question: question),
+            "system": system,
             "messages": [[
                 "role": "user",
                 "content": pictures.map {
@@ -289,7 +312,7 @@ public struct ScreenSight: Sendable {
         return Self.tidied(text)
     }
 
-    private func askOpenAI(model: String, pictures: [String], question: String) async throws -> String {
+    private func askOpenAI(model: String, pictures: [String], system: String, question: String) async throws -> String {
         guard let key = configuration.credential(for: .openai) else { throw ScreenSightError.noVisionKey }
         var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         request.httpMethod = "POST"
@@ -299,7 +322,7 @@ public struct ScreenSight: Sendable {
             "model": model,
             "max_tokens": 300,
             "messages": [
-                ["role": "system", "content": Self.systemPrompt(question: question)],
+                ["role": "system", "content": system],
                 ["role": "user", "content": [["type": "text", "text": question]] + pictures.map {
                     ["type": "image_url", "image_url": ["url": "data:image/png;base64,\($0)"]]
                 }],

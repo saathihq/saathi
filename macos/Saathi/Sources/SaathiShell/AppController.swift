@@ -539,7 +539,7 @@ public final class AppController {
     private func refreshPermissions() {
         let statuses = Permission.allCases.map { ($0, Permissions.status(of: $0)) }
         notch?.model.permissions = Dictionary(uniqueKeysWithValues: statuses)
-        menu.setPermissionsNeeded(statuses.filter { $0.1 != .granted }.map { $0.0.title })
+        menu.setPermissionsNeeded(statuses.filter { $0.0.isRequired && $0.1 != .granted }.map { $0.0.title })
     }
 
     /// Shows or hides the pointer companion and keeps the menu's checkbox and the island's toggle
@@ -619,7 +619,7 @@ public final class AppController {
                 }
                 RunLoop.main.add(poll, forMode: .common)
                 self.permissionPoll = poll
-            } else if let first = Permission.allCases.first(where: { Permissions.status(of: $0) != .granted }) {
+            } else if let first = Permission.allCases.first(where: { $0.isRequired && Permissions.status(of: $0) != .granted }) {
                 NSWorkspace.shared.open(first.settingsURL)
             }
             self.refreshPermissions()

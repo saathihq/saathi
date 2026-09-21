@@ -47,4 +47,13 @@ final class PermissionsTests: XCTestCase {
         // The API cannot tell "asked and refused" from "never asked", so we never claim denied.
         XCTAssertNotEqual(Permissions.status(of: .inputMonitoring), .denied)
     }
+
+    /// Accessibility is what tells forty identical rows apart. Sight works without it, so it is
+    /// offered, never counted as missing.
+    func testAccessibilityIsOfferedButNeverRequired() {
+        XCTAssertTrue(Permission.allCases.contains(.accessibility))
+        XCTAssertTrue(Permission.accessibility.settingsURL.absoluteString.hasSuffix("Privacy_Accessibility"))
+        XCTAssertNotEqual(Permissions.status(of: .accessibility), .denied)
+        XCTAssertEqual(Permission.allCases.filter(\.isRequired), [.microphone, .speechRecognition, .inputMonitoring])
+    }
 }
