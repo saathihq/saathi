@@ -173,7 +173,7 @@ struct IslandHomeView: View {
                     Text("Skills give Saathi superpowers")
                         .font(.system(size: 10.5))
                         .foregroundColor(Color.white.opacity(0.55))
-                    SkillTilesRow(store: model.skills)
+                    SkillTilesRow(store: model.skills, onComposingChanged: { model.isComposingSkill = $0 })
                         .padding(.top, 9)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

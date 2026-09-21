@@ -69,6 +69,7 @@ public final class NotchPanel: NSPanel {
     /// Watches the tab so switching Home ⇄ Setup re-lays the island at the new face's height.
     /// Without this the island keeps whichever height it opened at and the taller face is clipped.
     private var tabObserver: AnyCancellable?
+    private var composingObserver: AnyCancellable?
     /// Whoever had the keyboard before Setup took it, so they get it back. Following OpenClicky,
     /// which does the same around its text composer.
     private var applicationActiveBeforeSetup: NSRunningApplication?
@@ -121,6 +122,14 @@ public final class NotchPanel: NSPanel {
             .sink { [weak self] _ in
                 guard let self else { return }
                 DispatchQueue.main.async { self.apply(self.islandState) }
+            }
+        composingObserver = model.$isComposingSkill
+            .removeDuplicates()
+            .sink { [weak self] composing in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    self.setKeyboardFocus(Self.wantsKeyboard(state: self.islandState, tab: self.model.tab, isComposingSkill: composing))
+                }
             }
         mascot.setAccessibilityElement(true)
         mascot.setAccessibilityRole(.image)
@@ -239,16 +248,23 @@ public final class NotchPanel: NSPanel {
         if next != islandState { apply(next) }
     }
 
-    /// Takes or returns the keyboard, and only for the Setup tab.
+    /// When the island takes the keyboard: open on Setup, where keys are pasted, and on Home only
+    /// for as long as "Create a skill…" is open. A field that cannot be typed or pasted into is not
+    /// a field, and OpenClicky draws the line in the same place — it activates for its composer.
+    static func wantsKeyboard(state: IslandState, tab: IslandTab, isComposingSkill: Bool) -> Bool {
+        guard state == .open else { return false }
+        return tab == .setup || (tab == .home && isComposingSkill)
+    }
+
+    /// Takes or returns the keyboard. See `wantsKeyboard` for when.
     ///
     /// Saathi is an accessory app and the island is a `.nonactivatingPanel`, so while another app is
     /// frontmost it is that app — not Saathi — that receives ⌘V. Every key equivalent typed at the
     /// Setup tab went to whatever was behind it. Activating is therefore not optional if a key is
     /// ever to be pasted rather than typed by hand.
     ///
-    /// Only for Setup, deliberately. Home is something you glance at on the way past; stealing the
-    /// keyboard to show someone a status panel would be obnoxious, and OpenClicky draws the line in
-    /// the same place — it activates for its composer and nothing else.
+    /// Never for Home as such. Home is something you glance at on the way past; stealing the
+    /// keyboard to show someone a status panel would be obnoxious.
     func setKeyboardFocus(_ wanted: Bool) {
         if wanted {
             guard !NSApp.isActive else { makeKeyAndOrderFront(nil); return }
@@ -319,7 +335,7 @@ public final class NotchPanel: NSPanel {
         placeContents(in: windowTarget)
         island.setHandleVisible(collapsed && geometry.showsHandle)
         ignoresMouseEvents = collapsed
-        setKeyboardFocus(islandState == .open && model.tab == .setup)
+        setKeyboardFocus(Self.wantsKeyboard(state: islandState, tab: model.tab, isComposingSkill: model.isComposingSkill))
         if settlingNow { contentView?.layoutSubtreeIfNeeded() }
     }
 
