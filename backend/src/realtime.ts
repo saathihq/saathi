@@ -59,6 +59,11 @@ export type RealtimeGrant = {
  * is rail-independent and would bite under any payment provider. An implementation backed by
  * Postgres should do this as a single conditional UPDATE, not a SELECT followed by an UPDATE.
  */
+/** What asking for a trial comes to. The two refusals are the only two the database gives. */
+export type TrialResult =
+  | { ok: true; expiresAt: string; dailyVoiceSessions: number }
+  | { ok: false; reason: "rate_limited" | "expired" };
+
 export interface SessionLedger {
   /** Named so `/health` can say what is actually enforcing limits. */
   readonly description: string;
@@ -72,6 +77,14 @@ export interface SessionLedger {
   authorize?(token: string): Promise<string | null>;
   /** Returns null to allow, or a reason to refuse. Must be atomic against concurrent callers. */
   check(token: string): Promise<string | null>;
+  /**
+   * Gives `device` a trial account and registers `tokenSha256` as its one live token. Optional: a
+   * ledger that has no accounts to make omits it, and the backend then does not offer trials.
+   *
+   * Takes hashes, not the token or the address: what reaches the database is what is stored there.
+   * Must be atomic — the rate limit, the one-account-per-device rule and the insert are one call.
+   */
+  issueTrial?(device: string, tokenSha256: string, sourceSha256: string): Promise<TrialResult>;
 }
 
 /** No limits at all. The honest default for a self-hosted backend serving its owner. */
@@ -183,14 +196,17 @@ export type SupabaseConfig = {
 };
 
 /** Hex SHA-256, via Web Crypto so it runs on the edge runtime as well as under Node. */
-async function sha256Hex(value: string): Promise<string> {
+export async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
-type RpcResult = { ok?: boolean; reason?: string; account?: string; used?: number; allowance?: number };
+type RpcResult = {
+  ok?: boolean; reason?: string; account?: string; used?: number; allowance?: number;
+  expires_at?: string; daily_voice_sessions?: number;
+};
 
 /**
  * Accounts and the voice allowance, in Postgres.
@@ -206,7 +222,7 @@ export function supabaseLedger(
 ): SessionLedger {
   const base = config.url.endsWith("/") ? config.url.slice(0, -1) : config.url;
 
-  const rpc = async (name: string, token: string): Promise<RpcResult> => {
+  const rpc = async (name: string, params: Record<string, string>): Promise<RpcResult> => {
     const response = await fetchImpl(`${base}/rest/v1/rpc/${name}`, {
       method: "POST",
       headers: {
@@ -214,7 +230,7 @@ export function supabaseLedger(
         authorization: `Bearer ${config.secretKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ p_token_sha256: await sha256Hex(token) }),
+      body: JSON.stringify(params),
     });
     if (!response.ok) {
       // A database that cannot be reached must not read as "allowed". Refusing is the safe
@@ -228,13 +244,26 @@ export function supabaseLedger(
     description: "per-account daily limit, counted in Postgres (shared across every instance)",
 
     authorize: async (token: string) => {
-      const result = await rpc("saathi_resolve_token", token);
-      return result.ok ? null : "not authorised";
+      const result = await rpc("saathi_resolve_token", { p_token_sha256: await sha256Hex(token) });
+      // The one reason the database states for a token that was real: a trial that has ended.
+      return result.ok ? null : (result.reason ?? "not authorised");
     },
 
     check: async (token: string) => {
-      const result = await rpc("saathi_claim_voice_session", token);
+      const result = await rpc("saathi_claim_voice_session", { p_token_sha256: await sha256Hex(token) });
       return result.ok ? null : (result.reason ?? "not authorised");
+    },
+
+    issueTrial: async (device, tokenSha256, sourceSha256) => {
+      const result = await rpc("saathi_issue_trial", {
+        p_device_id: device, p_token_sha256: tokenSha256, p_source_sha256: sourceSha256,
+      });
+      if (result.ok && typeof result.expires_at === "string" && typeof result.daily_voice_sessions === "number") {
+        return { ok: true, expiresAt: result.expires_at, dailyVoiceSessions: result.daily_voice_sessions };
+      }
+      // Anything that is not a well-formed grant is a refusal. An answer this code does not
+      // understand must never become a token in someone's hands.
+      return { ok: false, reason: result.reason === "rate_limited" ? "rate_limited" : "expired" };
     },
   };
 }

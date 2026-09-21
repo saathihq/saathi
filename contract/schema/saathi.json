@@ -42,6 +42,12 @@
         "path": "/skills/create",
         "auth": true,
         "summary": "Drafts one SKILL.md from a sentence. The model runs on the backend's key, so creating a skill works in hosted mode, where the client holds no provider key of its own."
+      },
+      {
+        "method": "POST",
+        "path": "/trial",
+        "auth": false,
+        "summary": "Gives a first-run client a trial token: three voice sessions a day for seven days, one account per device. Body {\"device\": \"<uuid v4>\"}. 501 on a backend with no accounts database."
       }
     ]
   },

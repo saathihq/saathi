@@ -13,6 +13,7 @@
 import { Hono } from "hono";
 import { ACTION_WIRE_NAMES, CONTRACT_VERSION } from "./contract.js";
 import { createSkill, type SkillCreateEnv } from "./skillsCreate.js";
+import { issueTrial } from "./trial.js";
 import {
   LedgerUnavailableError,
   mintRealtimeGrant,
@@ -162,6 +163,9 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
       // letting an operator assume a quota they do not have.
       voice: (env.SAATHI_REALTIME_KEY ?? "").trim().length > 0 ? "hosted" : "off",
       limits: ledger.description,
+      // Whether a first-run client can be given a trial here. Only a ledger that can make accounts
+      // can, so this is a property of what was wired in, like `auth`.
+      trial: typeof ledger.issueTrial === "function" ? "on" : "off",
     }),
   );
 
@@ -244,6 +248,12 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
 
     return createSkill(c, env as SkillCreateEnv, fetchImpl);
   });
+
+  /**
+   * Hands a first-run client a trial token. The one unauthenticated route that gives anything
+   * away — see trial.ts for what bounds it.
+   */
+  app.post("/trial", (c) => issueTrial(c, ledger));
 
   app.notFound((c) => c.json({ error: "no such route" }, 404));
 

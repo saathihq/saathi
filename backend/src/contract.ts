@@ -144,4 +144,5 @@ export const BACKEND_ROUTES = [
   { method: "POST", path: "/session", auth: true },
   { method: "POST", path: "/realtime/session", auth: true },
   { method: "POST", path: "/skills/create", auth: true },
+  { method: "POST", path: "/trial", auth: false },
 ] as const;

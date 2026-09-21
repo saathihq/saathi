@@ -14,6 +14,7 @@ describe("health", () => {
       auth: "closed",
       voice: "off",
       limits: "none — every authorised caller may start a session",
+      trial: "off",
     });
   });
 });

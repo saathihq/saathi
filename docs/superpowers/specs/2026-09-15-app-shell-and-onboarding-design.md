@@ -200,8 +200,10 @@ Tracked by `onboarded` in `shell.json`. Steps, each a case of `OnboardingStep` i
   `accounts.trial boolean`, `accounts.expires_at`, `accounts.device_id` with a unique index, and
   `saathi_claim_voice_session` refuses expired accounts with a message that says the trial ended.
   Rate limit: five trials per source address per day, counted in Postgres, returning 429.
-- Route only exists when the accounts ledger is configured; a self-hosted anonymous or tokens
-  backend answers 404, and `/health` gains `"trial": "on" | "off"`.
+- The route is always mounted, because `routes match the contract` requires every declared route
+  to answer on every posture. A self-hosted anonymous or tokens backend answers 501 "this backend
+  does not offer trials" — the same code, for the same reason, as hosted voice without a provider
+  key — and `/health` gains `"trial": "on" | "off"`. *(Amended 2026-09-21: was 404.)*
 - Client: `TrialClient` in SaathiKit calls it, `ConfigurationStore` saves the token 0600 as it
   does today. The device id is generated once and saved as `deviceId`.
 - Deploy: the hosted service needs `SAATHI_SUPABASE_URL`, `SAATHI_SUPABASE_SECRET_KEY` and an
