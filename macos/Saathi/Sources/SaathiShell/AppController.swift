@@ -348,6 +348,10 @@ public final class AppController {
                     self.refreshPermissions()
                     if Permissions.status(of: permission) != .granted {
                         NSWorkspace.shared.open(permission.settingsURL)
+                        // Screen Recording is the one grant a running process never sees: the
+                        // preflight keeps answering no until a fresh start, so the row would sit
+                        // on "Fix" after the switch was turned on, with no way forward offered.
+                        if permission == .screenRecording { self.notch?.model.needsRestart = true }
                     }
                 }
             }

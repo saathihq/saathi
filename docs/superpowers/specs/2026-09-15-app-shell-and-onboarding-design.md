@@ -136,7 +136,8 @@ Denied is a terminal state the UI explains, with a button to open the right Syst
   and 25 pt below with an exponential ease (response 0.07 s) so it trails rather than jitters, and
   not moving its window at all while the pointer is still. It draws a 16 pt equilateral triangle in
   `#F0452B` rotated −35°, with a glow of its own colour: radius 8 at rest, 12 while thinking,
-  breathing between 1.0 and 0.6 opacity at 1 Hz while listening. It carries no face; its
+  and the glow alone breathing between 1.0 and 0.35 opacity at 1 Hz while listening (the triangle
+  stays solid). It carries no face; its
   accessibility label is the state word, so VoiceOver reads what the island shows.
 - **Onboarding cards.** A centred, key `NSWindow` with a dark translucent background and a step
   dot row, used for the welcome, the colour pick, and the demo. Everything on a card is also

@@ -66,18 +66,19 @@ public final class PointerBuddyView: NSView {
         layOutTriangle()
     }
 
-    /// A glow that breathes, for listening. Off, the buddy sits at full opacity.
+    /// A glow that breathes, for listening. Only the glow: the triangle itself stays solid, so the
+    /// buddy never looks like it is fading out from under the pointer. Off, the glow sits at full.
     public func setPulsing(_ on: Bool) {
         guard on != isPulsing else { return }
         isPulsing = on
         guard on else {
             triangle.removeAnimation(forKey: "pulse")
-            triangle.opacity = 1
+            triangle.shadowOpacity = 1
             return
         }
-        let pulse = CABasicAnimation(keyPath: "opacity")
+        let pulse = CABasicAnimation(keyPath: "shadowOpacity")
         pulse.fromValue = 1
-        pulse.toValue = 0.6
+        pulse.toValue = 0.35
         pulse.duration = 0.5
         pulse.autoreverses = true
         pulse.repeatCount = .infinity

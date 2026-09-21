@@ -29,13 +29,11 @@ struct IslandAgentsView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 14) {
-                if !model.isBackendConfigured {
-                    emptyState("Connect a backend to see your agents.", detail: "Add a token to ~/.saathi/shell.json.")
-                } else {
-                    // Saathi has no doing lane yet. Said plainly rather than shown as an empty grid
-                    // that looks like something failed to load.
-                    emptyState("No agents yet", detail: "Saathi can talk and look at the screen. Doing work is not wired up.")
-                }
+                // Saathi has no doing lane yet, on any lane. Said plainly rather than shown as an
+                // empty grid that looks like something failed to load — and not as "connect a
+                // backend", which sent someone with a working own-key install off to configure
+                // something that would not have given them agents either.
+                emptyState("No agents yet", detail: "Saathi can talk and look at the screen. Doing work is not wired up.")
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 16)

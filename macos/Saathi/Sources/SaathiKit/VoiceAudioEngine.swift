@@ -196,8 +196,8 @@ public nonisolated final class VoiceAudioEngine: @unchecked Sendable {
     /// graph is one engine. The session pauses it again when playback drains (see
     /// `onPlaybackActiveChanged`); left running, the microphone light stayed on between turns.
     public func enqueue(pcm16 data: Data) {
-        queue.async {
-            guard self.isRunning else { return }
+        queue.async { [weak self] in
+            guard let self, self.isRunning else { return }
             if !self.engine.isRunning {
                 do { try self.engine.start() } catch { return }
             }
