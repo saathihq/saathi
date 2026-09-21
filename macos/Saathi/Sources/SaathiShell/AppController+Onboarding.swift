@@ -91,6 +91,7 @@ extension AppController {
         }
         effects.finish = { [weak self] model in self?.finishOnboarding(model) }
 
+        applySpeechSettings(scripted: true)
         let coordinator = OnboardingCoordinator(model: model, effects: effects)
         onboarding = coordinator
         onboardingWindow = OnboardingWindowController(
@@ -115,9 +116,9 @@ extension AppController {
     /// moment the permission cards are behind us.
     private func onboardingChanged(_ model: OnboardingModel) {
         model.apply(to: &configuration)
-        // Saathi speaks the language and the pace it was just asked for from the next sentence on —
-        // including the rest of first run.
-        applySpeechSettings()
+        // The pace that was just asked for, from the next sentence on. Not the language, while first
+        // run is still talking: its lines are English. That follows once the closing line is said.
+        applySpeechSettings(scripted: true)
         // The island's face wears the colour as it is chosen, not at the next launch.
         if let name = configuration.colour, let colour = MascotColor(paletteName: name, in: data) {
             notch?.mascot.color = colour
@@ -162,6 +163,7 @@ extension AppController {
             // The closing line first: swapping the session stops the speaker, and "That's
             // everything…" was being cut off by the very thing it announces.
             await coordinator?.settle()
+            self.applySpeechSettings()
             // And any swap already under way: a reconfigure that finds another in flight does
             // nothing at all, which here would leave Saathi listening only, for good.
             for _ in 0..<100 where self.voice.isReconfiguring {

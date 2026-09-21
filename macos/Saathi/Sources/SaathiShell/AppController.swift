@@ -190,7 +190,18 @@ public final class AppController {
         ticker = timer
     }
 
-    func applySpeechSettings() { systemSpeaker.apply(SpeechSettings(configuration)) }
+    /// `scripted` is first run: its lines are written in English, so they are read by an English
+    /// voice whatever language was just chosen — a Tamil synthesiser reading English sentences is
+    /// the same noise as the reverse. The pace still follows at once.
+    func applySpeechSettings(scripted: Bool = false) {
+        systemSpeaker.apply(Self.speechSettings(for: configuration, scripted: scripted))
+    }
+
+    static func speechSettings(for configuration: SaathiConfiguration, scripted: Bool) -> SpeechSettings {
+        var settings = SpeechSettings(configuration)
+        if scripted { settings.language = "en" }
+        return settings
+    }
 
     // MARK: voice
 
