@@ -37,8 +37,9 @@ public struct OnboardingEffects {
     /// starts a fresh session then anyway, and two swaps racing is how one gets dropped.
     public var trialChatChanged: @MainActor (_ active: Bool) -> Void = { _ in }
     /// Opens or closes a listening turn, for the one card that listens without the keys: the mic
-    /// check comes before the card that teaches them.
-    public var setListening: @MainActor (Bool) -> Void = { _ in }
+    /// check comes before the card that teaches them. Returns whether it changed anything — false
+    /// when the turn was already where it was asked to be, because the keys got there first.
+    public var setListening: @MainActor (Bool) -> Bool = { _ in true }
     /// First run is over, by finishing or by skipping. Called exactly once.
     public var finish: @MainActor (OnboardingModel) -> Void = { _ in }
 
@@ -68,6 +69,8 @@ public final class OnboardingCoordinator: ObservableObject {
     private var finished = false
     private var trialChatActive = false
     private var emptyListens = 0
+    /// The open turn is the mic check's own, not one the keys opened. Only its own is its to close.
+    private var openedOwnTurn = false
 
     /// How long the mic check listens before it stops and shows what it heard.
     public var listenFor: TimeInterval = 5
@@ -129,9 +132,36 @@ public final class OnboardingCoordinator: ObservableObject {
     /// The session listened and got nothing. Once is a quiet moment; twice, the mic check stops
     /// insisting — a room too quiet to transcribe must not be a locked door.
     public func heardNothing() {
+        level = 0
         guard model.step == .demo(.micCheck) else { return }
+        endListeningState()
         emptyListens += 1
         if emptyListens >= 2 { send(.couldNotHear) }
+    }
+
+    /// The turn could not be opened at all: no microphone, no on-device recogniser. Nothing will
+    /// ever be heard, so the mic check stops asking at once rather than after two silences that
+    /// were never listened to.
+    public func listeningFailed() {
+        level = 0
+        guard model.step == .demo(.micCheck) else { return }
+        endListeningState()
+        send(.couldNotHear)
+    }
+
+    /// A turn ended, whoever opened it — the timer, or the keys being let go. The bars rest, and
+    /// the card stops saying it is listening.
+    public func turnEnded() {
+        level = 0
+        if model.step == .demo(.micCheck) { endListeningState() }
+    }
+
+    /// Stops *showing* listening, without touching the turn: it is already closed, or closing.
+    private func endListeningState() {
+        listening?.cancel()
+        listening = nil
+        isListening = false
+        openedOwnTurn = false
     }
 
     /// "Listen again" on the mic check, and what entering the card does by itself once Saathi has
@@ -140,7 +170,7 @@ public final class OnboardingCoordinator: ObservableObject {
         guard model.step == .demo(.micCheck), !finished, !isListening else { return }
         listening?.cancel()
         isListening = true
-        effects.setListening(true)
+        openedOwnTurn = effects.setListening(true)
         listening = Task { [listenFor] in
             try? await Task.sleep(nanoseconds: UInt64(listenFor * 1_000_000_000))
             guard !Task.isCancelled else { return }
@@ -154,7 +184,10 @@ public final class OnboardingCoordinator: ObservableObject {
         guard isListening else { return }
         isListening = false
         level = 0
-        effects.setListening(false)
+        // Only a turn this card opened. Someone holding the keys when the line ended opened their
+        // own, and closing it on a timer would cut them off mid-sentence.
+        if openedOwnTurn { _ = effects.setListening(false) }
+        openedOwnTurn = false
     }
 
     /// "Allow" on a permission card.

@@ -25,6 +25,8 @@ final class OnboardingCoordinatorTests: XCTestCase {
     private var trialDelay: UInt64 = 0
     private var permissionDelay: UInt64 = 0
     private var listening: [Bool] = []
+    /// Whether asking for a turn actually changes one. False stands for "the keys already had it".
+    private var turnOpens = true
 
     private func coordinator() -> OnboardingCoordinator {
         var effects = OnboardingEffects()
@@ -33,7 +35,11 @@ final class OnboardingCoordinatorTests: XCTestCase {
             if let delay = self?.permissionDelay, delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             return self?.permissionAnswers[permission] ?? .granted
         }
-        effects.setListening = { [weak self] in self?.listening.append($0) }
+        effects.setListening = { [weak self] on in
+            guard let self else { return false }
+            self.listening.append(on)
+            return self.turnOpens
+        }
         effects.permissionStatus = { [weak self] in self?.liveStatus[$0] ?? .notDetermined }
         effects.openSettings = { [weak self] in self?.openedSettings.append($0) }
         effects.enrollTrial = { [weak self] in
@@ -367,6 +373,62 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.bubble, "")
     }
 
+    /// A Mac with no microphone, or no on-device recogniser: the turn throws on opening, and no
+    /// "did not catch that" will ever come. Showing "Listening…" with nothing listening and never
+    /// unlocking Continue is a locked door with a sign on it saying it is open.
+    func testATurnThatCannotOpenStopsTheMicCheckAskingAtOnce() async {
+        let c = coordinator()
+        c.listenFor = 5
+        await toMicCheck(c)
+        XCTAssertTrue(c.isListening)
+        c.listeningFailed()
+        XCTAssertFalse(c.isListening)
+        XCTAssertTrue(c.model.canContinue)
+        XCTAssertTrue(c.model.micCheckGaveUp)
+    }
+
+    func testAFailureOnAnotherCardIsNotTheMicChecksBusiness() async {
+        let c = coordinator()
+        await toQuestions(c)
+        c.listeningFailed()
+        XCTAssertFalse(c.model.micCheckGaveUp)
+    }
+
+    /// The keys being let go ends the turn the card opened. The card must stop saying it is
+    /// listening then, not five seconds later — and must not then "close" a turn that is gone.
+    func testLettingGoOfTheKeysEndsTheListeningStateWithoutPressingAnything() async {
+        let c = coordinator()
+        c.listenFor = 0.05
+        await toMicCheck(c)
+        c.listening(level: 0.6, partial: nil)
+        c.turnEnded()
+        XCTAssertFalse(c.isListening)
+        XCTAssertEqual(c.level, 0, "the bars rest when the turn ends, heard or not")
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(listening, [true], "nothing was pressed to close a turn that had already closed")
+    }
+
+    /// Someone already holding the keys when the line ends has their own turn open. It is not the
+    /// card's to close on a timer, mid-sentence.
+    func testATurnTheKeysOpenedIsNotClosedByTheTimer() async {
+        turnOpens = false
+        let c = coordinator()
+        c.listenFor = 0.05
+        await toMicCheck(c)
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(listening, [true], "asked once, told the turn was not its own, and left it alone")
+    }
+
+    func testSilenceRestsTheBars() async {
+        let c = coordinator()
+        c.listenFor = 5
+        await toMicCheck(c)
+        c.listening(level: 0.7, partial: nil)
+        c.heardNothing()
+        XCTAssertEqual(c.level, 0)
+        XCTAssertFalse(c.isListening)
+    }
+
     /// A room too quiet to transcribe is not a locked door.
     func testTwoEmptyListensStopInsisting() async {
         let c = coordinator()
@@ -464,7 +526,7 @@ final class OnboardingEntryTests: XCTestCase {
     /// must not be read out by a Tamil synthesiser; the pace they asked for still applies at once.
     func testFirstRunIsReadByAnEnglishVoiceWhateverLanguageWasChosen() {
         let chosen = SaathiConfiguration(language: "ta-IN", pace: .slow)
-        XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: true), SpeechSettings(language: "en", pace: .slow))
+        XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: true), SpeechSettings(language: "en-US", pace: .slow))
         XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: false), SpeechSettings(language: "ta-IN", pace: .slow))
     }
 

@@ -8,6 +8,7 @@
 import AVFoundation
 import AppKit
 import Foundation
+import NaturalLanguage
 import os
 import SaathiContract
 
@@ -27,6 +28,9 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
     private let synthesizer = AVSpeechSynthesizer()
     private let queue = SerialTaskQueue()
     private let settings = OSAllocatedUnfairLock(initialState: SpeechSettings())
+    /// Asked for once. The list only changes when someone downloads a voice in System Settings,
+    /// and a relaunch picking that up is a fair price for not enumerating voices every sentence.
+    private static let installedVoiceLanguages = AVSpeechSynthesisVoice.speechVoices().map(\.language)
 
     public init(settings: SpeechSettings = SpeechSettings()) {
         self.settings.withLock { $0 = settings }
@@ -61,8 +65,9 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
         // A Tamil sentence read by an English synthesiser is noise. The voice follows the language
         // Saathi was told to speak, falling back only when this Mac has no voice for it.
         let language = SpeechSettings.voiceLanguage(
-            wanted: settings.language,
-            available: AVSpeechSynthesisVoice.speechVoices().map(\.language))
+            wanted: SpeechSettings.spokenLanguage(of: text, wanted: settings.language),
+            available: Self.installedVoiceLanguages,
+            preferred: Locale.preferredLanguages)
         utterance.voice = AVSpeechSynthesisVoice(language: language)
 
         // Tone maps to rate and pitch rather than to a different voice: switching voices mid-session is
@@ -227,15 +232,46 @@ public struct SpeechSettings: Equatable, Sendable {
 
     static let fallbackLanguage = "en-US"
 
-    /// The voice language to ask for: the wanted tag if this Mac has a voice for it, else any
-    /// voice of the same language ("ta" finds "ta-IN"; "en-IN" settles for "en-GB"), else English.
-    /// Pure, so it is tested against a list rather than against whatever this Mac has installed.
-    public static func voiceLanguage(wanted: String?, available: [String]) -> String {
+    /// The region to read a bare language in when nothing better is known. Without it "en" became
+    /// whichever English sorted first — Australian — and "pt" became Brazilian by the same accident.
+    static let usualRegion = ["en": "en-US", "fr": "fr-FR", "es": "es-ES", "pt": "pt-PT", "zh": "zh-CN", "nl": "nl-NL", "de": "de-DE", "it": "it-IT"]
+
+    /// The voice language to ask for: the wanted tag if this Mac has a voice for it; else a voice
+    /// of the same language, choosing the region the person themselves uses (`preferred`, as in
+    /// `Locale.preferredLanguages`), then the language's usual region, then any; else English.
+    /// Pure, so it is tested against lists rather than against whatever this Mac has installed.
+    public static func voiceLanguage(wanted: String?, available: [String], preferred: [String] = []) -> String {
         guard let wanted = wanted?.trimmingCharacters(in: .whitespaces), !wanted.isEmpty else { return fallbackLanguage }
-        if let exact = available.first(where: { $0.caseInsensitiveCompare(wanted) == .orderedSame }) { return exact }
+        let installed = { (tag: String) in available.first { $0.caseInsensitiveCompare(tag) == .orderedSame } }
+        if let exact = installed(wanted) { return exact }
+
         let code = wanted.split(separator: "-").first.map { $0.lowercased() } ?? wanted.lowercased()
-        let sameLanguage = available.filter { $0.lowercased() == code || $0.lowercased().hasPrefix(code + "-") }.sorted()
-        return sameLanguage.first ?? fallbackLanguage
+        let isSameLanguage = { (tag: String) in tag.lowercased() == code || tag.lowercased().hasPrefix(code + "-") }
+        if let theirs = preferred.filter(isSameLanguage).lazy.compactMap(installed).first { return theirs }
+        if let usual = usualRegion[code].flatMap(installed) { return usual }
+        return available.filter(isSameLanguage).sorted().first ?? fallbackLanguage
+    }
+
+    /// The language a line is actually *in*, between the one Saathi was told to speak and English.
+    ///
+    /// Saathi has sentences of its own that are written in English — "I did not catch that", the
+    /// (i) explanation, the whole of first run — and a Tamil synthesiser reading them is the same
+    /// noise as an English one reading Tamil. Rather than teach every caller to say which language
+    /// its string is in, the speaker looks: only ever a choice between the wanted language and
+    /// English, so a French sentence is never mistaken for Italian, and a line too short to tell
+    /// ("OK") stays in the wanted language.
+    public static func spokenLanguage(of text: String, wanted: String?) -> String? {
+        guard let wanted = wanted?.trimmingCharacters(in: .whitespaces), !wanted.isEmpty else { return wanted }
+        let code = wanted.split(separator: "-").first.map { $0.lowercased() } ?? wanted.lowercased()
+        guard code != "en" else { return wanted }
+
+        let recogniser = NLLanguageRecognizer()
+        recogniser.languageConstraints = [.english, NLLanguage(rawValue: code)]
+        recogniser.processString(text)
+        let guesses = recogniser.languageHypotheses(withMaximum: 2)
+        let english = guesses[.english] ?? 0
+        let theirs = guesses[NLLanguage(rawValue: code)] ?? 0
+        return english > 0.75 && english > theirs ? "en" : wanted
     }
 
     /// Calm is a little slower; a learner who asked for slow gets slower again, whatever the tone.

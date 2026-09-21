@@ -74,20 +74,30 @@ extension AppController {
         }
         effects.openSettings = { NSWorkspace.shared.open($0.settingsURL) }
         effects.enrollTrial = { [weak self] in
-            _ = try await TrialEnrollment.enroll(at: ConfigurationStore.defaultPath())
-            // The token and the device id were written by the enrolment; take them up so the next
-            // save from here does not write an older copy back over them.
-            if let self, let saved = try? ConfigurationStore.load(from: ConfigurationStore.defaultPath()) {
-                self.configuration.token = saved.token
-                self.configuration.deviceId = saved.deviceId
+            // Whatever the enrolment wrote is taken up on BOTH paths, so the next save from here
+            // does not write an older copy back over it. The device id is written before the
+            // request is made; losing it after a refusal would mint a new one on every "Try
+            // again", and a new id is a new trial.
+            let adopt = {
+                guard let self, let saved = try? ConfigurationStore.load(from: ConfigurationStore.defaultPath()) else { return }
+                if let token = saved.token { self.configuration.token = token }
+                if let device = saved.deviceId { self.configuration.deviceId = device }
+            }
+            do {
+                _ = try await TrialEnrollment.enroll(at: ConfigurationStore.defaultPath())
+                adopt()
+            } catch {
+                adopt()
+                throw error
             }
         }
         effects.save = { [weak self] model in self?.onboardingChanged(model) }
         effects.trialChatChanged = { [weak self] active in self?.setTrialChat(active) }
         effects.setListening = { [weak self] on in
             // The menu's Talk is a toggle; only press it when it is not already where it should be.
-            guard let self, self.voice.isTurnOpen != on else { return }
+            guard let self, self.voice.isTurnOpen != on else { return false }
             self.voice.toggleTalk()
+            return self.voice.isTurnOpen == on
         }
         effects.finish = { [weak self] model in self?.finishOnboarding(model) }
 
@@ -157,8 +167,9 @@ extension AppController {
         notch?.model.language = configuration.language ?? ""
 
         // A fresh session on whatever was chosen — or the first real one, if first run was closed
-        // before the listening session ever started.
-        let final = configuration
+        // before the listening session ever started. On the configuration as it is *after* the
+        // waits below, not a copy taken now: the closing line takes seconds, Setup is already
+        // open, and a key saved meanwhile must not be undone by an older copy applied on top.
         Task {
             // The closing line first: swapping the session stops the speaker, and "That's
             // everything…" was being cut off by the very thing it announces.
@@ -169,10 +180,14 @@ extension AppController {
             for _ in 0..<100 where self.voice.isReconfiguring {
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
+            if self.voice.isReconfiguring {
+                self.handle(.failure("still switching over — quit and reopen Saathi if I don't answer"))
+                return
+            }
             if self.voice.hasSession {
-                await self.reconfigure(final)
+                await self.reconfigure(self.configuration)
             } else {
-                self.voice.start(with: final)
+                self.voice.start(with: self.configuration)
                 self.applyConfigurationToIsland()
             }
         }

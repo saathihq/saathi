@@ -84,7 +84,12 @@ public final class AppController {
                 self?.conversation.append(.look(question: question, answer: answer))
             },
             // Only first run draws these; the rest of the app has the face for that.
-            onListening: { [weak self] level, partial in self?.onboarding?.listening(level: level, partial: partial) })
+            // And only while a turn is open: the tap goes on firing for a moment after the turn is
+            // closed, and a late buffer would leave the bars standing over a closed microphone.
+            onListening: { [weak self] level, partial in
+                guard let self, self.voice.isTurnOpen else { return }
+                self.onboarding?.listening(level: level, partial: partial)
+            })
         wireMenu()
         wireNotch()
     }
@@ -137,6 +142,10 @@ public final class AppController {
             case let .userSpoke(text): onboarding.heard(text)
             case .keysHeld: onboarding.keysHeld()
             case let .status(text) where text.lowercased().hasPrefix("did not catch"): onboarding.heardNothing()
+            case .keysReleased: onboarding.turnEnded()
+            // A turn that could not open: no microphone, no recogniser. The mic check must hear
+            // about it, or it shows "Listening…" with nothing listening and never unlocks.
+            case .failure: onboarding.listeningFailed()
             default: break
             }
         }
@@ -199,7 +208,7 @@ public final class AppController {
 
     static func speechSettings(for configuration: SaathiConfiguration, scripted: Bool) -> SpeechSettings {
         var settings = SpeechSettings(configuration)
-        if scripted { settings.language = "en" }
+        if scripted { settings.language = "en-US" }
         return settings
     }
 

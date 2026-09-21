@@ -128,7 +128,7 @@ final class SpeechSettingsTests: XCTestCase {
         XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "ta-IN", available: installed), "ta-IN")
         XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "ta", available: installed), "ta-IN", "a bare language finds its region")
         XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "EN-in", available: installed), "en-IN")
-        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en-AU", available: installed), "en-GB", "no such region: another voice of the same language")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en-AU", available: installed), "en-US", "no such region: the language's usual voice")
     }
 
     func testNoVoiceForTheLanguageFallsBackToEnglishRatherThanSilence() {
@@ -136,6 +136,32 @@ final class SpeechSettingsTests: XCTestCase {
         XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: nil, available: installed), "en-US")
         XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "  ", available: installed), "en-US")
         XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "e", available: installed), "en-US", "a prefix of a code is not the code")
+    }
+
+    /// "en" is what an unconfigured install resolves to. Sorted-first made that Australian.
+    func testABareLanguageTakesTheLearnersOwnRegionThenTheUsualOneNeverTheAlphabeticalOne() {
+        let macOS = ["en-AU", "en-GB", "en-IE", "en-IN", "en-US", "en-ZA", "pt-BR", "pt-PT", "ta-IN"]
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en", available: macOS), "en-US")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en", available: macOS, preferred: ["hi-IN", "en-IN"]), "en-IN")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "pt", available: macOS), "pt-PT")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en-NZ", available: macOS, preferred: ["en-NZ"]), "en-US",
+                       "their region has no voice: the usual one, not the first in the alphabet")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en", available: ["en-AU", "en-ZA"]), "en-AU", "only then, any")
+    }
+
+    /// Saathi's own fixed sentences are English. With Tamil configured they must not be handed to
+    /// the Tamil synthesiser — and a Tamil reply must not be handed to the English one.
+    func testALineIsReadInTheLanguageItIsWrittenIn() {
+        XCTAssertEqual(SpeechSettings.spokenLanguage(of: "I did not catch that. Say it once more?", wanted: "ta-IN"), "en")
+        XCTAssertEqual(SpeechSettings.spokenLanguage(of: "நான் அதைக் கேட்கவில்லை. மீண்டும் சொல்லுங்கள்.", wanted: "ta-IN"), "ta-IN")
+        XCTAssertEqual(SpeechSettings.spokenLanguage(of: "मैंने वह नहीं सुना। एक बार फिर कहिए।", wanted: "hi"), "hi")
+        XCTAssertEqual(SpeechSettings.spokenLanguage(of: "Je n'ai pas compris. Pouvez-vous répéter, s'il vous plaît ?", wanted: "fr-FR"), "fr-FR")
+        XCTAssertEqual(SpeechSettings.spokenLanguage(of: "Hold control and option whenever you want me.", wanted: "fr-FR"), "en")
+    }
+
+    func testEnglishConfiguredOrNothingConfiguredIsLeftAlone() {
+        XCTAssertEqual(SpeechSettings.spokenLanguage(of: "Bonjour tout le monde", wanted: "en-IN"), "en-IN")
+        XCTAssertNil(SpeechSettings.spokenLanguage(of: "hello", wanted: nil))
     }
 
     func testSlowIsSlowerWhateverTheToneAndTheTonesKeepTheirOwnNumbers() {

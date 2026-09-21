@@ -89,6 +89,15 @@ ordering inside `AppController` (the closing line, the dropped reconfigure), whi
 waiting and can only be seen in a running app. `TrialEnrollment` also wrote back a stale copy of
 `shell.json`; it now writes the token onto what is on disk when the answer arrives.
 
+A second review, of the fixes and of what was added after them, found seven more, also fixed: the
+mic check still locked on a Mac whose turn cannot open at all (no microphone, no recogniser); the
+final reconfigure applied a copy of the configuration taken before a several-second wait, which
+could erase a key saved in Setup meanwhile; the device id was wiped after a refused trial, so every
+"Try again" asked as a new device; a bare "en" resolved to whichever English voice sorted first,
+which is Australian; Saathi's own English sentences were handed to the learner's-language
+synthesiser once first run was over; the level bars could freeze standing over a closed
+microphone; and the mic check's timer could close a turn the keys had opened.
+
 Onboarding answers — the name included — pass through `handle` like any other transcript and so
 land in `~/.saathi/conversation.log`. That is the log doing its job, on the user's own disk, but
 it is worth knowing.
