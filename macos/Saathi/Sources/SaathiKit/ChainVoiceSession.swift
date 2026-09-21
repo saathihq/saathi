@@ -35,6 +35,10 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
     private let configuration: SaathiConfiguration
     private let speaker: any Speaker
     private let urlSession: URLSession
+    /// False for a session that only listens: a turn ends with the transcript and nothing is sent
+    /// to any model. First run uses it — "can I hear you?" and "what should I call you?" are
+    /// answered by what was heard, and must work before a model has been chosen at all.
+    public let thinks: Bool
 
     /// Everything touched from both the caller and the recognition callback, behind one scoped
     /// lock. `NSLock.lock()` is unavailable from an async context in the Swift 6 language mode —
@@ -57,11 +61,13 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
     public init(
         configuration: SaathiConfiguration,
         speaker: any Speaker,
-        urlSession: URLSession = URLSession(configuration: .default)
+        urlSession: URLSession = URLSession(configuration: .default),
+        thinks: Bool = true
     ) {
         self.configuration = configuration
         self.speaker = speaker
         self.urlSession = urlSession
+        self.thinks = thinks
         super.init()
     }
 
@@ -154,10 +160,15 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
         let heard = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !heard.isEmpty else {
             callbacks.onStatus?("did not catch that")
-            await speaker.speak("I did not catch that. Say it once more?", tone: .calm)
+            // A listen-only session leaves the asking-again to whoever is listening through it.
+            if thinks { await speaker.speak("I did not catch that. Say it once more?", tone: .calm) }
             return
         }
         callbacks.onUserTranscript?(heard)
+        guard thinks else {
+            callbacks.onStatus?("heard")
+            return
+        }
         callbacks.onStatus?("thinking…")
 
         try await think(about: heard, callbacks: callbacks)

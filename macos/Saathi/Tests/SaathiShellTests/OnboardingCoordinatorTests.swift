@@ -1,0 +1,300 @@
+//
+//  OnboardingCoordinatorTests.swift
+//  SaathiShellTests
+//
+//  First run with the world replaced by closures: what is said and in what order, what macOS is
+//  asked, what the backend is asked, and when `shell.json` is written.
+//
+
+import XCTest
+import SaathiContract
+import SaathiKit
+@testable import SaathiShell
+
+@MainActor
+final class OnboardingCoordinatorTests: XCTestCase {
+
+    private var spoken: [String] = []
+    private var saves = 0
+    private var finishes: [OnboardingModel] = []
+    private var trialChat: [Bool] = []
+    private var openedSettings: [Permission] = []
+    private var permissionAnswers: [Permission: PermissionStatus] = [:]
+    private var liveStatus: [Permission: PermissionStatus] = [:]
+    private var trialError: Error?
+
+    private func coordinator() -> OnboardingCoordinator {
+        var effects = OnboardingEffects()
+        effects.speak = { [weak self] text, _ in self?.spoken.append(text) }
+        effects.requestPermission = { [weak self] in self?.permissionAnswers[$0] ?? .granted }
+        effects.permissionStatus = { [weak self] in self?.liveStatus[$0] ?? .notDetermined }
+        effects.openSettings = { [weak self] in self?.openedSettings.append($0) }
+        effects.enrollTrial = { [weak self] in if let error = self?.trialError { throw error } }
+        effects.save = { [weak self] _ in self?.saves += 1 }
+        effects.trialChatChanged = { [weak self] in self?.trialChat.append($0) }
+        effects.finish = { [weak self] in self?.finishes.append($0) }
+        return OnboardingCoordinator(
+            model: OnboardingModel(supportedLanguages: ["en-IN", "ta-IN"], palette: ["blue", "teal"]),
+            effects: effects)
+    }
+
+    /// Lets the permission and trial tasks run, then waits for speech.
+    private func settle(_ c: OnboardingCoordinator) async {
+        for _ in 0..<5 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        await c.settle()
+    }
+
+    private func toPermissions(_ c: OnboardingCoordinator) async {
+        c.begin(); c.next(); c.choose(colour: "teal"); c.next(); c.next()
+        await settle(c)
+    }
+
+    private func toQuestions(_ c: OnboardingCoordinator) async {
+        await toPermissions(c)
+        for _ in 0..<3 { c.requestCurrentPermission(); await settle(c) }
+        c.next()
+        c.heard("hello"); c.next()
+        c.keysHeld(); c.next()
+        await settle(c)
+    }
+
+    func testBeginSaysTheWelcome() async {
+        let c = coordinator()
+        c.begin()
+        await settle(c)
+        XCTAssertEqual(spoken, ["Namaste. I'm Saathi, a companion for learning new things. I'll talk you through this."])
+    }
+
+    func testEveryStepChangeIsSavedAndSpoken() async {
+        let c = coordinator()
+        c.begin(); await settle(c)
+        c.next(); await settle(c)
+        XCTAssertEqual(c.model.step, .colour)
+        XCTAssertEqual(saves, 1)
+        XCTAssertEqual(spoken.count, 2)
+
+        c.choose(colour: "teal"); await settle(c)
+        XCTAssertEqual(saves, 2, "a colour is worth keeping")
+        XCTAssertEqual(spoken.count, 2, "but trying colours on does not make Saathi repeat itself")
+    }
+
+    func testAnEventThatChangesNothingSavesAndSaysNothing() async {
+        let c = coordinator()
+        c.begin(); await settle(c)
+        c.skipDemo(); c.answer("Asha"); c.keysHeld()
+        await settle(c)
+        XCTAssertEqual(saves, 0)
+        XCTAssertEqual(spoken.count, 1)
+    }
+
+    // MARK: permissions
+
+    func testAGrantedPermissionMovesOnAndTheNextReasonIsSpoken() async {
+        let c = coordinator()
+        await toPermissions(c)
+        XCTAssertEqual(c.model.step, .permission(.microphone))
+        c.requestCurrentPermission(); await settle(c)
+        XCTAssertEqual(c.model.step, .permission(.speechRecognition))
+        XCTAssertEqual(spoken.last, Permission.speechRecognition.reason)
+    }
+
+    func testADeniedPermissionMovesOnToo() async {
+        permissionAnswers[.microphone] = .denied
+        let c = coordinator()
+        await toPermissions(c)
+        c.requestCurrentPermission(); await settle(c)
+        XCTAssertEqual(c.model.step, .permission(.speechRecognition))
+        XCTAssertEqual(c.model.deniedPermissions, [.microphone])
+        XCTAssertTrue(openedSettings.isEmpty, "a refusal is an answer, not an invitation to System Settings")
+    }
+
+    /// Input Monitoring is a switch in System Settings: the card waits there rather than moving on
+    /// as if the learner had said no.
+    func testInputMonitoringOpensSettingsAndWaitsOnTheCard() async {
+        permissionAnswers[.inputMonitoring] = .notDetermined
+        let c = coordinator()
+        await toPermissions(c)
+        c.requestCurrentPermission(); await settle(c)
+        c.requestCurrentPermission(); await settle(c)
+        c.requestCurrentPermission(); await settle(c)
+
+        XCTAssertEqual(c.model.step, .permission(.inputMonitoring))
+        XCTAssertEqual(c.waitingOnSettings, .inputMonitoring)
+        XCTAssertEqual(openedSettings, [.inputMonitoring])
+
+        liveStatus[.inputMonitoring] = .granted
+        c.settlePermissionFromSettings(); await settle(c)
+        XCTAssertNil(c.waitingOnSettings)
+        XCTAssertEqual(c.model.step, .allSet)
+        XCTAssertEqual(c.model.deniedPermissions, [])
+    }
+
+    func testSkippingFromSettingsRecordsThatItIsStillOff() async {
+        permissionAnswers[.inputMonitoring] = .notDetermined
+        let c = coordinator()
+        await toPermissions(c)
+        for _ in 0..<3 { c.requestCurrentPermission(); await settle(c) }
+        c.settlePermissionFromSettings(); await settle(c)
+        XCTAssertEqual(c.model.step, .allSet)
+        XCTAssertEqual(c.model.deniedPermissions, [.inputMonitoring])
+    }
+
+    // MARK: listening and answering
+
+    func testATranscriptIsProofOfBeingHeardOnTheMicCheckAndAnAnswerOnAQuestion() async {
+        let c = coordinator()
+        await toPermissions(c)
+        for _ in 0..<3 { c.requestCurrentPermission(); await settle(c) }
+        c.next()
+        XCTAssertEqual(c.model.step, .demo(.micCheck))
+        c.heard("hello saathi")
+        XCTAssertEqual(c.bubble, "hello saathi")
+        XCTAssertTrue(c.model.canContinue)
+
+        c.next(); c.keysHeld(); c.next()
+        XCTAssertEqual(c.model.step, .demo(.question(.name)))
+        XCTAssertEqual(c.bubble, "", "the bubble does not carry one step's words onto the next")
+        c.heard("my name is asha")
+        XCTAssertEqual(c.model.answers.name, "Asha")
+    }
+
+    func testATranscriptOutsideTheListeningStepsIsNotFirstRunsBusiness() async {
+        let c = coordinator()
+        c.begin()
+        c.heard("hello")
+        XCTAssertEqual(c.bubble, "")
+        XCTAssertEqual(c.model.step, .welcome)
+    }
+
+    /// "Good to meet you, Asha." comes before "What do you want to learn?", not after and not
+    /// instead.
+    func testTheAcknowledgementIsSpokenBeforeTheNextQuestion() async {
+        let c = coordinator()
+        await toQuestions(c)
+        spoken.removeAll()
+        c.answer("Asha"); await settle(c)
+        XCTAssertEqual(spoken, ["Good to meet you, Asha.", "What do you want to learn, or play with, first?"])
+    }
+
+    func testAReaskIsSpokenWithoutAnAcknowledgement() async {
+        let c = coordinator()
+        await toQuestions(c)
+        c.answer("Asha"); c.answer("the tabla"); await settle(c)
+        spoken.removeAll()
+        c.answer("whatever"); await settle(c)
+        XCTAssertEqual(spoken.count, 1)
+        XCTAssertTrue(spoken[0].hasPrefix("Sorry"))
+    }
+
+    // MARK: the trial
+
+    private func toTrial(_ c: OnboardingCoordinator) async {
+        await toQuestions(c)
+        c.answer("Asha"); c.answer("the tabla"); c.answer("plain"); c.answer("Tamil")
+        await settle(c)
+        XCTAssertEqual(c.model.step, .demo(.trialChat))
+    }
+
+    func testTheDisclosureIsSpokenBeforeAnythingIsAskedOfTheBackend() async {
+        let c = coordinator()
+        await toTrial(c)
+        XCTAssertEqual(spoken.last, OnboardingScript.hostedDisclosure)
+        XCTAssertEqual(trialChat, [], "nothing is switched to hosted until the learner presses the button")
+    }
+
+    func testAnIssuedTrialSwitchesTheVoiceToHostedAndLeavingSwitchesItBack() async {
+        let c = coordinator()
+        await toTrial(c)
+        c.startTrial(); await settle(c)
+        XCTAssertEqual(c.model.trial, .ready)
+        XCTAssertEqual(trialChat, [true])
+
+        c.next(); await settle(c)
+        XCTAssertEqual(c.model.step, .demo(.providerChoice))
+        XCTAssertEqual(trialChat, [true, false])
+        XCTAssertEqual(c.model.availableProviderChoices, [.hosted, .local, .ownKey])
+    }
+
+    func testARefusedTrialIsSaidInTheBackendsWordsAndHostedIsNeverOffered() async {
+        trialError = TrialError.refused("that is five trial requests from this network today; try again tomorrow")
+        let c = coordinator()
+        await toTrial(c)
+        c.startTrial(); await settle(c)
+
+        XCTAssertEqual(c.model.trial, .failed("that is five trial requests from this network today; try again tomorrow"))
+        XCTAssertTrue(spoken.last?.contains("five trial requests") ?? false)
+        XCTAssertEqual(trialChat, [])
+        XCTAssertFalse(c.isBusy, "the card can be used again: Try again, or Skip")
+
+        c.skipTrial(); await settle(c)
+        XCTAssertEqual(c.model.availableProviderChoices, [.local, .ownKey])
+    }
+
+    // MARK: the end
+
+    func testFinishingIsReportedExactlyOnce() async {
+        let c = coordinator()
+        await toTrial(c)
+        c.skipTrial(); c.choose(provider: .local); await settle(c)
+        XCTAssertEqual(finishes.count, 1)
+        XCTAssertEqual(finishes.first?.providerChoice, .local)
+        c.close()
+        XCTAssertEqual(finishes.count, 1)
+    }
+
+    func testClosingTheWindowHalfwayFinishesWithoutClaimingToBeOnboarded() async {
+        let c = coordinator()
+        await toQuestions(c)
+        c.answer("Asha"); await settle(c)
+        c.close()
+        XCTAssertEqual(finishes.count, 1)
+        var configuration = SaathiConfiguration()
+        finishes[0].apply(to: &configuration)
+        XCTAssertEqual(configuration.name, "Asha")
+        XCTAssertNil(configuration.onboarded, "first run comes back next launch")
+    }
+
+    func testSkipDemoFinishes() async {
+        let c = coordinator()
+        await toQuestions(c)
+        c.skipDemo(); await settle(c)
+        XCTAssertEqual(finishes.count, 1)
+        XCTAssertEqual(finishes[0].step, .finished)
+    }
+}
+
+@MainActor
+final class OnboardingCardWordingTests: XCTestCase {
+
+    /// Saathi says the title and the sentence as one breath; the card prints the title once.
+    func testTheSubtitleDoesNotRepeatTheTitle() {
+        XCTAssertEqual(
+            OnboardingCardView.subtitle(for: OnboardingLine(
+                title: "Namaste", spoken: "Namaste. I'm Saathi, a companion for learning new things. I'll talk you through this.")),
+            "I'm Saathi, a companion for learning new things. I'll talk you through this.")
+        XCTAssertEqual(
+            OnboardingCardView.subtitle(for: OnboardingLine(
+                title: "This is how you talk to me.", spoken: "This is how you talk to me. Hold control and option, and say hi.")),
+            "Hold control and option, and say hi.")
+        XCTAssertEqual(
+            OnboardingCardView.subtitle(for: OnboardingLine(title: "All set", spoken: "Turn your sound on. Meet Saathi.")),
+            "Turn your sound on. Meet Saathi.")
+    }
+
+    func testAQuestionThatIsItsOwnTitleSaysHowToAnswerInstead() {
+        XCTAssertEqual(
+            OnboardingCardView.subtitle(for: OnboardingLine(title: "What should I call you?", spoken: "What should I call you?")),
+            "Say it, or type it.")
+    }
+
+    func testTheCardsFaceFollowsWhatTheCardIsDoing() {
+        var model = OnboardingModel(supportedLanguages: ["en-IN"], palette: ["blue"])
+        XCTAssertEqual(OnboardingWindowController.expression(for: model, isSpeaking: false), .idle)
+        XCTAssertEqual(OnboardingWindowController.expression(for: model, isSpeaking: true), .dictating)
+        for event: OnboardingEvent in [.next, .next, .next,
+                      .permissionResolved(.microphone, .granted), .permissionResolved(.speechRecognition, .granted),
+                      .permissionResolved(.inputMonitoring, .granted), .next] { model.handle(event) }
+        XCTAssertEqual(OnboardingWindowController.expression(for: model, isSpeaking: false), .listening)
+    }
+}
