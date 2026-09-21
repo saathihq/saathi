@@ -220,10 +220,19 @@ final class VoiceAudioEngineConcurrencyTests: XCTestCase {
     /// **It only proves anything under the Thread Sanitizer.** The plain suite runs it as a smoke
     /// test. The command that actually checks the fix:
     ///
-    ///     swift test --sanitize=thread --filter VoiceAudioEngineConcurrencyTests
+    ///     SAATHI_AUDIO_TESTS=1 swift test --sanitize=thread --filter VoiceAudioEngineConcurrencyTests
+    ///
+    /// Opt-in. `stop()` reaches `engine.inputNode`, which opens the input hardware even though
+    /// nothing is started, and this does it fifty times over. On 2026-09-22 that crashed the whole
+    /// bundle inside AVFAudio's own hardware-format listener ("memory corruption of free block")
+    /// the moment a Bluetooth headset connected mid-run — and a test that opens the microphone in
+    /// the background is also the likeliest reason a game lost its sound the evening before.
     ///
     /// On the pre-fix shape that aborts with a ReportRace in `handleMicrophoneBuffer`.
-    func testTearDownDuringACaptureBurstDoesNotRace() async {
+    func testTearDownDuringACaptureBurstDoesNotRace() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SAATHI_AUDIO_TESTS"] == "1",
+            "builds real AVAudioEngines, which open the audio hardware; set SAATHI_AUDIO_TESTS=1 to run it")
         let engine = VoiceAudioEngine()
         engine.setCallbacks(onMicrophoneFrame: { _, _ in }, onPlaybackActiveChanged: { _ in })
 
@@ -257,7 +266,10 @@ final class VoiceAudioEngineConcurrencyTests: XCTestCase {
 
     /// With no capture configured the tap must return immediately rather than dereferencing
     /// anything. This is the path teardown leaves behind.
-    func testTapWithNoConfiguredCaptureIsANoOp() async {
+    func testTapWithNoConfiguredCaptureIsANoOp() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SAATHI_AUDIO_TESTS"] == "1",
+            "builds real AVAudioEngines, which open the audio hardware; set SAATHI_AUDIO_TESTS=1 to run it")
         let engine = VoiceAudioEngine()
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)!
