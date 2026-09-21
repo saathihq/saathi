@@ -94,8 +94,11 @@ psql "$SAATHI_DATABASE_URL" -f backend/migrations/0001_accounts_and_voice_ledger
 
 Two things worth knowing before connecting:
 
-- Supabase's direct database host is **IPv6-only** now. If your network has no IPv6, use the
-  connection pooler host instead.
+- Supabase's direct database host is **IPv6-only** now. If your network has no IPv6, psql does not
+  fail — it hangs. Use the connection pooler host instead: for the hosted project that is
+  `aws-0-ap-northeast-1.pooler.supabase.com`, port 5432, user `postgres.<project ref>` (not
+  `postgres`). The region is not written anywhere obvious; a wrong one answers
+  `tenant/user … not found` at once, so trying them is cheap.
 - A password containing `#` breaks a connection *string* silently — `#` begins a URI fragment, so
   everything after it is discarded and you get an authentication failure that looks like a wrong
   password. Percent-encode it (`%23`, and `%21` for `!`), or sidestep the problem with `PGPASSWORD`.
@@ -114,3 +117,55 @@ values (encode(sha256('<the token>'::bytea), 'hex'), '<account id>', 'their lapt
 Revoking one is `update saathi.tokens set revoked_at = now() where token_sha256 = …`. The functions
 treat unknown and revoked identically, on purpose: telling them apart tells an attacker which of
 their guesses was once real.
+
+## Trials
+
+A trial is how a first-run Mac gets to talk to Saathi before anyone has an account: an ordinary
+`saathi.accounts` row, flagged `trial`, allowed **3 voice sessions a day**, that stops working
+**7 days** after it was made. `POST /trial` with `{"device": "<uuid v4>"}` hands back a token; the
+client generates the device id once and keeps it in `shell.json`.
+
+What bounds it, all of it in one Postgres function (`saathi_issue_trial`), because a counter in a
+serverless process is one quota per warm isolate:
+
+- **One account per device.** The same device asking again inside the seven days gets the same
+  account and a fresh token (the old one is revoked). After the seven days it is refused, not
+  re-enrolled — a reinstall does not mint a second allowance.
+- **Five asks per network per UTC day**, counting every ask, answered 429. A refused ask creates
+  nothing.
+- **Nothing identifying is stored.** Tokens are SHA-256 digests, as everywhere else. The source
+  address is hashed by the backend before it reaches the database; `saathi.trial_requests` holds a
+  digest, a date and a count, and is prunable by date.
+
+It needs the accounts database and nothing else — no new environment variable. Turning it on is
+applying the migration:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f backend/migrations/0002_trials.sql
+psql -v ON_ERROR_STOP=1 -f backend/migrations/0002_verify.sql   # asserts, then rolls back
+```
+
+`0002_trials.sql` is re-runnable. `0002_verify.sql` changes nothing: it runs every rule above inside
+a transaction it rolls back, and prints `0002: all assertions passed`.
+
+`/health` gains `"trial": "on" | "off"`. It is a property of what was wired in, like `auth`: a
+backend without the database answers `off`, and `501 this backend does not offer trials` on the
+route — the same code, for the same reason, as hosted voice without a provider key.
+
+An expired trial's token is refused with `your Saathi trial has ended` rather than the
+`not authorised` an unknown token gets: the caller holds something that was real, and that sentence
+is one they can act on.
+
+Ending a trial early:
+
+```sql
+update saathi.accounts set suspended_at = now() where device_id = '<the device id>';
+```
+
+### Verification
+
+| What | When | Result |
+|---|---|---|
+| `0002_trials.sql` + `0002_verify.sql` on a local Postgres 17 | 2026-09-21 | all assertions passed; applying twice is clean; 8 concurrent first asks from one device → 1 account, 1 live token |
+| `0002_trials.sql` + `0002_verify.sql` on the hosted database | 2026-09-21 | all assertions passed; the existing account and its token untouched; 0 trial rows left behind |
+| `/health` and `/trial` on api.saathi.dev | — | not yet verified against production: the route ships with the next deploy of `main` |
