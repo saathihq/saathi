@@ -30,15 +30,21 @@ public final class NotchPanel: NSPanel {
     static let compactContentHeight: CGFloat = 54
     static let openWidth: CGFloat = 512
     static let homeTotalHeight: CGFloat = 232
-    /// The content under the band. Home is OpenClicky's 195; Setup is Saathi's own tab and is sized
-    /// the same way — a number for the content, not for the island as a whole.
+    /// The content under the band, per tab — OpenClicky's three numbers: Home 195, Agents 380,
+    /// Settings 590. A number for the content, not for the island as a whole.
     static let homeContentUnderBand: CGFloat = 195
-    static let setupContentUnderBand: CGFloat = 214
+    static let agentsContentUnderBand: CGFloat = 380
+    /// Settings is a scroll of sections now rather than two fields, so it takes OpenClicky's own
+    /// height for that tab. Taller than the screen's menu bar allows is not a risk: the island hangs
+    /// from the top and the tab scrolls inside it.
+    static let setupContentUnderBand: CGFloat = 590
 
-    /// The island's total height for a tab, by OpenClicky's rule.
+    /// The island's total height for a tab, by OpenClicky's rule: a floor for the whole island and
+    /// a floor for the content under the band, whichever is larger.
     static func openHeight(for tab: IslandTab, topBandHeight: CGFloat) -> CGFloat {
         switch tab {
         case .home: return max(homeTotalHeight, topBandHeight + homeContentUnderBand)
+        case .agents: return topBandHeight + agentsContentUnderBand
         case .setup: return topBandHeight + setupContentUnderBand
         }
     }
@@ -207,6 +213,9 @@ public final class NotchPanel: NSPanel {
     /// The hosting view's own frame, in the panel's local coordinates — what the tests read to
     /// check the open island is actually 512 pt wide and not just the (always-largest) window.
     var bodyRect: CGRect { toLocal(rect(for: islandState)) }
+    /// Where the hosted tree actually is, in the panel's coordinates — as against `bodyRect`,
+    /// which is where it should be.
+    var hostingFrame: CGRect { hosting.frame }
 
     /// The island's rect on screen in a given state. Collapsed on a display without a notch this
     /// reaches down to the handle, so the handle itself is something you can hover.
@@ -307,11 +316,7 @@ public final class NotchPanel: NSPanel {
         let flare = IslandRootView.topCornerFlare
         let windowTarget = rect(for: .open).union(target).insetBy(dx: -flare, dy: 0)
         resizeWindow(to: windowTarget, growing: windowTarget.height >= frame.height)
-
-        island.setContentFrame(toLocal(windowTarget))
-        // The hosted tree fills the window and draws the island top-aligned inside it, so SwiftUI
-        // can spring the shape and the content together without the window clipping either.
-        hosting.frame = toLocal(windowTarget)
+        placeContents(in: windowTarget)
         island.setHandleVisible(collapsed && geometry.showsHandle)
         ignoresMouseEvents = collapsed
         setKeyboardFocus(islandState == .open && model.tab == .setup)
@@ -344,8 +349,24 @@ public final class NotchPanel: NSPanel {
     private func layOutForScreen() {
         setFrame(Self.openRect(geometry), display: true)
         island.frame = NSRect(origin: .zero, size: frame.size)
-        island.setHandleRect(toLocal(geometry.handleRect))
         apply(islandState)
+    }
+
+    /// Puts the hosted tree, the body and the handle where the window's *current* frame says.
+    ///
+    /// All three are in the panel's own coordinates, measured from its bottom-left, and the window
+    /// hangs from the top of the screen: so whenever the frame changes height, everything inside it
+    /// has to be placed again or it stays at the old frame's distance from the bottom. The handle
+    /// used to be placed once, against the Home-height window `layOutForScreen` starts from, and
+    /// the window was then grown for the Setup tab — which left the handle four hundred points
+    /// down an external display, over whatever was there. Called after every `setFrame`.
+    ///
+    /// The hosted tree fills the window and draws the island top-aligned inside it, so SwiftUI can
+    /// spring the shape and the content together without the window clipping either.
+    private func placeContents(in windowTarget: CGRect) {
+        island.setContentFrame(toLocal(windowTarget))
+        hosting.frame = toLocal(windowTarget)
+        island.setHandleRect(toLocal(geometry.handleRect))
     }
 
     /// The open island: 512 wide, and tall enough that its body always extends `topBandHeight +
@@ -375,6 +396,8 @@ public final class NotchPanel: NSPanel {
             DispatchQueue.main.asyncAfter(deadline: .now() + settle) { [weak self] in
                 guard let self, self.frame != target else { return }
                 self.setFrame(target, display: true)
+                // Everything inside was placed against the taller frame this window had until now.
+                self.placeContents(in: target)
             }
         }
     }
@@ -400,6 +423,8 @@ final class IslandView: NSView {
     /// For the tests: which of the two collapsed looks is on show.
     var isBodyVisible: Bool { !body.isHidden }
     var isHandleVisible: Bool { !handle.isHidden }
+    /// Where the handle is, in the island view's coordinates.
+    var handleFrame: CGRect { handle.frame }
 
     init() {
         super.init(frame: .zero)

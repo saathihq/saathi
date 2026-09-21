@@ -465,6 +465,43 @@ final class RealtimeVoiceNameTests: XCTestCase {
         XCTAssertEqual(output["voice"] as? String, "cedar")
     }
 
+    /// The realtime model's own audio is Saathi's voice on this lane. Offered a `say` tool as well,
+    /// it called it, the system voice read the line out, and two speakers answered one question.
+    func testTheRealtimeSessionOffersNoSayToolBecauseItSpeaksForItself() throws {
+        let session = RealtimeVoiceSession(configuration: SaathiConfiguration(provider: .openai, openaiKey: "sk-o"))
+        XCTAssertTrue(session.speaksForItself)
+        let sessionObject = try XCTUnwrap(session.sessionUpdateForTesting()["session"] as? [String: Any])
+        let names = try XCTUnwrap(sessionObject["tools"] as? [[String: Any]]).compactMap { $0["name"] as? String }
+        XCTAssertFalse(names.contains(SayAction.wireName), "got \(names)")
+        XCTAssertEqual(Set(names), [ShowStepAction.wireName, OpenUrlAction.wireName, LookAtScreenAction.wireName])
+    }
+
+    /// "How do I play this song" got "which instrument do you play?" — the model never looked. With
+    /// the tools and the old prompt, gpt-4o-mini looked 0 of 3 times for that question; with the
+    /// pointing rule it looked 3 of 3. The rule is pinned here so it does not quietly erode.
+    func testTheInstructionsSayThatPointingWordsMeanLookFirst() {
+        let instructions = RealtimeVoiceSession.instructions(language: "en")
+        XCTAssertTrue(instructions.contains("\"this\", \"that\", \"here\""), instructions)
+        XCTAssertTrue(instructions.contains("how do I play this song"))
+        XCTAssertTrue(instructions.contains("Call look_at_screen first, every time, before answering"))
+    }
+
+    /// Playing a reply restarts the audio engine, tap and all. The microphone light stayed on for
+    /// as long as Saathi ran because nothing paused it afterwards.
+    func testTheMicrophoneIsReleasedOnceTheReplyHasPlayedUnlessATurnIsOpen() {
+        XCTAssertTrue(RealtimeVoiceSession.releasesMicrophoneAfterPlayback(active: false, mode: .pushToTalk, forwarding: false, replyUnfinished: false))
+        XCTAssertFalse(RealtimeVoiceSession.releasesMicrophoneAfterPlayback(active: true, mode: .pushToTalk, forwarding: false, replyUnfinished: false), "still playing")
+        XCTAssertFalse(RealtimeVoiceSession.releasesMicrophoneAfterPlayback(active: false, mode: .pushToTalk, forwarding: true, replyUnfinished: false), "a barge-in: the learner is talking")
+        XCTAssertFalse(RealtimeVoiceSession.releasesMicrophoneAfterPlayback(active: false, mode: .alwaysOn, forwarding: false, replyUnfinished: false), "always-on listens by definition")
+        XCTAssertFalse(RealtimeVoiceSession.releasesMicrophoneAfterPlayback(active: false, mode: .pushToTalk, forwarding: false, replyUnfinished: true), "an underrun, or the gap before a continuation: more audio is coming")
+    }
+
+    /// The chain lane has no voice of its own: the system voice is how it speaks at all.
+    func testTheChainSessionDoesNotSpeakForItself() {
+        let session = ChainVoiceSession(configuration: SaathiConfiguration(provider: .local), speaker: SilentSpeaker())
+        XCTAssertFalse(session.speaksForItself)
+    }
+
     func testTheVoiceCanBeChanged() throws {
         let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o", voice: "marin")
         let session = RealtimeVoiceSession(configuration: configuration)
@@ -513,4 +550,9 @@ final class VendorKeyPlumbingTests: XCTestCase {
         let report = ProviderReport.describe(configuration)
         XCTAssertTrue(report.contains("your key   set"), "got:\n\(report)")
     }
+}
+
+
+private struct SilentSpeaker: Speaker {
+    func speak(_ text: String, tone: Tone) async {}
 }

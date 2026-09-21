@@ -308,6 +308,91 @@ final class SetupPresentationTests: XCTestCase {
         XCTAssertEqual(AppController.unusedKeyNote(for: plan), "")
     }
 
+    // MARK: what was said
+
+    func testTheLastExchangeStartsEmptyAndActionsReadAsOneLine() {
+        XCTAssertEqual(IslandModel().lastYouSaid, "")
+        XCTAssertEqual(IslandModel().lastSaathiSaid, "")
+        XCTAssertEqual(AppController.describe(.say(SayAction(text: "hi"))), "say: hi")
+        XCTAssertEqual(AppController.describe(.showStep(ShowStepAction(title: "Open Spotify", index: 1, total: 3))), "show_step 1/3: Open Spotify")
+        XCTAssertEqual(AppController.describe(.openUrl(OpenUrlAction(url: "https://x.y"))), "open_url: https://x.y")
+        XCTAssertEqual(AppController.describe(.lookAtScreen(LookAtScreenAction(question: "which song"))), "look_at_screen: which song")
+    }
+
+    // MARK: who speaks
+
+    /// One question got two answers, one in the realtime voice and one in the system's: the model
+    /// called `show_step`, and the performer read the narration out over the model's own audio.
+    /// On a lane whose session speaks for itself, the performer says nothing — the island still
+    /// shows the step, and an `open_url` is still opened.
+    func testNarrationIsNotReadOutOverASessionThatSpeaksForItself() {
+        let say = SaathiAction.say(SayAction(text: "hello"))
+        let step = SaathiAction.showStep(ShowStepAction(title: "Open Spotify", index: 1, total: 2))
+        let open = SaathiAction.openUrl(OpenUrlAction(url: "https://example.org"))
+        XCTAssertFalse(AppController.performs(say, sessionSpeaksForItself: true))
+        XCTAssertFalse(AppController.performs(step, sessionSpeaksForItself: true))
+        XCTAssertTrue(AppController.performs(open, sessionSpeaksForItself: true))
+        XCTAssertTrue(AppController.performs(say, sessionSpeaksForItself: false))
+        XCTAssertTrue(AppController.performs(step, sessionSpeaksForItself: false))
+    }
+
+    // MARK: the status pill in the band
+
+    /// The pill describes the lane in use. A red "Set up backend" over a config that talks straight
+    /// to OpenAI with its own key told someone with a working install to configure something they
+    /// will never use.
+    func testThePillNamesTheVendorWhenYourOwnKeyIsInUse() {
+        let pill = AppController.connectionPill(for: SaathiConfiguration(provider: .openai, openaiKey: "sk-o"))
+        XCTAssertEqual(pill, AppController.ConnectionPill(title: "api.openai.com", isConfigured: true))
+        let claude = AppController.connectionPill(for: SaathiConfiguration(provider: .anthropic, anthropicKey: "sk-a"))
+        XCTAssertEqual(claude, AppController.ConnectionPill(title: "api.anthropic.com", isConfigured: true))
+    }
+
+    func testThePillAsksForAKeyWhenTheLaneNeedsOneAndHasNone() {
+        let pill = AppController.connectionPill(for: SaathiConfiguration(provider: .openai))
+        XCTAssertEqual(pill, AppController.ConnectionPill(title: "Add a key", isConfigured: false))
+    }
+
+    func testThePillNamesTheBackendOnlyOnTheHostedLane() {
+        XCTAssertEqual(
+            AppController.connectionPill(for: SaathiConfiguration(provider: .hosted)),
+            AppController.ConnectionPill(title: "Set up backend", isConfigured: false))
+        XCTAssertEqual(
+            AppController.connectionPill(for: SaathiConfiguration(provider: .hosted, token: "tok")),
+            AppController.ConnectionPill(title: "api.saathi.dev", isConfigured: true))
+        XCTAssertEqual(
+            AppController.connectionPill(for: SaathiConfiguration(provider: .hosted, backendUrl: "https://saathi.example.org/", token: "tok")),
+            AppController.ConnectionPill(title: "saathi.example.org", isConfigured: true))
+    }
+
+    /// A local server is told apart by its port; a vendor never is.
+    func testThePillKeepsThePortOfALocalServer() {
+        XCTAssertEqual(
+            AppController.connectionPill(for: SaathiConfiguration(provider: .local)),
+            AppController.ConnectionPill(title: "localhost:11434", isConfigured: true))
+    }
+
+    /// The Setup tab's Backend rows only mean anything on the hosted lane; elsewhere they say so
+    /// instead of reporting a token "missing" that nothing would read.
+    func testTheBackendRowsSayNotUsedOffTheHostedLane() {
+        XCTAssertEqual(AppController.backendTitle(for: SaathiConfiguration(provider: .openai, openaiKey: "sk-o")), "not used")
+        XCTAssertEqual(AppController.backendTitle(for: SaathiConfiguration(provider: .hosted)), "Set up backend")
+        XCTAssertEqual(AppController.backendTitle(for: SaathiConfiguration(provider: .hosted, token: "tok")), "api.saathi.dev")
+    }
+
+    // MARK: the key rows
+
+    /// A saved key is one line, not a field and a Check: the field comes back only when the row is
+    /// reopened for a new key. Everything else — empty, being typed, checked either way — shows it.
+    func testASavedKeyRowIsCollapsedUntilReopened() {
+        XCTAssertFalse(IslandSetupView.showsKeyField(.saved(masked: "sk-…u6MA"), reopened: false))
+        XCTAssertTrue(IslandSetupView.showsKeyField(.saved(masked: "sk-…u6MA"), reopened: true))
+        XCTAssertTrue(IslandSetupView.showsKeyField(.empty, reopened: false))
+        XCTAssertTrue(IslandSetupView.showsKeyField(.editing, reopened: false))
+        XCTAssertTrue(IslandSetupView.showsKeyField(.checking, reopened: false))
+        XCTAssertTrue(IslandSetupView.showsKeyField(.checked(.valid), reopened: false))
+    }
+
     func testTheProviderTitleReadsAsAProviderAndAModel() {
         let configuration = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
         XCTAssertEqual(AppController.providerTitle(for: configuration), "openai · gpt-4o-mini")

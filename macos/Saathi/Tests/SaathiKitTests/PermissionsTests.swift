@@ -33,6 +33,16 @@ final class PermissionsTests: XCTestCase {
         XCTAssertEqual(Permissions.map(SFSpeechRecognizerAuthorizationStatus.notDetermined), .notDetermined)
     }
 
+    /// Looking at the screen needs Screen Recording, and until now nothing asked for it: the
+    /// capture ran without the grant and came back as a picture of the wallpaper.
+    func testScreenRecordingIsOneOfTheThingsSaathiAsksFor() {
+        XCTAssertTrue(Permission.allCases.contains(.screenRecording))
+        XCTAssertEqual(Permission.screenRecording.title, "Screen Recording")
+        XCTAssertTrue(Permission.screenRecording.settingsURL.absoluteString.hasSuffix("Privacy_ScreenCapture"))
+        // Like Input Monitoring, the API answers yes or no, so "denied" is never claimed.
+        XCTAssertNotEqual(Permissions.status(of: .screenRecording), .denied)
+    }
+
     func testStatusOfInputMonitoringNeverThrowsAndIsNeverDenied() {
         // The API cannot tell "asked and refused" from "never asked", so we never claim denied.
         XCTAssertNotEqual(Permissions.status(of: .inputMonitoring), .denied)

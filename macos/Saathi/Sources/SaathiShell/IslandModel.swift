@@ -43,8 +43,36 @@ public struct IslandLanguage: Identifiable, Equatable, Sendable {
     ]
 }
 
+/// Which face of the island is showing. OpenClicky's three, in its order: two pills in the band
+/// and Settings behind the gear, so the visible tab bar stays Home · Agents.
+/// One icon in the "Active integrations" box: what it is, how it is drawn, and whether it is
+/// configured. A row of data rather than a row of hand-written views, so adding one is a line here.
+public struct IslandIntegration: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    /// SF Symbol name, and the colour the tile takes once it is connected.
+    public let systemImage: String
+    public let tintHex: String
+    public var isOn: Bool
+
+    public init(id: String, title: String, systemImage: String, tintHex: String, isOn: Bool = false) {
+        self.id = id
+        self.title = title
+        self.systemImage = systemImage
+        self.tintHex = tintHex
+        self.isOn = isOn
+    }
+
+    /// OpenClicky's two, with its colours: the tool bridge and the computer-use driver.
+    public static let all: [IslandIntegration] = [
+        IslandIntegration(id: "composio", title: "Composio", systemImage: "link", tintHex: "#7C6CFF"),
+        IslandIntegration(id: "computer-use", title: "Computer Use", systemImage: "cursorarrow.rays", tintHex: "#38BDF8"),
+    ]
+}
+
 public enum IslandTab: Equatable, Sendable {
     case home
+    case agents
     case setup
 }
 
@@ -112,6 +140,33 @@ public final class IslandModel: ObservableObject {
             ?? resolved
         return "\(named) · this Mac"
     }
+    /// The user's skill library, as the "Add skills" row reads it. Handed in by the shell so the
+    /// panel can be built in a test without touching `~/.saathi/skills`.
+    @Published public var skills: SkillLibraryStore?
+    /// What the status pill in the band says, and whether it reads as connected. OpenClicky shows
+    /// its backend's host here; Saathi has more than one lane, so the pill names whichever is in
+    /// use — the vendor's host for your own key, the backend's for the hosted lane — and only reads
+    /// red when that lane is missing the one thing it needs.
+    @Published public var connectionTitle: String = "Set up backend"
+    @Published public var isConnectionConfigured = false
+    /// The Setup tab's Backend rows. Only the hosted lane has a backend; `usesBackend` is false on
+    /// every other lane so the rows can say "not used" instead of reporting a token missing.
+    @Published public var usesBackend = false
+    @Published public var backendTitle: String = "not used"
+    @Published public var isBackendConfigured = false
+    /// The two integration icons along the bottom. Separate from `permissions` because these are
+    /// things Saathi can be connected TO, not things macOS has to allow.
+    @Published public var integrations: [IslandIntegration] = IslandIntegration.all
+    /// Whether the pointer companion is docked into the island rather than out on the desktop.
+    @Published public var isCursorDocked = false
+    /// Whether Saathi is listening without being held. Only changes the Hands-free row's wording.
+    @Published public var isAlwaysListening = false
+
+    /// The last exchange, so "what did I ask and what did it say" can be answered at a glance.
+    /// The whole conversation is in `conversation.log`; these are its last two lines.
+    @Published public var lastYouSaid: String = ""
+    @Published public var lastSaathiSaid: String = ""
+
     /// True once a permission has been granted that this process still cannot pick up. The island
     /// then offers to relaunch rather than leaving someone holding keys that do nothing.
     @Published public var needsRestart = false
@@ -148,6 +203,14 @@ public struct IslandActions {
     public var onLanguage: (String) -> Void = { _ in }
     /// Relaunch Saathi so a permission grant this process could not pick up takes effect.
     public var onRestart: () -> Void = {}
+    /// Dock the pointer companion into the island, or let it back out.
+    public var onToggleCursorDock: () -> Void = {}
+    /// The (i): say out loud what Saathi does. Closes the panel first, so the companion is in view.
+    public var onExplain: () -> Void = {}
+    /// Show `~/.saathi/shell.json` in the Finder — where an integration or a backend is configured.
+    public var onRevealSettingsFile: () -> Void = {}
+    /// Open `~/.saathi/conversation.log` — what was said, kept for exactly this kind of question.
+    public var onOpenConversationLog: () -> Void = {}
 
     public init() {}
 }

@@ -176,7 +176,10 @@ final class PanelTests: XCTestCase {
         panel.pollHover(mouse: atTheNotch, now: CACurrentMediaTime())
         XCTAssertEqual(panel.islandState, .open)
         XCTAssertEqual(panel.rect(for: .open).width, NotchPanel.openWidth)
-        XCTAssertNotNil(panel.mascot.superview)
+        XCTAssertNil(
+            panel.mascot.superview,
+            "the open panel is OpenClicky's Home tab, which has no face in it — the companion is "
+                + "out on the desktop, or docked as a badge. The face shows in the compact strip")
         XCTAssertEqual(panel.rect(for: .open).maxY, screen.frame.maxY, accuracy: 0.5)
     }
 
@@ -236,7 +239,7 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.islandState, .open)
         XCTAssertTrue(panel.drawsIslandBackdrop)
         XCTAssertFalse(panel.contents.isHandleVisible, "the handle gives way to the island")
-        XCTAssertNotNil(panel.mascot.superview)
+        XCTAssertNil(panel.mascot.superview, "the open Home panel has no face in it")
     }
 
     func testOnANotchedDisplayCollapsedIsTheNotchItselfAndNoHandle() throws {
@@ -262,12 +265,83 @@ final class PanelTests: XCTestCase {
         XCTAssertNil(panel.mascot.window, "a hidden mascot in a window would go on ticking")
         XCTAssertNil(panel.mascot.superview)
 
-        panel.apply(.open)
-        XCTAssertTrue(panel.mascot.window === panel, "back in the island when it comes down")
+        // The compact strip is the state that shows the face: the open panel is OpenClicky's Home
+        // tab, and that panel has no face in it.
+        panel.apply(.compact)
+        XCTAssertTrue(panel.mascot.window === panel, "back in the island when the strip comes down")
         XCTAssertNotNil(panel.mascot.superview)
+
+        panel.apply(.open)
+        XCTAssertNil(panel.mascot.window, "Home has skill tiles where the face used to be")
 
         panel.apply(.collapsed)
         XCTAssertNil(panel.mascot.window)
+    }
+
+    // MARK: the three tabs, and how tall each one makes the island
+
+    /// OpenClicky's `fullHeight` rule, and its three numbers. They are worth pinning because they
+    /// are the kind of thing that gets nudged by a layout tweak and never noticed: the island is
+    /// laid out from them, not from what its content happens to measure.
+    func testEachTabOpensTheIslandToItsOwnHeight() {
+        let band: CGFloat = 32
+        XCTAssertEqual(NotchPanel.openHeight(for: .home, topBandHeight: band), 232,
+                       "Home has a floor for the whole island: 32 + 195 is under it, so 232 wins")
+        XCTAssertEqual(NotchPanel.openHeight(for: .agents, topBandHeight: band), band + 380)
+        XCTAssertEqual(NotchPanel.openHeight(for: .setup, topBandHeight: band), band + 590,
+                       "Settings is a scroll of sections, not two fields")
+    }
+
+    /// The Home floor is a floor, not a fixed height: a tall menu-bar band pushes past it.
+    func testATallBandPushesHomePastItsFloor() {
+        XCTAssertEqual(NotchPanel.openHeight(for: .home, topBandHeight: 50), 245)
+    }
+
+    func testSwitchingTabRelaysTheIslandAtTheNewTabsHeight() throws {
+        let panel = try island(notched)
+        panel.model.tab = .home
+        panel.apply(.open)
+        let home = panel.rect(for: .open).height
+
+        panel.model.tab = .setup
+        let settings = panel.rect(for: .open).height
+        XCTAssertGreaterThan(settings, home, "Settings is the taller face")
+        XCTAssertEqual(settings, notched.topBandHeight + NotchPanel.setupContentUnderBand)
+        XCTAssertEqual(panel.rect(for: .open).width, NotchPanel.openWidth, "every tab is 512 wide")
+    }
+
+    /// Regression for the handle four hundred points down an external display. The island is laid
+    /// out for a screen at Home's height and the handle placed against that window; the window is
+    /// then grown for whichever tab is current, and the handle — in the window's own coordinates,
+    /// measured from its bottom — stayed where the shorter window's top had been.
+    func testTheHandleStaysInTheMenuBarWhateverHeightTheWindowGrowsTo() throws {
+        let panel = try island(secondary)
+        panel.model.tab = .setup   // the tallest face; the window grows to hold it
+        panel.apply(.collapsed)
+        XCTAssertEqual(
+            panel.frame.height, secondary.topBandHeight + NotchPanel.setupContentUnderBand, accuracy: 0.5,
+            "the window is sized for the current tab even while collapsed")
+        XCTAssertTrue(panel.contents.isHandleVisible)
+        let onScreen = panel.contents.handleFrame.offsetBy(dx: panel.frame.minX, dy: panel.frame.minY)
+        XCTAssertEqual(onScreen.midX, secondary.handleRect.midX, accuracy: 0.5)
+        XCTAssertEqual(onScreen.maxY, 1080 - NotchGeometry.handleTopInset, accuracy: 0.5,
+                       "tucked just under the top edge of the screen, not the top of some earlier window")
+    }
+
+    /// The other direction: a window that shrinks back for a shorter tab does so only after the
+    /// spring has settled, and everything inside it was placed against the taller frame.
+    func testTheContentStaysAtTheTopOnceTheWindowShrinksBackForAShorterTab() throws {
+        let panel = try island(secondary)
+        panel.model.tab = .setup
+        panel.apply(.open)
+        panel.model.tab = .home
+        panel.apply(.collapsed)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: NotchPanel.springSettleDuration + 0.3))
+        XCTAssertEqual(panel.frame.height, NotchPanel.homeTotalHeight, accuracy: 0.5, "shrunk back for Home")
+        XCTAssertEqual(panel.hostingFrame.maxY, panel.frame.height, accuracy: 0.5,
+                       "the hosted tree hangs from the top of the window it is now in")
+        let onScreen = panel.contents.handleFrame.offsetBy(dx: panel.frame.minX, dy: panel.frame.minY)
+        XCTAssertEqual(onScreen.maxY, 1080 - NotchGeometry.handleTopInset, accuracy: 0.5)
     }
 
     func testOnlyTheWorkingStatesCountAsBusy() {

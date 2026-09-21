@@ -26,23 +26,33 @@ public struct VoiceSessionCallbacks: Sendable {
     public var onAction: (@Sendable (SaathiAction) -> Void)?
     /// Free-text lane progress ("listening…", "thinking…"), for a status line.
     public var onStatus: (@Sendable (String) -> Void)?
+    /// A screen look finished: what the model asked the eyes, and what they answered — or why they
+    /// could not look. The answer goes back to the model either way; this is so it can be kept.
+    public var onScreenLook: (@Sendable (_ question: String, _ answer: String) -> Void)?
 
     public init(
         onUserTranscript: (@Sendable (String) -> Void)? = nil,
         onSaathiTranscript: (@Sendable (String) -> Void)? = nil,
         onAction: (@Sendable (SaathiAction) -> Void)? = nil,
-        onStatus: (@Sendable (String) -> Void)? = nil
+        onStatus: (@Sendable (String) -> Void)? = nil,
+        onScreenLook: (@Sendable (String, String) -> Void)? = nil
     ) {
         self.onUserTranscript = onUserTranscript
         self.onSaathiTranscript = onSaathiTranscript
         self.onAction = onAction
         self.onStatus = onStatus
+        self.onScreenLook = onScreenLook
     }
 }
 
 public protocol VoiceSession: AnyObject, Sendable {
     /// Which lane this is, so a caller can say so without re-deriving it.
     var lane: VoiceLane { get }
+    /// Whether the session's own audio is Saathi's voice. True on the realtime lane, where the
+    /// model speaks; false on the chain lane, which has no voice but the system's. A shell reads
+    /// this to know whether a `say` or a `show_step` still needs saying out loud — reading one out
+    /// over a session that speaks for itself is how one question got two answers in two voices.
+    var speaksForItself: Bool { get }
     /// Open whatever the lane needs — a socket, a recogniser — and start listening.
     func start(callbacks: VoiceSessionCallbacks) async throws
     /// The learner is talking. In the realtime lane this opens the microphone; in the chain lane it

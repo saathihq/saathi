@@ -62,7 +62,7 @@
     <string>Saathi uses on-device speech recognition so it can understand you without sending your voice anywhere. Run `saathi voice` to see exactly where each part of a spoken turn goes.</string>
 
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Saathi looks at your screen only when you ask it about something you can see. One frame of the main display is captured at that moment, sent to the model that answers, and then discarded. Nothing is captured at any other time.</string>
+    <string>Saathi looks at your screen only when you ask it about something you can see. One frame of the display your pointer is on is captured at that moment, sent to the model that answers, and then discarded. Nothing is captured at any other time.</string>
 
     <key>NSHumanReadableCopyright</key>
     <string>Apache-2.0. Source at github.com/saathihq/saathi</string>

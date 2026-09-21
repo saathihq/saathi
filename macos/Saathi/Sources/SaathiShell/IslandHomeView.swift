@@ -127,25 +127,23 @@ struct IslandCompactView: View {
     }
 }
 
-/// The full island: who is talking (the top band), where it thinks and how to talk to it (the
-/// body), what to fix (the permissions list), and the controls (the bottom row). Modelled on
-/// OpenClicky's `NotchFullPanelView` / `NotchHomeView`.
+/// OpenClicky's `NotchFullPanelView` and `NotchHomeView`, ported rather than reinterpreted.
+///
+/// The previous version of this file kept OpenClicky's geometry and wrote its own contents — a
+/// "Where I think" column, a permissions list, three capsule buttons. It was the same island with a
+/// different panel inside it, which is not what "the same panel" means. This is the panel: the tab
+/// bar in the menu-bar band, "Add skills" over a row of skill tiles on the left, ⌘ Shortcuts on the
+/// right, "Active integrations" and Dock Cursor along the bottom. 512 × 232 including the band.
 struct IslandHomeView: View {
     @ObservedObject var display: IslandDisplay
     @ObservedObject var model: IslandModel
     let mascot: MascotView
     let actions: IslandActions
 
-    /// OpenClicky's `NotchFullPanelView`, structurally: the tab bar lives *in* the menu-bar band on
-    /// either side of the physical notch, and the panel's content begins six points below it.
-    ///
-    /// Saathi used to stack a title band and then a tab strip under it — two bands where OpenClicky
-    /// has one — which is most of why the island was taller than its content and had a strip of dead
-    /// space across the top. The status dot keeps its place on the right of the notch, where the
-    /// band is otherwise empty.
     var body: some View {
         VStack(spacing: 0) {
-            topBand
+            // The tab bar lives in the menu-bar band, on either side of the physical notch.
+            IslandTabBar(display: display, model: model, actions: actions)
                 .frame(height: 24)
                 .padding(.horizontal, 14)
                 .padding(.top, 5)
@@ -154,234 +152,212 @@ struct IslandHomeView: View {
             Group {
                 switch model.tab {
                 case .home: homeBody
+                case .agents: IslandAgentsView(model: model)
                 case .setup: IslandSetupView(display: display, model: model, actions: actions)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.top, 6)
-            // OpenClicky's NotchHomeView padding, applied to whichever face is showing rather than
-            // to Home alone — the Setup tab was running its text into the island's left edge.
-            .padding(.horizontal, 20)
-            .padding(.bottom, 14)
         }
     }
 
-    // MARK: the band — tabs to the left of the notch, state to the right
-
-    private var topBand: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                tabButton("Home", .home)
-                tabButton("Setup", .setup)
-            }
-            Spacer(minLength: display.notchGap)
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 7, height: 7)
-                Text(model.state.word)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.85))
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    private func tabButton(_ title: String, _ tab: IslandTab) -> some View {
-        Button(action: { model.tab = tab }) {
-            Text(title)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundColor(model.tab == tab ? .white : Color.white.opacity(0.5))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(model.tab == tab ? Color.white.opacity(0.16) : .clear))
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: the Home tab — OpenClicky's NotchHomeView, with Saathi's content
+    // MARK: - Home
 
     private var homeBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 18) {
-                leftColumn
-                rightColumn
-            }
-            Spacer(minLength: 6)
-            bottomRow
-        }
-    }
-
-    private var statusColor: Color {
-        switch model.state {
-        case .idle, .asleep: return .green
-        case .alert: return .red
-        default: return Color(PointerBuddyView.tint)
-        }
-    }
-
-    // MARK: left column — where it thinks
-
-    /// OpenClicky's left column exactly: a bold title, a dim subtitle, then a block nine points
-    /// below where its skill tiles sit.
-    ///
-    /// Saathi's block is what it has instead of tiles — the face, and the three facts about a spoken
-    /// turn that are otherwise invisible: which language it answers in, which voice it uses, and
-    /// whether the turn is one open connection or three steps. They fill the column for the same
-    /// reason OpenClicky's tiles do, and unlike filler they are things a person actually wants to
-    /// check before they start talking.
-    private var leftColumn: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("Where I think")
-                .font(.system(size: 13.5, weight: .bold))
-                .foregroundColor(.white)
-            Text(model.providerTitle)
-                .font(.system(size: 10.5))
-                .foregroundColor(Color.white.opacity(0.55))
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 10) {
-                    MascotHostView(mascot: mascot).frame(width: 44, height: 44)
-                    Text(model.privacyLine)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add skills")
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("Skills give Saathi superpowers")
                         .font(.system(size: 10.5))
-                        .foregroundColor(Color.white.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundColor(Color.white.opacity(0.55))
+                    SkillTilesRow(store: model.skills)
+                        .padding(.top, 9)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "command").font(.system(size: 10, weight: .semibold))
+                        Text("Shortcuts").font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .foregroundColor(Color.white.opacity(0.75))
+                    .padding(.top, 1)
+                    // The four shortcuts, in OpenClicky's order. Talk is the one Saathi recognises
+                    // today; the other three land with the shortcut recogniser.
+                    shortcutRow(title: "Talk", keys: ["⌃ control", "⌥ option"])
+                    shortcutRow(title: "Text", keys: ["⌃ control", "2×"])
+                    shortcutRow(title: "Dictate", keys: ["fn", "⌃ control"])
+                    shortcutRow(title: model.isAlwaysListening ? "Hands-free ●" : "Hands-free", keys: ["fn", "⌃ control", "2×"])
+                }
+                .frame(width: 180, alignment: .leading)
+            }
+
+            Spacer(minLength: 6)
+
+            Text("Active integrations")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.75))
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    ForEach(model.integrations) { integration in
+                        integrationIcon(integration)
+                    }
+                    Button(action: actions.onRevealSettingsFile) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.7))
+                            .frame(width: 22, height: 22)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                    .help("Configure an integration in ~/.saathi/shell.json")
                     Spacer(minLength: 0)
                 }
-                factRow("Answers in", model.languageTitle)
-                factRow("Voice", model.voiceTitle)
-                factRow("A turn", model.laneTitle)
-                capsuleButton("Provider…", action: actions.onProvider)
-                    .padding(.top, 1)
-            }
-            .padding(.top, 9)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+                .padding(7)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(hex: "#161616")))
 
-    /// One fact and its value, on a line. Same weights as the right column's shortcut rows so the
-    /// two halves of the panel read as one table rather than two lists.
-    private func factRow(_ title: String, _ value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.system(size: 10.5))
-                .foregroundColor(Color.white.opacity(0.55))
-            Spacer(minLength: 8)
-            Text(value)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.85))
-                .lineLimit(1)
-        }
-        .frame(width: 210)
-    }
-
-    // MARK: right column — how to talk to it, and what to fix
-
-    private var rightColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionHeader("command", "Shortcuts")
-            shortcutRow(title: "Talk", keys: ["⌃ control", "⌥ option"], note: "hold")
-            // Short enough to sit in OpenClicky's 180pt column without eliding. The long form
-            // ("Talk from the menu" / "menu bar ▸ Talk") truncated to an ellipsis at this width,
-            // which tells a reader less than the short form does.
-            shortcutRow(title: "From the menu", keys: ["Talk"])
-            sectionHeader("checkmark.shield", "Permissions")
-                .padding(.top, 4)
-            ForEach(Permission.allCases, id: \.title) { permission in
-                permissionRow(permission)
-            }
-            if model.needsRestart {
-                Button(action: actions.onRestart) {
-                    Text("Restart Saathi")
-                        .font(.system(size: 9.5, weight: .semibold))
+                Button(action: actions.onToggleCursorDock) {
+                    Text(model.isCursorDocked ? "Release Cursor" : "Dock Cursor")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.orange))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(Color(hex: "#262626")))
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 4)
-                Text("The grant needs a fresh start to take effect.")
-                    .font(.system(size: 8.5))
-                    .foregroundColor(Color.white.opacity(0.45))
-            }
-        }
-        .frame(width: 180, alignment: .leading)
-    }
+                .pointerCursor()
+                .disabled(model.state != .idle)
 
-    private func sectionHeader(_ systemImage: String, _ title: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: systemImage).font(.system(size: 10, weight: .semibold))
-            Text(title).font(.system(size: 11.5, weight: .semibold))
-        }
-        .foregroundColor(Color.white.opacity(0.75))
-    }
-
-    private func shortcutRow(title: String, keys: [String], note: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack {
-                Text(title).font(.system(size: 10.5)).foregroundColor(Color.white.opacity(0.85))
-                Spacer()
-                HStack(spacing: 3) {
-                    ForEach(keys, id: \.self) { key in
-                        Text(key)
-                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                            .foregroundColor(Color.white.opacity(0.8))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white.opacity(0.12)))
-                    }
+                // (i): Saathi says what it does, next to the companion. The panel closes first so
+                // the companion is actually in view when it starts talking.
+                Button(action: actions.onExplain) {
+                    Image(systemName: "info")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color(hex: "#262626")))
                 }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .help("What does Saathi do?")
             }
-            if let note {
-                Text(note)
-                    .font(.system(size: 8.5))
-                    .foregroundColor(Color.white.opacity(0.4))
-            }
+            .padding(.top, 6)
         }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 14)
     }
 
-    private func permissionRow(_ permission: Permission) -> some View {
+    private func integrationIcon(_ integration: IslandIntegration) -> some View {
+        Image(systemName: integration.systemImage)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(integration.isOn ? .white : Color.white.opacity(0.35))
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(integration.isOn ? Color(hex: integration.tintHex) : Color.white.opacity(0.08))
+            )
+            .help(integration.isOn ? "\(integration.title) connected" : "\(integration.title) not configured")
+    }
+
+    private func shortcutRow(title: String, keys: [String]) -> some View {
         HStack {
-            Text(permission.title).font(.system(size: 10.5)).foregroundColor(Color.white.opacity(0.85))
+            Text(title).font(.system(size: 10.5)).foregroundColor(Color.white.opacity(0.85))
             Spacer()
-            if model.permissions[permission] == .granted {
-                Text("✓").font(.system(size: 10.5, weight: .semibold)).foregroundColor(.green)
-            } else {
-                Button(action: { actions.onFixPermission(permission) }) {
-                    Text("Fix")
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color(PointerBuddyView.tint)))
+            HStack(spacing: 3) {
+                ForEach(keys, id: \.self) { key in
+                    Text(key)
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundColor(Color.white.opacity(0.8))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white.opacity(0.12)))
                 }
-                .buttonStyle(.plain)
             }
         }
     }
+}
 
-    // MARK: bottom row — the controls
+// MARK: - Tab bar
 
-    private var bottomRow: some View {
+/// OpenClicky's `NotchTabBar`: two pills on the left, the backend status pill and the gear on the
+/// right. Settings is behind the gear in both, which is why the visible bar reads Home · Agents.
+struct IslandTabBar: View {
+    @ObservedObject var display: IslandDisplay
+    @ObservedObject var model: IslandModel
+    let actions: IslandActions
+
+    var body: some View {
         HStack(spacing: 8) {
-            capsuleButton(model.state == .listening ? "Stop talking" : "Talk", action: actions.onTalk)
-            capsuleButton(model.companionVisible ? "Companion on" : "Companion off", action: actions.onToggleCompanion)
-            Spacer()
-            capsuleButton("Quit", action: actions.onQuit)
+            tabPill(title: "Home", systemImage: "house", tab: .home)
+            tabPill(title: "Agents", systemImage: "sparkles", tab: .agents)
+
+            // A hardware notch sits in the middle of this band; nothing may be laid out under it.
+            Spacer(minLength: display.notchGap)
+
+            backendStatusPill
+
+            iconButton(systemImage: "gearshape.fill", help: "Setup") { model.tab = .setup }
+                .background(
+                    Circle().fill(model.tab == .setup ? Color.white.opacity(0.16) : Color.clear)
+                )
         }
-        .padding(.top, 8)
     }
 
-    private func capsuleButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(Color(red: 0x26 / 255, green: 0x26 / 255, blue: 0x26 / 255)))
+    private func tabPill(title: String, systemImage: String, tab: IslandTab) -> some View {
+        let isSelected = model.tab == tab
+        return Button(action: { model.tab = tab }) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage).font(.system(size: 9.5, weight: .semibold))
+                Text(title).font(.system(size: 10.5, weight: .semibold))
+            }
+            .foregroundColor(isSelected ? .white : Color.white.opacity(0.65))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(isSelected ? Color.white.opacity(0.14) : Color.clear))
         }
         .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
+    /// Where Saathi is connected, on the lane in use. Green with the host once the lane has what it
+    /// needs; red with what is missing until then — and a tap on the red one goes to Setup, which
+    /// is where the missing thing is entered, rather than to the file behind it.
+    private var backendStatusPill: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(model.isConnectionConfigured ? DS.Colors.success : DS.Colors.overlayCursorColor)
+                .frame(width: 5, height: 5)
+            Text(model.connectionTitle)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(model.isConnectionConfigured ? Color.white.opacity(0.7) : .white)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule().fill(
+                model.isConnectionConfigured ? Color.white.opacity(0.08) : DS.Colors.overlayCursorColor.opacity(0.35)
+            )
+        )
+        .onTapGesture {
+            if model.isConnectionConfigured { actions.onRevealSettingsFile() } else { model.tab = .setup }
+        }
+        .pointerCursor()
+    }
+
+    private func iconButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color.white.opacity(0.75))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .help(help)
     }
 }

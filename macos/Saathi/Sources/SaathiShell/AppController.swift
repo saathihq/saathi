@@ -40,6 +40,8 @@ public final class AppController {
     /// resume and open a socket after the replacement session already exists.
     private var startTask: Task<Void, Never>?
     private var monitor: HoldToTalkMonitor?
+    /// What was said, kept: `~/.saathi/conversation.log`.
+    private let conversation: ConversationLog
     private var ticker: Timer?
     private var ticks = 0
     private var permissionPoll: Timer?
@@ -49,6 +51,7 @@ public final class AppController {
 
     public init() throws {
         configuration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
+        conversation = ConversationLog(url: ConversationLog.defaultURL(beside: ConfigurationStore.defaultPath()))
         data = try MascotData.load()
         color = MascotColor(paletteName: "blue", in: data) ?? MascotColor(hex: "#377FE6")
         machine = CompanionStateMachine(now: CACurrentMediaTime())
@@ -104,8 +107,38 @@ public final class AppController {
     // MARK: events
 
     private func handle(_ event: CompanionEvent) {
+        record(event)
         machine.apply(event, now: CACurrentMediaTime())
         render()
+    }
+
+    /// Everything worth keeping passes through `handle`, so this is the one place the log is
+    /// written from — both lanes, the menu's Talk and the keys alike.
+    private func record(_ event: CompanionEvent) {
+        switch event {
+        case let .userSpoke(text):
+            conversation.append(.you(text))
+            notch?.model.lastYouSaid = text
+        case let .saathiSpoke(text):
+            conversation.append(.saathi(text))
+            notch?.model.lastSaathiSaid = text
+        case let .action(action):
+            conversation.append(.action(Self.describe(action)))
+        case let .failure(message):
+            conversation.append(.error(message))
+        case .keysHeld, .keysReleased, .status, .speakingChanged, .quit:
+            break
+        }
+    }
+
+    /// An action as one log line: its wire name and the thing it carries.
+    static func describe(_ action: SaathiAction) -> String {
+        switch action {
+        case let .say(say): return "say: \(say.text)"
+        case let .showStep(step): return "show_step \(step.index)/\(step.total): \(step.title)"
+        case let .openUrl(open): return "open_url: \(open.url)"
+        case let .lookAtScreen(look): return "look_at_screen: \(look.question)"
+        }
     }
 
     private func render(force: Bool = false) {
@@ -154,6 +187,7 @@ public final class AppController {
                     Task { @MainActor in
                         guard let self else { return }
                         self.handle(.action(action))
+                        guard Self.performs(action, sessionSpeaksForItself: session.speaksForItself) else { return }
                         Task {
                             do {
                                 try await self.performer.perform(action)
@@ -163,7 +197,10 @@ public final class AppController {
                         }
                     }
                 },
-                onStatus: { [weak self] status in Task { @MainActor in self?.handle(.status(status)) } }
+                onStatus: { [weak self] status in Task { @MainActor in self?.handle(.status(status)) } },
+                onScreenLook: { [weak self] question, answer in
+                    Task { @MainActor in self?.conversation.append(.look(question: question, answer: answer)) }
+                }
             )
             // Cancelling any previous start before racing a fresh one in keeps at most one
             // start in flight for this controller — see `startTask`'s doc comment.
@@ -255,7 +292,38 @@ public final class AppController {
         notch.model.laneTitle = configuration.providerRow.voice == .realtime
             ? "one connection"
             : "three steps"
+
+        // The status pill in the menu-bar band, and the Backend rows on Setup. Two different
+        // questions: the pill says where Saathi is connected on the lane in use, the rows say
+        // whether the hosted backend is set up — which off the hosted lane it need not be.
+        let pill = Self.connectionPill(for: configuration)
+        notch.model.connectionTitle = pill.title
+        notch.model.isConnectionConfigured = pill.isConfigured
+        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        notch.model.usesBackend = configuration.providerRow.requiresToken
+        notch.model.isBackendConfigured = !token.isEmpty
+        notch.model.backendTitle = Self.backendTitle(for: configuration)
+
+        // Neither integration exists in Saathi yet, so both draw in their real "not configured"
+        // state. They are a list rather than two hand-written tiles so that wiring one up later is
+        // a line here, not a change to the panel.
+        notch.model.integrations = IslandIntegration.all
+
+        // One store for the life of the app: it watches `~/.saathi/skills` with a dispatch source,
+        // and rebuilding it on every reconfigure would leak a watcher per provider change.
+        if notch.model.skills == nil {
+            let launched = configuration
+            notch.model.skills = SkillLibraryStore(configuration: { [weak self] in self?.configuration ?? launched })
+        }
     }
+
+    /// What the (i) says out loud. One sentence per thing Saathi actually does — not a description
+    /// of the roadmap, because someone pressing (i) is asking what this can do for them now.
+    static let whatSaathiDoes = """
+        I am Saathi. Hold control and option and talk to me, and I will answer out loud. \
+        Ask me about something on your screen and I will look at it. \
+        Everything I know about where I think and what leaves this machine is on the Setup tab.
+        """
 
     // MARK: what the island says about a configuration
     //
@@ -266,10 +334,66 @@ public final class AppController {
         "\(configuration.resolvedProvider.rawValue) · \(configuration.resolvedModel)"
     }
 
+    /// What the status pill in the band says, and whether it reads as connected.
+    struct ConnectionPill: Equatable {
+        let title: String
+        let isConfigured: Bool
+    }
+
+    /// The pill describes the lane in use, not the hosted backend regardless of lane. OpenClicky
+    /// has one backend and shows its host; Saathi's config can talk straight to a vendor with its
+    /// own key, and a red "Set up backend" over exactly that config told someone with a working
+    /// install to go and configure something nothing would ever read. So: the backend's host on the
+    /// hosted lane, the vendor's host on an own-key lane, the local server otherwise — and red only
+    /// when the lane in use is missing the one credential it needs.
+    static func connectionPill(for configuration: SaathiConfiguration) -> ConnectionPill {
+        let row = configuration.providerRow
+        if row.requiresToken {
+            let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return token.isEmpty
+                ? ConnectionPill(title: "Set up backend", isConfigured: false)
+                : ConnectionPill(title: host(of: configuration.resolvedBaseURL), isConfigured: true)
+        }
+        if row.requiresKey, configuration.credential(for: row.kind) == nil {
+            return ConnectionPill(title: "Add a key", isConfigured: false)
+        }
+        return ConnectionPill(title: host(of: configuration.resolvedProviderBaseURL), isConfigured: true)
+    }
+
+    /// The Setup tab's Backend row. Only the hosted lane has a backend, so on every other lane the
+    /// row says so rather than nagging about a token nothing would read.
+    static func backendTitle(for configuration: SaathiConfiguration) -> String {
+        guard configuration.providerRow.requiresToken else { return "not used" }
+        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? "Set up backend" : host(of: configuration.resolvedBaseURL)
+    }
+
+    /// "api.openai.com", or "localhost:11434": the port only when the URL names one, because a
+    /// local server is told apart by its port and a vendor never is. The whole string if it is
+    /// not a URL at all, so a typo in the config is shown rather than hidden.
+    static func host(of urlString: String) -> String {
+        guard let url = URL(string: urlString), let host = url.host else { return urlString }
+        if let port = url.port { return "\(host):\(port)" }
+        return host
+    }
+
     static func privacyLine(for configuration: SaathiConfiguration) -> String {
         let row = configuration.providerRow
         if row.voice == .realtime { return "your voice leaves as audio" }
         return row.sendsDataOffMachine ? "only the transcript is sent" : "stays on this machine"
+    }
+
+    /// Whether an action goes to the performer at all. The performer reads `say` and `show_step`
+    /// out through the system voice, which is right on the chain lane — it has no other voice —
+    /// and wrong on a lane whose session speaks for itself: the realtime model's own audio already
+    /// carries what it wants to say, and the system voice reading a step over it is the second,
+    /// robot-sounding speaker that was reported. The island shows the step either way, because
+    /// `handle(.action)` runs before this is asked; and an `open_url` is always opened.
+    static func performs(_ action: SaathiAction, sessionSpeaksForItself: Bool) -> Bool {
+        switch action {
+        case .say, .showStep: return !sessionSpeaksForItself
+        case .openUrl, .lookAtScreen: return true
+        }
     }
 
     /// Says out loud that a key was saved and is not being used. Empty when there is nothing to
@@ -553,6 +677,34 @@ public final class AppController {
         actions.onToggleCompanion = { [weak self] in
             guard let self, let notch = self.notch else { return }
             self.setCompanionVisible(!notch.model.companionVisible)
+        }
+        // Dock Cursor, as far as Saathi can honour it today: it takes the companion off the desktop
+        // and puts it back. OpenClicky's version flies the buddy into the notch and leaves it there
+        // as a glowing badge — that badge is the next slice, and this is the seam it lands on.
+        actions.onToggleCursorDock = { [weak self] in
+            guard let self, let notch = self.notch else { return }
+            let docking = !notch.model.isCursorDocked
+            notch.model.isCursorDocked = docking
+            self.setCompanionVisible(!docking)
+        }
+        actions.onExplain = { [weak self] in
+            guard let self, let notch = self.notch else { return }
+            // The panel closes first so the companion is actually in view when it starts talking —
+            // the same reason OpenClicky's (i) closes its own island before speaking.
+            notch.apply(.collapsed)
+            Task { await self.speaker.speak(Self.whatSaathiDoes, tone: .calm) }
+        }
+        actions.onRevealSettingsFile = {
+            NSWorkspace.shared.activateFileViewerSelecting([ConfigurationStore.defaultPath()])
+        }
+        actions.onOpenConversationLog = { [weak self] in
+            guard let self else { return }
+            let url = self.conversation.fileURL
+            if !FileManager.default.fileExists(atPath: url.path) {
+                self.conversation.append(.error("nothing has been said yet"))
+                self.conversation.flush()
+            }
+            NSWorkspace.shared.open(url)
         }
         actions.onQuit = menu.onQuit
         actions.onRestart = {

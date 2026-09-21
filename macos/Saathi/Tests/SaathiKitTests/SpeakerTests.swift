@@ -64,7 +64,14 @@ final class SystemSpeakerTests: XCTestCase {
     /// two overlapping calls each await whatever is already in flight before starting their own,
     /// so neither one strands. An empty utterance finishes fast, so both calls should return
     /// well within the timeout even run back to back.
+    ///
+    /// Opt-in: even an empty utterance opens the system's audio output, and a test run in the
+    /// background took the sound out of a game that was being played at the time. Run it with
+    /// `SAATHI_AUDIO_TESTS=1 swift test` when the speaker itself is what changed.
     func testOverlappingSpeakCallsDoNotStrandTheFirst() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SAATHI_AUDIO_TESTS"] == "1",
+            "touches the real audio output; set SAATHI_AUDIO_TESTS=1 to run it")
         let speaker = SystemSpeaker()
         let start = DispatchTime.now()
         async let first: Void = speaker.speak("", tone: .neutral)

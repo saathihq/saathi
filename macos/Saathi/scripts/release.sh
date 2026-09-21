@@ -108,12 +108,10 @@ plutil -lint "$APP/Contents/Info.plist" >/dev/null
 # `--options runtime` is the hardened runtime, which notarization requires. `--timestamp` needs
 # Apple's timestamp server, which fails often enough under a flaky connection that retrying is
 # worth more than the three lines it costs — an unsigned-but-"successful" build is worse.
-sign() {
+codesign_retrying() {
   local attempt
   for attempt in 1 2 3; do
-    if codesign --force --options runtime --timestamp \
-        --entitlements "$PACKAGE_DIR/Resources/Saathi.entitlements" \
-        --sign "$SIGN_IDENTITY" "$@"; then
+    if codesign --force --timestamp --sign "$SIGN_IDENTITY" "$@"; then
       return 0
     fi
     echo "  codesign failed (attempt $attempt); retrying in 5 s" >&2
@@ -122,16 +120,30 @@ sign() {
   return 1
 }
 
+sign() {
+  codesign_retrying --options runtime \
+    --entitlements "$PACKAGE_DIR/Resources/Saathi.entitlements" "$@"
+}
+
+# The resource bundle's seal wants the timestamp server too, and it was the one call without the
+# retry: a flaky connection failed the build right here, leaving an unsigned bundle in dist.
+seal() {
+  codesign_retrying "$@"
+}
+
 NESTED_BUNDLE="$APP/Contents/Resources/Saathi_SaathiMascot.bundle"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   echo "▸ signing ad-hoc (this Mac only, not distributable)"
+  echo "  note: macOS ties an Input Monitoring grant to the signing identity. A grant made to a"
+  echo "  Developer ID build will not carry over to this one — hold-to-talk will do nothing until"
+  echo "  it is granted again, and a rebuild loses it again. Prefer --no-notarize for a local build."
   codesign --force --sign - "$NESTED_BUNDLE"
   codesign --force --sign - --entitlements "$PACKAGE_DIR/Resources/Saathi.entitlements" "$APP/Contents/MacOS/saathi"
   codesign --force --sign - --entitlements "$PACKAGE_DIR/Resources/Saathi.entitlements" "$APP"
 else
   echo "▸ signing"
   # A resource bundle has no executable, so no hardened runtime or entitlements — just a seal.
-  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$NESTED_BUNDLE"
+  seal "$NESTED_BUNDLE"
   sign "$APP/Contents/MacOS/saathi"
   sign "$APP"
 fi

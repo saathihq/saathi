@@ -25,6 +25,7 @@ import SaathiContract
 public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Sendable {
 
     public let lane: VoiceLane = .realtime
+    public let speaksForItself = true
 
     /// How a turn is delimited. Push-to-talk is the default because it is the one that works in a
     /// room with other people in it.
@@ -53,6 +54,8 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         private var _activeResponseId: String?
         private var _cancelledResponseIds: Set<String> = []
         private var _needsContinuation = false
+        private var _pendingLooks = 0
+        private var _playbackActive = false
         private var _assistantBuffer = ""
 
         func withLock<T>(_ body: (SessionState) -> T) -> T {
@@ -87,6 +90,20 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         var needsContinuation: Bool {
             get { withLock { $0._needsContinuation } }
             set { withLock { $0._needsContinuation = newValue } as Void }
+        }
+        /// Screen looks that have been asked for and not yet answered: each one ends in a
+        /// continuation, so the reply is not over while any is outstanding.
+        func beginLook() { withLock { $0._pendingLooks += 1 } as Void }
+        func endLook() { withLock { $0._pendingLooks = max(0, $0._pendingLooks - 1) } as Void }
+        var playbackActive: Bool {
+            get { withLock { $0._playbackActive } }
+            set { withLock { $0._playbackActive = newValue } as Void }
+        }
+        /// More audio is still to come for this reply: a response is streaming, a continuation is
+        /// armed, or a look is out. A drained playback queue in that state is an underrun or the
+        /// gap before a continuation, not the end.
+        var replyUnfinished: Bool {
+            withLock { $0._responseInProgress || $0._needsContinuation || $0._pendingLooks > 0 }
         }
         func markCancelled(_ id: String) { withLock { _ = $0._cancelledResponseIds.insert(id) } }
         func wasCancelled(_ id: String) -> Bool { withLock { $0._cancelledResponseIds.contains(id) } }
@@ -159,7 +176,15 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         // a fast engine restart rather than a full CoreAudio setup.
         engine.setCallbacks(
             onMicrophoneFrame: { [weak self] data, _ in self?.forwardMicrophone(data) },
-            onPlaybackActiveChanged: { _ in }
+            // Playing a reply restarts the engine, microphone tap included; without this the
+            // engine stayed up after the reply and the orange microphone light stayed on for as
+            // long as Saathi ran. Pause it again once the reply has been played, unless a turn has
+            // opened meanwhile — then the microphone is exactly what is wanted.
+            onPlaybackActiveChanged: { [weak self] active in
+                guard let self else { return }
+                self.state.playbackActive = active
+                self.releaseMicrophoneIfTheReplyIsOver()
+            }
         )
         let audioDescription = try await engine.start()
         if mode == .pushToTalk { engine.pause() }
@@ -253,8 +278,16 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
 
     public func beginTurn() async throws {
         guard state.connected else { throw VoiceError.transport("not connected") }
-        _ = try await engine.start()
+        // `forwarding` before the engine is asked for, not after: a reply that drains while
+        // `start()` is in flight fires `onPlaybackActiveChanged(false)`, and with `forwarding`
+        // still false that pauses the engine under the turn that is just opening.
         state.forwarding = true
+        do {
+            _ = try await engine.start()
+        } catch {
+            state.forwarding = false
+            throw error
+        }
         state.callbacks.onStatus?("listening…")
         engine.flushPlayback()
         if state.responseInProgress { cancelActiveResponse() }
@@ -296,7 +329,12 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
             input["turn_detection"] = ["type": "server_vad", "create_response": true]
         }
 
-        let tools = (try? VoiceToolCall.toolDefinitions()) ?? []
+        // Every tool but `say`. The model speaks in its own voice here; offered `say` as well, it
+        // called it, the system voice read the line out over the model's audio, and two speakers
+        // answered one question. `show_step` stays: the island shows the step, and the shell
+        // knows not to narrate it on this lane.
+        let tools = ((try? VoiceToolCall.toolDefinitions()) ?? [])
+            .filter { ($0["name"] as? String) != SayAction.wireName }
         return [
             "type": "session.update",
             "session": [
@@ -352,6 +390,12 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     what comes back. Do not guess first and look afterwards; looking is quick and guessing about \
     someone's own screen is the worst thing you can do here, because they will believe you.
 
+    Whenever the learner says "this", "that", "here", "it" or "the one" about something they might \
+    be looking at — "how do I play this song", "what is this", "why is that red" — they are pointing \
+    at their screen. Call look_at_screen first, every time, before answering. Do not ask what they \
+    mean and do not answer from the words alone: asked "how do I play this song", you once asked \
+    back which instrument they play, while the song sat under their pointer.
+
     You have no camera and no view of the room, and you cannot see the screen at any other moment: \
     one frame is captured when you call the tool and at no other time. If look_at_screen comes back \
     saying it could not look, tell the learner exactly why — a missing permission is something they \
@@ -367,6 +411,27 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         socket.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] error in
             if let error { self?.state.callbacks.onStatus?("send failed: \(error.localizedDescription)") }
         }
+    }
+
+    /// Whether the engine — and with it the microphone — should be paused now that playback has
+    /// changed state. Only when it has just gone quiet, only in push-to-talk (always-on listens by
+    /// definition), and only if no turn is open: `beginTurn` sets `forwarding` before it flushes
+    /// playback, so a barge-in's "went quiet" arrives with `forwarding` already true.
+    ///
+    /// And only if the reply is actually over. The queue also runs dry when audio arrives slower
+    /// than it plays, and between a tool call's response and its continuation; pausing there stops
+    /// the engine mid-sentence and restarts it on the next delta, which is a gap the learner hears.
+    static func releasesMicrophoneAfterPlayback(active: Bool, mode: TurnMode, forwarding: Bool, replyUnfinished: Bool) -> Bool {
+        !active && mode == .pushToTalk && !forwarding && !replyUnfinished
+    }
+
+    /// Asked from both ends of a reply: when playback drains, and when the response finishes —
+    /// whichever comes last is the one that finds everything quiet.
+    private func releaseMicrophoneIfTheReplyIsOver() {
+        guard Self.releasesMicrophoneAfterPlayback(
+            active: state.playbackActive, mode: mode,
+            forwarding: state.forwarding, replyUnfinished: state.replyUnfinished) else { return }
+        engine.pause()
     }
 
     private func forwardMicrophone(_ pcm16: Data) {
@@ -442,6 +507,10 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
             let cancelled = status == "cancelled" || (responseId.map { state.wasCancelled($0) } ?? false)
             if wantsContinuation, !cancelled {
                 try? send(["type": "response.create"])
+            } else {
+                // Playback usually outlasts the response and releases the microphone itself; after
+                // an underrun it has already drained, and this is the only end the reply has left.
+                releaseMicrophoneIfTheReplyIsOver()
             }
 
         case "error":
@@ -469,8 +538,10 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         if name == LookAtScreenAction.wireName {
             let question = (arguments["question"] as? String) ?? "What is on the screen?"
             state.callbacks.onStatus?("looking at the screen…")
+            state.beginLook()
             Task { [weak self] in
                 guard let self else { return }
+                defer { self.state.endLook() }
                 let answer: String
                 do {
                     answer = try await ScreenSight(configuration: self.configuration).look(question: question)
@@ -479,6 +550,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
                     // Screen Recording permission" is a useful sentence; silence is not.
                     answer = "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
                 }
+                self.state.callbacks.onScreenLook?(question, answer)
                 try? self.send([
                     "type": "conversation.item.create",
                     "item": ["type": "function_call_output", "call_id": callId, "output": answer],

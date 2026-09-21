@@ -30,6 +30,7 @@ import Speech
 public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendable {
 
     public let lane: VoiceLane = .chain
+    public let speaksForItself = false
 
     private let configuration: SaathiConfiguration
     private let speaker: any Speaker

@@ -191,6 +191,10 @@ public nonisolated final class VoiceAudioEngine: @unchecked Sendable {
     }
 
     /// Queue assistant audio for playback. PCM16 mono at `sampleRate`.
+    ///
+    /// Restarts the engine if it is paused, which brings the microphone tap up with it: the
+    /// graph is one engine. The session pauses it again when playback drains (see
+    /// `onPlaybackActiveChanged`); left running, the microphone light stayed on between turns.
     public func enqueue(pcm16 data: Data) {
         queue.async {
             guard self.isRunning else { return }
