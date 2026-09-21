@@ -167,7 +167,7 @@ switched on.
 saathi/
 ├─ contract/      the single source of truth — Swift, C# and TypeScript are GENERATED from it
 ├─ backend/       the key-holding side (Hono/Node), served at api.saathi.dev
-├─ macos/Saathi/  the macOS client — Swift package (SaathiKit + a `saathi` CLI)
+├─ macos/Saathi/  the macOS client — Swift package: SaathiKit, the mascot, the app shell, a `saathi` CLI
 ├─ windows/       the Windows client — .NET 8 (Saathi.Contract, Saathi.Core, a `saathi` CLI)
 ├─ api/           the Vercel Function that serves api.saathi.dev (wraps backend/)
 └─ selfhost/      Docker + Caddy, for running the backend on your own box instead
@@ -183,9 +183,9 @@ remove it and replace it with a published package, a version bump, and someone r
 npm install
 npm run generate        # rewrite the generated contract for all three targets
 npm run check:contract  # fail if what is checked in is stale (CI runs this on every PR)
-npm test                # backend             (26 tests)
-npm run test:mac        # swift test          (68 tests)
-npm run test:win        # dotnet test         (66 tests)
+npm test                # backend             (64 tests)
+npm run test:mac        # swift test          (about 390, silent: see below)
+npm run test:win        # dotnet test
 bash scripts/check-parity.sh   # run both clients and diff them
 ```
 
@@ -199,6 +199,11 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
 ```
 
 Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
+
+`swift test` is silent and touches no audio hardware by default. The three tests that speak through
+the real synthesiser or build real `AVAudioEngine`s are opt-in — `SAATHI_AUDIO_TESTS=1 swift test` —
+because a test run in the background should not take the sound out of whatever else the machine is
+doing, and with a Bluetooth headset connecting mid-run they crashed inside AVFAudio.
 
 ### Building and signing it yourself
 
@@ -413,38 +418,54 @@ What should not carry over is the accumulated structure: a 1,689-line central ma
 prefixes for one subsystem, around 1,500 lines of dead code, and a test suite that never type-checked
 its own test files. A fresh start is worth having precisely because those are avoidable.
 
-## Next step
+## Where it stands (September 2026)
 
-**The four open questions above, before any product code.** The skeleton deliberately does not
-answer them: the three actions in the contract (`say`, `show_step`, `open_url`) are a seed chosen to
-exercise the structure, not a claim about what Saathi does. Replacing them is meant to be cheap, and
-is the first thing that should happen once the questions are answered.
+The skeleton this README was first written around has been built on. What exists:
 
-What the skeleton does commit to, because these follow from the premise rather than from the
-unanswered questions:
+- **A macOS app, not only a CLI.** A menu-bar item, an island that hangs from the notch and opens
+  under the pointer (Home, Setup and Agents tabs), an orange pointer buddy, and hold
+  control + option to talk, in any app. `scripts/release.sh` builds, signs and notarizes it.
+- **Keys in the app.** Paste an OpenAI or Anthropic key in Setup; it is validated, stored in
+  `~/.saathi/shell.json` at 0600, and Saathi reconfigures itself without a relaunch. The sentence
+  under the fields says where your voice will go, and is the same code that decides it.
+- **Four actions**, not three: `say`, `show_step`, `open_url`, and `look_at_screen` — one frame of
+  the pointer's display plus a close-up around the pointer, sent to a vision model only when a turn
+  asks about something visible, with what macOS Accessibility says is under the pointer alongside.
+- **Skills.** A library of `SKILL.md` files under `~/.saathi`, tiles on Home, and "Create a skill…",
+  drafted by the backend so it works without a key of your own.
+- **The hosted service is live.** `api.saathi.dev` runs contract 0.8.0 with accounts in Postgres, a
+  per-account daily voice allowance claimed in one atomic statement, hosted realtime voice minted
+  rather than proxied, and **trials**: a first-run Mac can be given three conversations a day for
+  seven days with no sign-in, one account per device. [docs/HOSTING.md](docs/HOSTING.md) has the
+  posture, the migrations and what was verified in production.
+- **First run, as a model.** The order of the steps, what a spoken answer means, every line Saathi
+  says and what ends up in `shell.json` are pure, tested values in SaathiKit. The cards that draw
+  them are being worked on.
+
+What the project still commits to, because it follows from the premise rather than from any open
+question:
 
 - **The companion says what is happening.** `say` and the narration of `show_step` are the primary
   output, and every step announces its place in the whole — someone who cannot see a progress bar
   still needs to know how much is left, and someone who can is not harmed by hearing it.
 - **Closed enumerations everywhere a mishearing could land.** A misheard word can produce a wrong
   value inside a known set, never a command outside it.
-- **Provider keys stay on the backend.** Clients hold a token for the backend and nothing else.
+- **Provider keys stay on the backend** in hosted mode; your own keys stay on your machine.
 - **Refusals are explicit.** `open_url` takes http(s) only, checked in both clients, because the URL
   came from a model that got it from speech.
+- **It looks only when asked.** Nothing is captured on a timer or in the background.
 
-## Still to do on the skeleton
+## Still to do
 
-- **The macOS shell.** Today the client is a CLI; the menu-bar/overlay app is not written.
-  `SaathiKit` is deliberately free of UI so that shell links against it rather than reimplementing.
-- **The Windows shell.** Same: `Saathi.Core` is `net8.0` and holds no Windows-only API, so it builds
-  and tests on Linux CI. The WPF overlay (`net8.0-windows`) is where UIA, WGC, App Actions and the
-  SAPI speaker land — see the stack reasoning in OpenClicky's `docs/WINDOWS-REFERENCE.md`.
+- **The Windows shell.** `Saathi.Core` is `net8.0` and holds no Windows-only API, so it builds and
+  tests on Linux CI. The WPF overlay (`net8.0-windows`) is where UIA, WGC, App Actions and the SAPI
+  speaker land — see `docs/WINDOWS-REFERENCE.md`. The Windows client has the generated contract and
+  the CLI; everything under "Where it stands" above is macOS only.
 - **`ConfigurationStore` on Windows does not yet restrict the config file.** On Unix it is chmod
   0600; the Windows equivalent is an ACL and is stubbed with a comment rather than silently
   no-op'd. It must land with whatever first writes a real token.
-- **Neither hostname resolves yet, and nothing has been deployed.** A Vercel project named `saathi`
-  exists (created by `vercel build`) but has never been deployed, and the Porkbun DNS records do not
-  exist. `saathi health` fails against the default backend until both are done.
-- **The website says the product does not exist**, because it does not. When that changes, the
-  `saathi-site` repository needs changing with it — it is deliberately not written as though there
-  were something to sign up for.
+- **A doing lane.** Saathi talks, shows steps, opens links and looks. It does not yet do work in
+  other apps; the Agents tab says so rather than showing an empty grid.
+- **Billing.** Accounts have a plan label and an allowance, not a price. India is the first market
+  and the payment rail is an open decision.
+- **The website** (`saathi-site`, a separate repository) needs to say what now exists.
