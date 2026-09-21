@@ -1,8 +1,8 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.7.0.
+// Contract version 0.8.0.
 
-export const CONTRACT_VERSION = "0.7.0";
+export const CONTRACT_VERSION = "0.8.0";
 export const DEFAULT_BASE_URL = "https://api.saathi.dev";
 
 /** `~/.saathi/shell.json`. */
@@ -29,6 +29,22 @@ export type SaathiConfiguration = {
   backendUrl?: string;
   /** Account token for the hosted backend. Only used in hosted mode. */
   token?: string;
+  /** What the learner asked to be called. Asked once, in onboarding. */
+  name?: string;
+  /** The mascot's colour, as a palette name from mascot.json. */
+  colour?: string;
+  /** How the learner asked Saathi to sound. */
+  tone?: Tone;
+  /** How fast the learner asked Saathi to go. */
+  pace?: Pace;
+  /** What the learner said they want to learn or play with first. */
+  firstGoal?: string;
+  /** True once first run has finished. Unset or false means show it. */
+  onboarded?: boolean;
+  /** A UUID v4 generated once on this machine. Sent to the hosted backend only to ask for a trial, so a reinstall does not mint a second allowance. */
+  deviceId?: string;
+  /** Whether Saathi registered itself as a login item. */
+  startAtLogin?: boolean;
 };
 
 /** One row per provider mode: where it runs, what it needs, and whether using it means

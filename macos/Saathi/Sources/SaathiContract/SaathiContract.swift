@@ -1,13 +1,13 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.7.0.
+// Contract version 0.8.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.7.0"
+    public static let contractVersion = "0.8.0"
 }
 
 /// One row per provider mode: where it runs, what it needs, and whether using it means
@@ -194,8 +194,24 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var backendUrl: String?
     /// Account token for the hosted backend. Only used in hosted mode.
     public var token: String?
+    /// What the learner asked to be called. Asked once, in onboarding.
+    public var name: String?
+    /// The mascot's colour, as a palette name from mascot.json.
+    public var colour: String?
+    /// How the learner asked Saathi to sound.
+    public var tone: Tone?
+    /// How fast the learner asked Saathi to go.
+    public var pace: Pace?
+    /// What the learner said they want to learn or play with first.
+    public var firstGoal: String?
+    /// True once first run has finished. Unset or false means show it.
+    public var onboarded: Bool?
+    /// A UUID v4 generated once on this machine. Sent to the hosted backend only to ask for a trial, so a reinstall does not mint a second allowance.
+    public var deviceId: String?
+    /// Whether Saathi registered itself as a login item.
+    public var startAtLogin: Bool?
 
-    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, language: String? = nil, backendUrl: String? = nil, token: String? = nil) {
+    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, language: String? = nil, backendUrl: String? = nil, token: String? = nil, name: String? = nil, colour: String? = nil, tone: Tone? = nil, pace: Pace? = nil, firstGoal: String? = nil, onboarded: Bool? = nil, deviceId: String? = nil, startAtLogin: Bool? = nil) {
         self.provider = provider
         self.providerBaseUrl = providerBaseUrl
         self.model = model
@@ -207,6 +223,14 @@ public struct SaathiConfiguration: Codable, Sendable {
         self.language = language
         self.backendUrl = backendUrl
         self.token = token
+        self.name = name
+        self.colour = colour
+        self.tone = tone
+        self.pace = pace
+        self.firstGoal = firstGoal
+        self.onboarded = onboarded
+        self.deviceId = deviceId
+        self.startAtLogin = startAtLogin
     }
 
     /// The mode in effect. Unset means `.local` — running against a model on this

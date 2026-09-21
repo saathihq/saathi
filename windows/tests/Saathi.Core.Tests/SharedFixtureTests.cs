@@ -42,6 +42,14 @@ public class SharedFixtureTests
         Assert.Equal("ta", configuration.Language);
         Assert.Equal("https://backend.example.test", configuration.BackendUrl);
         Assert.Equal("not-a-real-token", configuration.Token);
+        Assert.Equal("Asha", configuration.Name);
+        Assert.Equal("teal", configuration.Colour);
+        Assert.Equal(Tone.Calm, configuration.Tone);
+        Assert.Equal(Pace.Slow, configuration.Pace);
+        Assert.Equal("play the tabla", configuration.FirstGoal);
+        Assert.True(configuration.Onboarded);
+        Assert.Equal("3f2b8c1e-5a44-4c1b-9d0e-7a6b5c4d3e2f", configuration.DeviceId);
+        Assert.False(configuration.StartAtLogin);
     }
 
     /// <summary>Precedence, not just parsing: both clients must resolve the fixture the same way.</summary>

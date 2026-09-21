@@ -447,6 +447,14 @@ final class SharedFixtureTests: XCTestCase {
         XCTAssertEqual(configuration.language, "ta")
         XCTAssertEqual(configuration.backendUrl, "https://backend.example.test")
         XCTAssertEqual(configuration.token, "not-a-real-token")
+        XCTAssertEqual(configuration.name, "Asha")
+        XCTAssertEqual(configuration.colour, "teal")
+        XCTAssertEqual(configuration.tone, .calm, "an enum config field must parse from its wire spelling")
+        XCTAssertEqual(configuration.pace, .slow)
+        XCTAssertEqual(configuration.firstGoal, "play the tabla")
+        XCTAssertEqual(configuration.onboarded, true, "a bool config field must parse as a bool, not a string")
+        XCTAssertEqual(configuration.deviceId, "3f2b8c1e-5a44-4c1b-9d0e-7a6b5c4d3e2f")
+        XCTAssertEqual(configuration.startAtLogin, false)
     }
 
     /// The override wins over the provider's own default — checked through the fixture so both

@@ -14,7 +14,7 @@
     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
     "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
   ],
-  "version": "0.7.0",
+  "version": "0.8.0",
   "backend": {
     "defaultBaseUrl": "https://api.saathi.dev",
     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
@@ -115,6 +115,54 @@
         "type": "string",
         "optional": true,
         "doc": "Account token for the hosted backend. Only used in hosted mode."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "optional": true,
+        "doc": "What the learner asked to be called. Asked once, in onboarding."
+      },
+      {
+        "name": "colour",
+        "type": "string",
+        "optional": true,
+        "doc": "The mascot's colour, as a palette name from mascot.json."
+      },
+      {
+        "name": "tone",
+        "type": "Tone",
+        "optional": true,
+        "doc": "How the learner asked Saathi to sound."
+      },
+      {
+        "name": "pace",
+        "type": "Pace",
+        "optional": true,
+        "doc": "How fast the learner asked Saathi to go."
+      },
+      {
+        "name": "firstGoal",
+        "type": "string",
+        "optional": true,
+        "doc": "What the learner said they want to learn or play with first."
+      },
+      {
+        "name": "onboarded",
+        "type": "bool",
+        "optional": true,
+        "doc": "True once first run has finished. Unset or false means show it."
+      },
+      {
+        "name": "deviceId",
+        "type": "string",
+        "optional": true,
+        "doc": "A UUID v4 generated once on this machine. Sent to the hosted backend only to ask for a trial, so a reinstall does not mint a second allowance."
+      },
+      {
+        "name": "startAtLogin",
+        "type": "bool",
+        "optional": true,
+        "doc": "Whether Saathi registered itself as a login item."
       }
     ]
   },

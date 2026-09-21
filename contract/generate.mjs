@@ -110,7 +110,8 @@ function toolSchemaLiteral(lang) {
 
 /** Config fields are always optional; only their base type varies. */
 function swiftConfigType(f) {
-  return (f.type === "string" ? "String" : f.type) + "?";
+  const base = f.type === "string" ? "String" : f.type === "bool" ? "Bool" : f.type;
+  return base + "?";
 }
 
 function swift() {
@@ -367,7 +368,8 @@ function csharp() {
   for (const f of schema.config.fields) {
     out.push(`    /// <summary>${f.doc}</summary>`);
     out.push(`    [JsonPropertyName("${f.name}")]`);
-    out.push(`    public ${f.type === "string" ? "string" : f.type}? ${pascal(f.name)} { get; set; }\n`);
+    const csType = f.type === "string" ? "string" : f.type === "bool" ? "bool" : f.type;
+    out.push(`    public ${csType}? ${pascal(f.name)} { get; set; }\n`);
   }
   const baseUrlField = pascal(
     (schema.config.fields.find((f) => f.name === "backendUrl") ?? schema.config.fields[0]).name,
@@ -504,7 +506,8 @@ function typescript() {
   out.push(`/** \`~/${schema.config.directoryName}/${schema.config.fileName}\`. */`);
   out.push("export type SaathiConfiguration = {");
   for (const f of schema.config.fields) {
-    out.push(`  /** ${f.doc} */\n  ${f.name}?: ${f.type === "string" ? "string" : f.type};`);
+    const tsType = f.type === "string" ? "string" : f.type === "bool" ? "boolean" : f.type;
+    out.push(`  /** ${f.doc} */\n  ${f.name}?: ${tsType};`);
   }
   out.push("};\n");
 

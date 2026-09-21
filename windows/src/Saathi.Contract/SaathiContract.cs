@@ -1,6 +1,6 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.7.0.
+// Contract version 0.8.0.
 
 #nullable enable
 using System.Linq;
@@ -13,7 +13,7 @@ namespace Saathi.Contract;
 public static class SaathiBackend
 {
     public const string DefaultBaseUrl = "https://api.saathi.dev";
-    public const string ContractVersion = "0.7.0";
+    public const string ContractVersion = "0.8.0";
 }
 
 /// <summary>One row per provider mode: where it runs, what it needs, and whether using it
@@ -212,6 +212,38 @@ public sealed class SaathiConfiguration
     /// <summary>Account token for the hosted backend. Only used in hosted mode.</summary>
     [JsonPropertyName("token")]
     public string? Token { get; set; }
+
+    /// <summary>What the learner asked to be called. Asked once, in onboarding.</summary>
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    /// <summary>The mascot's colour, as a palette name from mascot.json.</summary>
+    [JsonPropertyName("colour")]
+    public string? Colour { get; set; }
+
+    /// <summary>How the learner asked Saathi to sound.</summary>
+    [JsonPropertyName("tone")]
+    public Tone? Tone { get; set; }
+
+    /// <summary>How fast the learner asked Saathi to go.</summary>
+    [JsonPropertyName("pace")]
+    public Pace? Pace { get; set; }
+
+    /// <summary>What the learner said they want to learn or play with first.</summary>
+    [JsonPropertyName("firstGoal")]
+    public string? FirstGoal { get; set; }
+
+    /// <summary>True once first run has finished. Unset or false means show it.</summary>
+    [JsonPropertyName("onboarded")]
+    public bool? Onboarded { get; set; }
+
+    /// <summary>A UUID v4 generated once on this machine. Sent to the hosted backend only to ask for a trial, so a reinstall does not mint a second allowance.</summary>
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; set; }
+
+    /// <summary>Whether Saathi registered itself as a login item.</summary>
+    [JsonPropertyName("startAtLogin")]
+    public bool? StartAtLogin { get; set; }
 
     /// <summary>The mode in effect. Unset means <c>local</c> — running against a model
     /// on this machine, with no key and no account, is the default rather than a special case.</summary>

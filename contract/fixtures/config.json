@@ -10,5 +10,13 @@
   "voice": "not-a-real-voice",
   "language": "ta",
   "backendUrl": "https://backend.example.test",
-  "token": "not-a-real-token"
+  "token": "not-a-real-token",
+  "name": "Asha",
+  "colour": "teal",
+  "tone": "calm",
+  "pace": "slow",
+  "firstGoal": "play the tabla",
+  "onboarded": true,
+  "deviceId": "3f2b8c1e-5a44-4c1b-9d0e-7a6b5c4d3e2f",
+  "startAtLogin": false
 }
