@@ -99,3 +99,23 @@ final class OnboardingAnswersTests: XCTestCase {
         XCTAssertEqual(AnswerParser.language(from: "ta-IN", supported: ["en-US", "ta-IN"]), "ta-IN")
     }
 }
+
+final class OnboardingLanguagesTests: XCTestCase {
+
+    func testOneEntryPerLanguageTheMachinesRegionWinsAndItsLanguageLeads() {
+        let entries = OnboardingLanguages.entries(
+            from: ["en-US", "en-GB", "en-IN", "hi-IN", "ta-IN", "ko-KR", "fr-FR", "fr-CA"], machine: "en-IN")
+        XCTAssertEqual(entries.first, .init(tag: "en-IN", name: "English"))
+        XCTAssertEqual(entries.map(\.name), ["English", "French", "Hindi", "Korean", "Tamil"])
+        XCTAssertEqual(entries.first { $0.name == "French" }?.tag, "fr-CA", "no machine region: the first alphabetically")
+    }
+
+    func testAMachineWhoseLanguageIsNotSupportedLeadsWithNothingSpecial() {
+        let entries = OnboardingLanguages.entries(from: ["en-US", "hi-IN"], machine: "ml-IN")
+        XCTAssertEqual(entries.map(\.tag), ["en-US", "hi-IN"])
+    }
+
+    func testNoRecogniserAtAllStillOffersSomething() {
+        XCTAssertEqual(OnboardingLanguages.entries(from: [], machine: "en-US"), [.init(tag: "en-US", name: "English")])
+    }
+}

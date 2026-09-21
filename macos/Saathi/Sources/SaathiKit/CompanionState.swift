@@ -154,6 +154,9 @@ public struct CompanionStateMachine: Equatable, Sendable {
         let lower = text.lowercased()
         if lower.hasPrefix("listening") { return .listening }
         if lower.hasPrefix("thinking") { return .thinking }
+        // A listen-only session's turn ends with the transcript and nothing follows it: no reply,
+        // no speech. Without this the face would sit on "Thinking" about nothing.
+        if lower.hasPrefix("heard") { return current == .thinking || current == .listening ? .idle : current }
         let trouble = ["did not catch", "ignored", "realtime error", "disconnected", "send failed", "not authorised", "refused"]
         if trouble.contains(where: { lower.hasPrefix($0) }) { return .alert(text) }
         return current

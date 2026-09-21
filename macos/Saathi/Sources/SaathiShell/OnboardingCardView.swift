@@ -96,6 +96,23 @@ struct OnboardingCardView: View {
 
     private var topBar: some View {
         ZStack {
+            // The window has no title bar, so this is the only way out of it. Closing is skipping
+            // what is left: what was answered is already saved, and first run comes back next
+            // launch unless it was finished.
+            HStack {
+                Button { coordinator.close() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(OnboardingStyle.faint)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color.white.opacity(0.07)))
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("Close")
+                Spacer()
+            }
             if let demoIndex {
                 HStack(spacing: 9) {
                     ForEach(0..<5, id: \.self) { index in

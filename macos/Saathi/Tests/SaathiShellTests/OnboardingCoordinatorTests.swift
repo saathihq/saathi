@@ -298,3 +298,22 @@ final class OnboardingCardWordingTests: XCTestCase {
         XCTAssertEqual(OnboardingWindowController.expression(for: model, isSpeaking: false), .listening)
     }
 }
+
+@MainActor
+final class OnboardingEntryTests: XCTestCase {
+
+    /// `onboarded` did not exist before contract 0.8.0, so every working install has it unset.
+    /// Greeting someone who has used Saathi for weeks with "Namaste, I'm Saathi" is not first run.
+    func testFirstRunShowsItselfOnlyToAnInstallWithNothingConfigured() {
+        XCTAssertTrue(AppController.shouldOnboard(SaathiConfiguration()))
+        XCTAssertTrue(AppController.shouldOnboard(SaathiConfiguration(onboarded: false)))
+        XCTAssertFalse(AppController.shouldOnboard(SaathiConfiguration(onboarded: true)))
+        XCTAssertFalse(AppController.shouldOnboard(SaathiConfiguration(openaiKey: "sk-works")))
+        XCTAssertFalse(AppController.shouldOnboard(SaathiConfiguration(token: "saathi_live")))
+    }
+
+    /// Quit halfway through: a colour and a name are on disk, `onboarded` is not. It comes back.
+    func testAnInterruptedFirstRunComesBack() {
+        XCTAssertTrue(AppController.shouldOnboard(SaathiConfiguration(name: "Asha", colour: "teal")))
+    }
+}
