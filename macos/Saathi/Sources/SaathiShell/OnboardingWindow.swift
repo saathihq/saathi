@@ -32,6 +32,8 @@ public final class OnboardingWindowController: NSObject {
     private var startAtLogin: Bool
     private let onStartAtLoginChanged: (Bool) -> Void
     private var observation: Any?
+    /// Whatever was frontmost when the card took the keyboard, so closing can give it back.
+    private var applicationActiveBefore: NSRunningApplication?
 
     public init(
         coordinator: OnboardingCoordinator,
@@ -140,12 +142,21 @@ public final class OnboardingWindowController: NSObject {
         } else {
             window.center()
         }
+        let front = NSWorkspace.shared.frontmostApplication
+        if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            applicationActiveBefore = front
+        }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Takes the card away and gives the keyboard back. The second half matters more: someone who
+    /// asked for onboarding from the middle of writing something should land back in it, the same
+    /// way the island's Setup tab returns them.
     public func close() {
         window.orderOut(nil)
+        applicationActiveBefore?.activate()
+        applicationActiveBefore = nil
     }
 
     public var isVisible: Bool { window.isVisible }

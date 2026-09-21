@@ -95,10 +95,6 @@ it is worth knowing.
 
 ## Known rough edges
 
-- The window activates the app (it has to, for "Or type here"); closing it does not hand focus
-  back to whatever was frontmost, the way the island's Setup tab does.
-- The island's mascot keeps the colour it launched with until the next launch; the card's changes
-  at once.
 - Nothing here has been seen on a real screen, spoken aloud, or run against real permissions. The
   first ten minutes with it will find things.
 

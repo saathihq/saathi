@@ -23,6 +23,7 @@
 import AppKit
 import SaathiContract
 import SaathiKit
+import SaathiMascot
 import ServiceManagement
 
 extension AppController {
@@ -114,6 +115,10 @@ extension AppController {
     /// moment the permission cards are behind us.
     private func onboardingChanged(_ model: OnboardingModel) {
         model.apply(to: &configuration)
+        // The island's face wears the colour as it is chosen, not at the next launch.
+        if let name = configuration.colour, let colour = MascotColor(paletteName: name, in: data) {
+            notch?.mascot.color = colour
+        }
         do {
             try ConfigurationStore.save(configuration, to: ConfigurationStore.defaultPath())
         } catch {
