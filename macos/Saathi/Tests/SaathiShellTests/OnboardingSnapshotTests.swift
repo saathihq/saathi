@@ -81,7 +81,10 @@ final class OnboardingSnapshotTests: XCTestCase {
                 for _ in 0..<5 { await Task.yield() }
                 try await Task.sleep(nanoseconds: 30_000_000)
             }
-            if let bubble = shot.bubble { coordinator.heard(bubble) }
+            if let bubble = shot.bubble {
+                coordinator.heard(bubble)
+                coordinator.listening(level: 0.7, partial: nil)   // so the drawing shows the bars up
+            }
 
             let colour = MascotColor(paletteName: model.colour ?? "blue", in: data) ?? MascotColor(hex: "#377FE6")
             let mascot = MascotView(data: data, color: colour, expression: OnboardingWindowController.expression(for: model, isSpeaking: false),

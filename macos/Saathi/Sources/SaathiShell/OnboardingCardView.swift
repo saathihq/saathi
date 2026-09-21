@@ -295,9 +295,31 @@ struct OnboardingCardView: View {
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(OnboardingStyle.bubble))
     }
 
+    /// Five bars, the middle one tallest, all driven by the one level. They say "I can hear you"
+    /// before any word has been made out, which on a first run is the more reassuring half.
+    static let barShape: [CGFloat] = [0.45, 0.75, 1, 0.75, 0.45]
+
+    static func barHeight(level: Float, shape: CGFloat, resting: CGFloat = 4, full: CGFloat = 30) -> CGFloat {
+        resting + (full - resting) * CGFloat(min(1, max(0, level))) * shape
+    }
+
+    private var levelBars: some View {
+        HStack(alignment: .center, spacing: 5) {
+            ForEach(Array(Self.barShape.enumerated()), id: \.offset) { _, shape in
+                Capsule()
+                    .fill(OnboardingStyle.pillBottom.opacity(coordinator.level > 0.02 ? 1 : 0.35))
+                    .frame(width: 5, height: Self.barHeight(level: coordinator.level, shape: shape))
+            }
+        }
+        .frame(height: 32)
+        .animation(.easeOut(duration: 0.08), value: coordinator.level)
+        .accessibilityHidden(true)
+    }
+
     private func listening(showKeys: Bool) -> some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 18) {
             heading()
+            levelBars
             HStack(alignment: .center, spacing: 14) {
                 face(80)
                 speechBubble(

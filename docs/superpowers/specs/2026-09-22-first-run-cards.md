@@ -68,9 +68,9 @@ type it." underneath.
 
 ## Not built, on purpose
 
-- **Level bars and the input device picker** on the mic check. Neither session exposes an input
-  level, and the line Saathi speaks no longer promises bars. The transcript bubble is the proof of
-  being heard.
+- **The input device picker** on the mic check. The level bars *are* there: the chain session
+  reports an input level (in decibels, so ordinary speech actually moves them) and what it has made
+  out so far, and the listening cards show both live.
 - **Back.** `OnboardingModel` has no backwards event. HeyClicky has one; nothing in the spec does.
 - **The one-line model reaction** to each answer (spec step 6.3, two-second budget). The scripted
   acknowledgement is always spoken; the reaction would be a second voice arriving late.

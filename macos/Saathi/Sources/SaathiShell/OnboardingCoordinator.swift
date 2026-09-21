@@ -59,6 +59,8 @@ public final class OnboardingCoordinator: ObservableObject {
     @Published public private(set) var isSpeaking = false
     /// The mic check has a turn open: the card shows that it is listening.
     @Published public private(set) var isListening = false
+    /// How loud the microphone is, 0…1, while a turn is open. The bars on the listening cards.
+    @Published public private(set) var level: Float = 0
 
     private let effects: OnboardingEffects
     private var speech: Task<Void, Never>?
@@ -94,6 +96,7 @@ public final class OnboardingCoordinator: ObservableObject {
     /// A transcript from the voice session. On a question it is the answer; on the two listening
     /// steps it is proof of being heard; anywhere else it is not first run's business.
     public func heard(_ text: String) {
+        level = 0   // the turn is over; the bars come to rest
         switch model.step {
         case .demo(.question):
             bubble = text
@@ -107,6 +110,21 @@ public final class OnboardingCoordinator: ObservableObject {
     }
 
     public func keysHeld() { send(.keysHeld) }
+
+    /// Live from an open turn: how loud, and what has been made out so far. Only the cards that
+    /// listen show either; the words are a preview, and the turn's final transcript still arrives
+    /// through `heard`.
+    public func listening(level: Float?, partial: String?) {
+        switch model.step {
+        case .demo(.micCheck), .demo(.holdToTalk), .demo(.question): break
+        default: return
+        }
+        if let level {
+            // Up at once, down slowly: bars that fall to nothing between syllables flicker.
+            self.level = max(level, self.level * 0.8)
+        }
+        if let partial, !partial.isEmpty { bubble = partial }
+    }
 
     /// The session listened and got nothing. Once is a quiet moment; twice, the mic check stops
     /// insisting — a room too quiet to transcribe must not be a locked door.
@@ -135,6 +153,7 @@ public final class OnboardingCoordinator: ObservableObject {
         listening = nil
         guard isListening else { return }
         isListening = false
+        level = 0
         effects.setListening(false)
     }
 
@@ -204,7 +223,10 @@ public final class OnboardingCoordinator: ObservableObject {
 
         effects.save(model)
 
-        if before.step != model.step { stopListening() }
+        if before.step != model.step {
+            stopListening()
+            level = 0
+        }
         if before.step == .demo(.trialChat), model.step != .demo(.trialChat), trialChatActive {
             trialChatActive = false
             // Not when first run is ending: the app starts a fresh session then, and this swap

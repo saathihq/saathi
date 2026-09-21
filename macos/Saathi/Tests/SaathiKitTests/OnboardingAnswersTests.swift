@@ -6,6 +6,7 @@
 //  "uh, Asha.", or "call me Ash". These pin what is kept.
 //
 
+import AVFoundation
 import XCTest
 import SaathiContract
 @testable import SaathiKit
@@ -117,5 +118,32 @@ final class OnboardingLanguagesTests: XCTestCase {
 
     func testNoRecogniserAtAllStillOffersSomething() {
         XCTAssertEqual(OnboardingLanguages.entries(from: [], machine: "en-US"), [.init(tag: "en-US", name: "English")])
+    }
+}
+
+
+final class InputLevelTests: XCTestCase {
+
+    /// Decibels, not raw amplitude: on a linear scale ordinary speech sits in the bottom tenth and
+    /// the bars barely move, which reads as "it cannot hear me".
+    func testOrdinarySpeechMovesTheBarsAndSilenceDoesNot() {
+        XCTAssertEqual(InputLevel.normalised(rms: 0), 0)
+        XCTAssertEqual(InputLevel.normalised(rms: 0.001), 0, "room noise, -60 dB")
+        XCTAssertGreaterThan(InputLevel.normalised(rms: 0.05), 0.5, "speech at arm's length, about -26 dB")
+        XCTAssertEqual(InputLevel.normalised(rms: 0.5), 1, "close and loud is simply full")
+        XCTAssertEqual(InputLevel.normalised(rms: .nan), 0)
+        XCTAssertEqual(InputLevel.normalised(rms: -1), 0)
+    }
+
+    func testTheLevelOfABufferIsItsFirstChannelsRMS() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+        buffer.frameLength = 480
+        XCTAssertEqual(InputLevel.level(of: buffer), 0, "silence")
+        let channel = try XCTUnwrap(buffer.floatChannelData?[0])
+        for index in 0..<480 { channel[index] = index.isMultiple(of: 2) ? 0.1 : -0.1 }
+        XCTAssertEqual(InputLevel.level(of: buffer), InputLevel.normalised(rms: 0.1), accuracy: 0.0001)
+        buffer.frameLength = 0
+        XCTAssertEqual(InputLevel.level(of: buffer), 0)
     }
 }

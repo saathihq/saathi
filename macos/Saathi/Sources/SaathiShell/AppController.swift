@@ -79,7 +79,9 @@ public final class AppController {
             onEvent: { [weak self] in self?.handle($0) },
             onScreenLook: { [weak self] question, answer in
                 self?.conversation.append(.look(question: question, answer: answer))
-            })
+            },
+            // Only first run draws these; the rest of the app has the face for that.
+            onListening: { [weak self] level, partial in self?.onboarding?.listening(level: level, partial: partial) })
         wireMenu()
         wireNotch()
     }

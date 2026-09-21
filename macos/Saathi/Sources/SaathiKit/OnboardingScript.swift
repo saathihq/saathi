@@ -74,9 +74,7 @@ public enum OnboardingScript {
         case .micCheck:
             return OnboardingLine(
                 title: "Can I hear you?",
-                // No level bars yet — the audio engine has no tap to drive them — so the line does
-                // not promise any. The transcript is the proof of being heard.
-                spoken: "Can I hear you? Say anything, and I'll show you what I heard.")
+                spoken: "Can I hear you? Say anything. You'll see the bars move, and I'll show you what I heard.")
         case .holdToTalk:
             return OnboardingLine(
                 title: "This is how you talk to me.",

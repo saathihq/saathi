@@ -111,8 +111,10 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw VoiceError.audio("no microphone input available")
         }
+        let onInputLevel = state.withLock { $0.callbacks.onInputLevel }
         inputNode.installTap(onBus: 0, bufferSize: 2400, format: format) { buffer, _ in
             request.append(buffer)
+            onInputLevel?(InputLevel.level(of: buffer))
         }
         engine.prepare()
         try engine.start()
@@ -129,6 +131,7 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
             guard let self, let result else { return }
             let text = result.bestTranscription.formattedString
             self.state.withLock { $0.latestTranscript = text }
+            callbacks.onPartialTranscript?(text)
         }
         state.withLock { $0.recognitionTask = task }
     }

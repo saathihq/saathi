@@ -321,7 +321,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         await toMicCheck(c)
         XCTAssertEqual(listening, [true])
         XCTAssertTrue(c.isListening)
-        XCTAssertEqual(spoken.last, "Can I hear you? Say anything, and I'll show you what I heard.")
+        XCTAssertEqual(spoken.last, "Can I hear you? Say anything. You'll see the bars move, and I'll show you what I heard.")
 
         try? await Task.sleep(nanoseconds: 120_000_000)
         XCTAssertEqual(listening, [true, false], "stopping is what makes the session hand over a transcript")
@@ -338,6 +338,33 @@ final class OnboardingCoordinatorTests: XCTestCase {
         await toMicCheck(c)
         c.skipDemo(); await settle(c)
         XCTAssertEqual(listening, [true, false])
+    }
+
+    /// The bars rise at once and fall slowly — bars that drop to nothing between syllables flicker —
+    /// and what has been made out so far shows before the turn has ended.
+    func testTheBarsAndTheLiveWordsFollowAnOpenTurnAndRestWhenItEnds() async {
+        let c = coordinator()
+        c.listenFor = 5
+        await toMicCheck(c)
+        c.listening(level: 0.8, partial: nil)
+        XCTAssertEqual(c.level, 0.8, accuracy: 0.001)
+        c.listening(level: 0.1, partial: "hello sa")
+        XCTAssertEqual(c.level, 0.64, accuracy: 0.001, "down slowly")
+        XCTAssertEqual(c.bubble, "hello sa")
+        XCTAssertFalse(c.model.heardSomething, "a preview is not yet being heard: the turn has not ended")
+
+        c.heard("hello saathi")
+        XCTAssertEqual(c.level, 0)
+        XCTAssertEqual(c.bubble, "hello saathi")
+        XCTAssertTrue(c.model.canContinue)
+    }
+
+    func testLevelsOutsideTheListeningCardsAreIgnored() async {
+        let c = coordinator()
+        c.begin()
+        c.listening(level: 0.9, partial: "hello")
+        XCTAssertEqual(c.level, 0)
+        XCTAssertEqual(c.bubble, "")
     }
 
     /// A room too quiet to transcribe is not a locked door.
@@ -436,5 +463,18 @@ final class OnboardingEntryTests: XCTestCase {
     /// Quit halfway through: a colour and a name are on disk, `onboarded` is not. It comes back.
     func testAnInterruptedFirstRunComesBack() {
         XCTAssertTrue(AppController.shouldOnboard(SaathiConfiguration(name: "Asha", colour: "teal")))
+    }
+}
+
+
+final class OnboardingBarsTests: XCTestCase {
+
+    func testBarsRestSmallAndTheMiddleOneIsTallest() {
+        XCTAssertEqual(OnboardingCardView.barHeight(level: 0, shape: 1), 4)
+        XCTAssertEqual(OnboardingCardView.barHeight(level: 1, shape: 1), 30)
+        XCTAssertEqual(OnboardingCardView.barHeight(level: 7, shape: 1), 30, "clamped")
+        XCTAssertLessThan(
+            OnboardingCardView.barHeight(level: 0.5, shape: OnboardingCardView.barShape[0]),
+            OnboardingCardView.barHeight(level: 0.5, shape: OnboardingCardView.barShape[2]))
     }
 }
