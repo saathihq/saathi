@@ -56,7 +56,7 @@ browsers, and the database functions are not granted to it, so every call would 
 
 ```bash
 curl https://api.saathi.dev/health
-{"ok":true,"version":"0.6.0","auth":"accounts","voice":"hosted","limits":"per-account daily limit, counted in Postgres (shared across every instance)"}
+{"ok":true,"version":"0.8.0","auth":"accounts","voice":"hosted","limits":"per-account daily limit, counted in Postgres (shared across every instance)","trial":"on"}
 ```
 
 As deployed on 2026-09-16: accounts in Supabase project `qkrkijwdwsclpikjgvcb`, hosted voice on
@@ -168,4 +168,12 @@ update saathi.accounts set suspended_at = now() where device_id = '<the device i
 |---|---|---|
 | `0002_trials.sql` + `0002_verify.sql` on a local Postgres 17 | 2026-09-21 | all assertions passed; applying twice is clean; 8 concurrent first asks from one device → 1 account, 1 live token |
 | `0002_trials.sql` + `0002_verify.sql` on the hosted database | 2026-09-21 | all assertions passed; the existing account and its token untouched; 0 trial rows left behind |
-| `/health` and `/trial` on api.saathi.dev | — | not yet verified against production: the route ships with the next deploy of `main` |
+| `/health` on api.saathi.dev after `vercel --prod` | 2026-09-21 | `version 0.8.0`, `auth accounts`, `voice hosted`, `trial on` |
+| `POST /trial` with a bad device | 2026-09-21 | 400 `device must be a version 4 UUID`; spends nothing |
+| One real trial, end to end | 2026-09-21 | token issued, 3 a day, expiry 7 days out; `/session` with it → 200; same device again → a fresh token, and the first one → 401. The test account and its rate-limit row were deleted afterwards |
+| `POST /skills/create` with no token | 2026-09-21 | 401 — the route is live in production (before this deploy it did not exist there) |
+
+Deploys are **not** triggered by pushing `main`: the Vercel project is not connected to the
+repository. Production changes when someone runs `npx vercel --prod` from a clean checkout. For a
+few seconds after a deploy an old instance can still answer; a route that is new in that deploy may
+404 once before it is there.
