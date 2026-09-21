@@ -329,11 +329,11 @@ final class SetupPresentationTests: XCTestCase {
         let say = SaathiAction.say(SayAction(text: "hello"))
         let step = SaathiAction.showStep(ShowStepAction(title: "Open Spotify", index: 1, total: 2))
         let open = SaathiAction.openUrl(OpenUrlAction(url: "https://example.org"))
-        XCTAssertFalse(AppController.performs(say, sessionSpeaksForItself: true))
-        XCTAssertFalse(AppController.performs(step, sessionSpeaksForItself: true))
-        XCTAssertTrue(AppController.performs(open, sessionSpeaksForItself: true))
-        XCTAssertTrue(AppController.performs(say, sessionSpeaksForItself: false))
-        XCTAssertTrue(AppController.performs(step, sessionSpeaksForItself: false))
+        XCTAssertFalse(VoiceConductor.performs(say, sessionSpeaksForItself: true))
+        XCTAssertFalse(VoiceConductor.performs(step, sessionSpeaksForItself: true))
+        XCTAssertTrue(VoiceConductor.performs(open, sessionSpeaksForItself: true))
+        XCTAssertTrue(VoiceConductor.performs(say, sessionSpeaksForItself: false))
+        XCTAssertTrue(VoiceConductor.performs(step, sessionSpeaksForItself: false))
     }
 
     // MARK: the status pill in the band
