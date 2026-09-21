@@ -118,3 +118,38 @@ final class ObservedSpeakerTests: XCTestCase {
         XCTAssertEqual(events.withLock { $0 }, [true, false])
     }
 }
+
+final class SpeechSettingsTests: XCTestCase {
+
+    private let installed = ["en-US", "en-GB", "en-IN", "hi-IN", "ta-IN", "ko-KR"]
+
+    /// A Tamil sentence read by an English synthesiser is noise.
+    func testTheVoiceFollowsTheLanguageSaathiWasToldToSpeak() {
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "ta-IN", available: installed), "ta-IN")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "ta", available: installed), "ta-IN", "a bare language finds its region")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "EN-in", available: installed), "en-IN")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "en-AU", available: installed), "en-GB", "no such region: another voice of the same language")
+    }
+
+    func testNoVoiceForTheLanguageFallsBackToEnglishRatherThanSilence() {
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "ml-IN", available: installed), "en-US")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: nil, available: installed), "en-US")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "  ", available: installed), "en-US")
+        XCTAssertEqual(SpeechSettings.voiceLanguage(wanted: "e", available: installed), "en-US", "a prefix of a code is not the code")
+    }
+
+    func testSlowIsSlowerWhateverTheToneAndTheTonesKeepTheirOwnNumbers() {
+        XCTAssertEqual(SpeechSettings.rateMultiplier(tone: .neutral, pace: nil), 1.0)
+        XCTAssertEqual(SpeechSettings.rateMultiplier(tone: .neutral, pace: .normal), 1.0)
+        XCTAssertEqual(SpeechSettings.rateMultiplier(tone: .calm, pace: nil), 0.9)
+        XCTAssertEqual(SpeechSettings.rateMultiplier(tone: .encouraging, pace: .slow), 0.85)
+        XCTAssertEqual(SpeechSettings.rateMultiplier(tone: .calm, pace: .slow), 0.9 * 0.85, accuracy: 0.0001)
+        XCTAssertEqual(SpeechSettings.pitchMultiplier(tone: .calm), 0.95)
+        XCTAssertEqual(SpeechSettings.pitchMultiplier(tone: .encouraging), 1.08)
+    }
+
+    func testSettingsComeFromTheConfiguration() {
+        let settings = SpeechSettings(SaathiConfiguration(language: "ta-IN", pace: .slow))
+        XCTAssertEqual(settings, SpeechSettings(language: "ta-IN", pace: .slow))
+    }
+}

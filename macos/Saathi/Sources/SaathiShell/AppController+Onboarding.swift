@@ -115,6 +115,9 @@ extension AppController {
     /// moment the permission cards are behind us.
     private func onboardingChanged(_ model: OnboardingModel) {
         model.apply(to: &configuration)
+        // Saathi speaks the language and the pace it was just asked for from the next sentence on —
+        // including the rest of first run.
+        applySpeechSettings()
         // The island's face wears the colour as it is chosen, not at the next launch.
         if let name = configuration.colour, let colour = MascotColor(paletteName: name, in: data) {
             notch?.mascot.color = colour

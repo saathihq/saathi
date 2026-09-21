@@ -27,6 +27,8 @@ public final class AppController {
     let notch: NotchPanel?
     let menu: MenuBarController
 
+    /// The voice underneath `speaker`, kept so its language and pace can follow the configuration.
+    private let systemSpeaker: SystemSpeaker
     var speaker: ObservedSpeaker!
     private var performer: ActionPerformer!
     /// The voice session's whole life — start, turns, reconfigure, quit. See `VoiceConductor`.
@@ -61,7 +63,8 @@ public final class AppController {
         }
         menu = MenuBarController(icon: MenuBarIcon.image(data: data), installStatusItem: true)
 
-        speaker = ObservedSpeaker(SystemSpeaker()) { [weak self] speaking in
+        systemSpeaker = SystemSpeaker(settings: SpeechSettings(configuration))
+        speaker = ObservedSpeaker(systemSpeaker) { [weak self] speaking in
             Task { @MainActor in self?.handle(.speakingChanged(speaking)) }
         }
         performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
@@ -187,6 +190,8 @@ public final class AppController {
         ticker = timer
     }
 
+    func applySpeechSettings() { systemSpeaker.apply(SpeechSettings(configuration)) }
+
     // MARK: voice
 
     /// Swaps in a new configuration without a relaunch. The teardown order lives in
@@ -194,6 +199,7 @@ public final class AppController {
     func reconfigure(_ updated: SaathiConfiguration) async {
         guard await voice.reconfigure(to: updated) else { return }
         configuration = updated
+        systemSpeaker.apply(SpeechSettings(updated))
         applyConfigurationToIsland()
     }
 
