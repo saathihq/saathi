@@ -11,6 +11,9 @@ import SaathiContract
 public struct BackendHealth: Codable, Sendable, Equatable {
     public let ok: Bool
     public let version: String?
+    /// "on" when this backend can hand a first-run client a trial; nil from a backend that
+    /// predates trials.
+    public let trial: String?
 }
 
 /// What `/skills/create` gives back: the drafted SKILL.md, plus the name the model chose so the
