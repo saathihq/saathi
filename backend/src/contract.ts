@@ -1,8 +1,8 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.6.0.
+// Contract version 0.7.0.
 
-export const CONTRACT_VERSION = "0.6.0";
+export const CONTRACT_VERSION = "0.7.0";
 export const DEFAULT_BASE_URL = "https://api.saathi.dev";
 
 /** `~/.saathi/shell.json`. */
@@ -127,4 +127,5 @@ export const BACKEND_ROUTES = [
   { method: "GET", path: "/health", auth: false },
   { method: "POST", path: "/session", auth: true },
   { method: "POST", path: "/realtime/session", auth: true },
+  { method: "POST", path: "/skills/create", auth: true },
 ] as const;

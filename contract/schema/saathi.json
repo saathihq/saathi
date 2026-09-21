@@ -14,7 +14,7 @@
     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
     "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
   ],
-  "version": "0.6.0",
+  "version": "0.7.0",
   "backend": {
     "defaultBaseUrl": "https://api.saathi.dev",
     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
@@ -36,6 +36,12 @@
         "path": "/realtime/session",
         "auth": true,
         "summary": "Mints a short-lived client secret for a realtime voice session. The provider key stays here; the client connects to the provider directly, so no audio crosses this backend."
+      },
+      {
+        "method": "POST",
+        "path": "/skills/create",
+        "auth": true,
+        "summary": "Drafts one SKILL.md from a sentence. The model runs on the backend's key, so creating a skill works in hosted mode, where the client holds no provider key of its own."
       }
     ]
   },

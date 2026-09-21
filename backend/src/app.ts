@@ -12,6 +12,7 @@
 
 import { Hono } from "hono";
 import { ACTION_WIRE_NAMES, CONTRACT_VERSION } from "./contract.js";
+import { createSkill, type SkillCreateEnv } from "./skillsCreate.js";
 import {
   LedgerUnavailableError,
   mintRealtimeGrant,
@@ -42,6 +43,14 @@ export type AppEnv = {
   SAATHI_REALTIME_BASE_URL?: string;
   SAATHI_REALTIME_MODEL?: string;
   SAATHI_REALTIME_VOICE?: string;
+  /**
+   * What `/skills/create` drafts with. Separate names from the realtime ones so a deploy can draft
+   * skills without offering hosted voice, or the other way round; the key falls back to the
+   * realtime one because in practice it is the same vendor account.
+   */
+  SAATHI_SKILL_KEY?: string;
+  SAATHI_SKILL_BASE_URL?: string;
+  SAATHI_SKILL_MODEL?: string;
 };
 
 /** Injectable so the tests never open a socket or need a key. */
@@ -221,6 +230,19 @@ export function createApp(env: AppEnv = {}, dependencies: AppDependencies = {}) 
       if (error instanceof RealtimeMintError) return c.json({ error: error.message }, 502);
       return c.json({ error: "could not open a realtime session" }, 502);
     }
+  });
+
+  /**
+   * Drafts one SKILL.md from a sentence, on this backend's key.
+   *
+   * Authorised like every other route, and no further: what it spends is one non-streaming model
+   * call with both interpolated fields length-capped, which is the whole of the abuse surface.
+   */
+  app.post("/skills/create", async (c) => {
+    const rejection = await rejectIfUnauthorised(c.req.header("authorization") ?? "");
+    if (rejection) return rejection;
+
+    return createSkill(c, env as SkillCreateEnv, fetchImpl);
   });
 
   app.notFound((c) => c.json({ error: "no such route" }, 404));

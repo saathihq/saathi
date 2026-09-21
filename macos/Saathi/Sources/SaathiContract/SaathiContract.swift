@@ -1,13 +1,13 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.6.0.
+// Contract version 0.7.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.6.0"
+    public static let contractVersion = "0.7.0"
 }
 
 /// One row per provider mode: where it runs, what it needs, and whether using it means
