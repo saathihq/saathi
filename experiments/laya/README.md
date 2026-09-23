@@ -16,6 +16,15 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python laya
 .venv/bin/python bench.py --quick    # accuracy only
 ```
 
+To try your own sentences interactively:
+
+```bash
+.venv/bin/python ask.py              # type a sentence, see the three decisions and their confidence
+```
+
+Laya does not generate text, so this is not a chat: each line you type is treated as something said
+to Saathi, and it *classifies* it. `/choice mood: happy, sad, angry` swaps in a question of your own.
+
 `cases.json` holds the labelled transcripts — English, Tamil and Hindi, shaped the way speech
 recognition hands them over. Add cases there; the labels are what Saathi's own code would need.
 
