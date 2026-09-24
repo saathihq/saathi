@@ -30,6 +30,7 @@ public final class VoiceConductor {
     private let stopSpeaking: @MainActor () -> Void
     private let onEvent: @MainActor (CompanionEvent) -> Void
     private let onScreenLook: @MainActor (_ question: String, _ answer: String) -> Void
+    private let onListening: @MainActor (_ level: Float?, _ partial: String?) -> Void
 
     private var session: (any VoiceSession)?
     private var turns: TurnCoordinator?
@@ -53,13 +54,15 @@ public final class VoiceConductor {
         perform: @escaping @Sendable (SaathiAction) async throws -> Void,
         stopSpeaking: @escaping @MainActor () -> Void,
         onEvent: @escaping @MainActor (CompanionEvent) -> Void,
-        onScreenLook: @escaping @MainActor (_ question: String, _ answer: String) -> Void = { _, _ in }
+        onScreenLook: @escaping @MainActor (_ question: String, _ answer: String) -> Void = { _, _ in },
+        onListening: @escaping @MainActor (_ level: Float?, _ partial: String?) -> Void = { _, _ in }
     ) {
         self.makeSession = makeSession
         self.perform = perform
         self.stopSpeaking = stopSpeaking
         self.onEvent = onEvent
         self.onScreenLook = onScreenLook
+        self.onListening = onListening
     }
 
     // MARK: starting
@@ -94,7 +97,9 @@ public final class VoiceConductor {
                 onStatus: { [weak self] status in Task { @MainActor in self?.onEvent(.status(status)) } },
                 onScreenLook: { [weak self] question, answer in
                     Task { @MainActor in self?.onScreenLook(question, answer) }
-                }
+                },
+                onInputLevel: { [weak self] level in Task { @MainActor in self?.onListening(level, nil) } },
+                onPartialTranscript: { [weak self] text in Task { @MainActor in self?.onListening(nil, text) } }
             )
             // Cancelling any previous start before racing a fresh one in keeps at most one
             // start in flight — see `startTask`'s doc comment.

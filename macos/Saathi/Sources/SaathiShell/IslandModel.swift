@@ -170,6 +170,9 @@ public final class IslandModel: ObservableObject {
     /// True once a permission has been granted that this process still cannot pick up. The island
     /// then offers to relaunch rather than leaving someone holding keys that do nothing.
     @Published public var needsRestart = false
+    /// "Create a skill…" is open on Home. The one moment Home takes the keyboard: a field that
+    /// cannot be typed or pasted into is not a field.
+    @Published public var isComposingSkill = false
 
     public init() {}
 

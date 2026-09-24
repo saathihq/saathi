@@ -62,8 +62,15 @@ public struct IslandHover: Equatable {
         guard busy != self.busy else { return state }
         self.busy = busy
         if busy {
-            if !hovering { state = .compact }
-            collapseAt = nil
+            if !hovering, state == .open, collapseAt != nil {
+                // The pointer has just left and the open island is living out its grace. Let it:
+                // the grace ends in `resting`, which is now the strip. Snapping to the strip here
+                // cut the grace short the instant Saathi started listening — which, since leaving
+                // the island to hold the keys is the ordinary thing to do, was most of the time.
+            } else {
+                if !hovering { state = .compact }
+                collapseAt = nil
+            }
         } else if !hovering {
             collapseAt = now + grace
         }

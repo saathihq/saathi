@@ -141,6 +141,24 @@ final class OnboardingModelTests: XCTestCase {
         XCTAssertEqual(m.step, .demo(.holdToTalk))
     }
 
+    /// Without the microphone or the recogniser nothing can ever be heard, and the only other way
+    /// on would be Skip demo — which skips the questions and the provider choice with it.
+    func testTheMicCheckIsPassableWhenNothingCanBeHeard() {
+        var noMic = model()
+        _ = walk(&noMic, [.next, .next, .next,
+            .permissionResolved(.microphone, .denied), .permissionResolved(.speechRecognition, .granted),
+            .permissionResolved(.inputMonitoring, .granted), .next])
+        XCTAssertEqual(noMic.step, .demo(.micCheck))
+        XCTAssertTrue(noMic.canContinue)
+
+        var quiet = model()
+        _ = walk(&quiet, throughPermissions + [.next])
+        XCTAssertFalse(quiet.canContinue)
+        quiet.handle(.couldNotHear)
+        XCTAssertTrue(quiet.canContinue, "a room too quiet to transcribe is not a locked door")
+        XCTAssertFalse(quiet.heardSomething)
+    }
+
     func testHoldToTalkContinuesOnlyOnceTheKeysWereHeld() {
         var m = model()
         _ = walk(&m, throughPermissions + [.next, .heard("hi"), .next])

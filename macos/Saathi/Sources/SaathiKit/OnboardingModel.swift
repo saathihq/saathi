@@ -62,6 +62,8 @@ public enum OnboardingEvent: Equatable, Sendable {
     case permissionResolved(Permission, PermissionStatus)
     /// A transcript arrived, from the mic check or a held turn.
     case heard(String)
+    /// The mic check listened and nothing came back, more than once. The step stops insisting.
+    case couldNotHear
     case keysHeld
     /// An answer to the current question, spoken or typed.
     case answered(String)
@@ -85,6 +87,8 @@ public struct OnboardingModel: Equatable, Sendable {
     public private(set) var heardSomething = false
     public private(set) var lastHeard = ""
     public private(set) var heldKeys = false
+    /// The mic check gave up: no microphone, no recogniser, or a room too quiet to transcribe.
+    public private(set) var micCheckGaveUp = false
     public private(set) var trial: TrialState = .notAsked
     public private(set) var providerChoice: ProviderChoice?
     /// The current question was answered once with something unreadable and is being asked again.
@@ -107,7 +111,12 @@ public struct OnboardingModel: Equatable, Sendable {
         switch step {
         case .welcome, .colour, .intoNotch, .allSet: return true
         case .permission, .finished: return false
-        case .demo(.micCheck): return heardSomething
+        // Hearing someone is the point, but not a toll: without the microphone or the recogniser
+        // nothing can ever be heard, and the only other way on would be Skip demo, which skips
+        // the questions and the provider choice along with it.
+        case .demo(.micCheck):
+            return heardSomething || micCheckGaveUp
+                || permissions[.microphone] != .granted || permissions[.speechRecognition] != .granted
         // Someone without Input Monitoring can never hold the keys; the step must not trap them.
         case .demo(.holdToTalk): return heldKeys || permissions[.inputMonitoring] != .granted
         case .demo(.question): return false
@@ -177,6 +186,8 @@ public struct OnboardingModel: Equatable, Sendable {
 
         case let (.demo(.micCheck), .heard(text)):
             note(heard: text)
+        case (.demo(.micCheck), .couldNotHear):
+            micCheckGaveUp = true
         case (.demo(.micCheck), .next):
             if canContinue { step = .demo(.holdToTalk) }
 

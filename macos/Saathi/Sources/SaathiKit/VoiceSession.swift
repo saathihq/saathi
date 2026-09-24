@@ -29,19 +29,29 @@ public struct VoiceSessionCallbacks: Sendable {
     /// A screen look finished: what the model asked the eyes, and what they answered — or why they
     /// could not look. The answer goes back to the model either way; this is so it can be kept.
     public var onScreenLook: (@Sendable (_ question: String, _ answer: String) -> Void)?
+    /// How loud the microphone is right now, 0…1, about twenty times a second while a turn is open.
+    /// For showing someone they are being heard; nothing is decided from it.
+    public var onInputLevel: (@Sendable (Float) -> Void)?
+    /// What has been recognised so far in the open turn. The chain lane only; the final transcript
+    /// still arrives through `onUserTranscript` when the turn ends.
+    public var onPartialTranscript: (@Sendable (String) -> Void)?
 
     public init(
         onUserTranscript: (@Sendable (String) -> Void)? = nil,
         onSaathiTranscript: (@Sendable (String) -> Void)? = nil,
         onAction: (@Sendable (SaathiAction) -> Void)? = nil,
         onStatus: (@Sendable (String) -> Void)? = nil,
-        onScreenLook: (@Sendable (String, String) -> Void)? = nil
+        onScreenLook: (@Sendable (String, String) -> Void)? = nil,
+        onInputLevel: (@Sendable (Float) -> Void)? = nil,
+        onPartialTranscript: (@Sendable (String) -> Void)? = nil
     ) {
         self.onUserTranscript = onUserTranscript
         self.onSaathiTranscript = onSaathiTranscript
         self.onAction = onAction
         self.onStatus = onStatus
         self.onScreenLook = onScreenLook
+        self.onInputLevel = onInputLevel
+        self.onPartialTranscript = onPartialTranscript
     }
 }
 

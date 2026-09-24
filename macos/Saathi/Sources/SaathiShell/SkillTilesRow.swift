@@ -17,10 +17,13 @@ import SwiftUI
 
 struct SkillTilesRow: View {
     let store: SkillLibraryStore?
+    /// Told when the composer opens and closes, so the panel can take the keyboard for exactly
+    /// that long.
+    var onComposingChanged: (Bool) -> Void = { _ in }
 
     var body: some View {
         if let store {
-            SkillTilesContent(store: store)
+            SkillTilesContent(store: store, onComposingChanged: onComposingChanged)
         } else {
             Button(action: {}) {
                 Image(systemName: "plus")
@@ -38,6 +41,7 @@ struct SkillTilesRow: View {
 
 struct SkillTilesContent: View {
     @ObservedObject var store: SkillLibraryStore
+    var onComposingChanged: (Bool) -> Void = { _ in }
     @State private var isComposing = false
     @State private var request = ""
     @FocusState private var isRequestFieldFocused: Bool
@@ -82,6 +86,11 @@ struct SkillTilesContent: View {
                     .help(error)
             }
         }
+        .onChange(of: isComposing) { onComposingChanged($0) }
+        // The view is torn down when the island collapses, taking `isComposing` with it and never
+        // calling `onChange`; without this the panel would go on holding the keyboard for a field
+        // that no longer exists.
+        .onDisappear { onComposingChanged(false) }
     }
 
     private func skillTile(_ skill: SkillFile) -> some View {

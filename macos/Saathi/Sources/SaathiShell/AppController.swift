@@ -16,21 +16,23 @@ import ServiceManagement
 @MainActor
 public final class AppController {
 
-    private var configuration: SaathiConfiguration
-    private let data: MascotData
+    var configuration: SaathiConfiguration
+    let data: MascotData
     private let color: MascotColor
     private let validator = KeyValidator()
     private var machine: CompanionStateMachine
     private var shown: CompanionState = .idle
 
     private let companion: CompanionPanel
-    private let notch: NotchPanel?
-    private let menu: MenuBarController
+    let notch: NotchPanel?
+    let menu: MenuBarController
 
-    private var speaker: ObservedSpeaker!
+    /// The voice underneath `speaker`, kept so its language and pace can follow the configuration.
+    private let systemSpeaker: SystemSpeaker
+    var speaker: ObservedSpeaker!
     private var performer: ActionPerformer!
     /// The voice session's whole life — start, turns, reconfigure, quit. See `VoiceConductor`.
-    private var voice: VoiceConductor!
+    var voice: VoiceConductor!
     private var monitor: HoldToTalkMonitor?
     /// What was said, kept: `~/.saathi/conversation.log`.
     private let conversation: ConversationLog
@@ -39,11 +41,19 @@ public final class AppController {
     private var permissionPoll: Timer?
     private var screenObserver: NSObjectProtocol?
 
+    /// First run, while it is showing. See `AppController+Onboarding.swift`.
+    var onboarding: OnboardingCoordinator?
+    var onboardingWindow: OnboardingWindowController?
+    /// During first run the voice session only listens — the mic check and the four questions
+    /// must work before any model has been chosen — except for the trial chat, which is real.
+    var listensOnly = false
+
     public init() throws {
         configuration = try ConfigurationStore.load(from: ConfigurationStore.defaultPath())
         conversation = ConversationLog(url: ConversationLog.defaultURL(beside: ConfigurationStore.defaultPath()))
         data = try MascotData.load()
-        color = MascotColor(paletteName: "blue", in: data) ?? MascotColor(hex: "#377FE6")
+        color = MascotColor(paletteName: configuration.colour ?? OnboardingModel.defaultColour, in: data)
+            ?? MascotColor(hex: "#377FE6")
         machine = CompanionStateMachine(now: CACurrentMediaTime())
         companion = CompanionPanel()
         if let screen = NSScreen.main {
@@ -53,19 +63,32 @@ public final class AppController {
         }
         menu = MenuBarController(icon: MenuBarIcon.image(data: data), installStatusItem: true)
 
-        speaker = ObservedSpeaker(SystemSpeaker()) { [weak self] speaking in
+        systemSpeaker = SystemSpeaker(settings: SpeechSettings(configuration))
+        speaker = ObservedSpeaker(systemSpeaker) { [weak self] speaking in
             Task { @MainActor in self?.handle(.speakingChanged(speaking)) }
         }
         performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
         let speaker = self.speaker!
         let performer = self.performer!
         voice = VoiceConductor(
-            makeSession: { try VoiceSessionFactory.make(configuration: $0, speaker: speaker) },
+            makeSession: { [weak self] configuration in
+                if self?.listensOnly == true {
+                    return ChainVoiceSession(configuration: configuration, speaker: speaker, thinks: false)
+                }
+                return try VoiceSessionFactory.make(configuration: configuration, speaker: speaker)
+            },
             perform: { try await performer.perform($0) },
             stopSpeaking: { speaker.stop() },
             onEvent: { [weak self] in self?.handle($0) },
             onScreenLook: { [weak self] question, answer in
                 self?.conversation.append(.look(question: question, answer: answer))
+            },
+            // Only first run draws these; the rest of the app has the face for that.
+            // And only while a turn is open: the tap goes on firing for a moment after the turn is
+            // closed, and a late buffer would leave the bars standing over a closed microphone.
+            onListening: { [weak self] level, partial in
+                guard let self, self.voice.isTurnOpen else { return }
+                self.onboarding?.listening(level: level, partial: partial)
             })
         wireMenu()
         wireNotch()
@@ -77,7 +100,13 @@ public final class AppController {
         menu.setStartAtLogin(SMAppService.mainApp.status == .enabled)
         render(force: true)
         startTicking()
-        voice.start(with: configuration)
+        if Self.shouldOnboard(configuration) {
+            // No voice session yet: starting one asks macOS for speech recognition, and first run
+            // asks for that itself, one permission at a time, with the reason said first.
+            beginOnboarding(isFirstRun: true)
+        } else {
+            voice.start(with: configuration)
+        }
         startHoldToTalkIfPossible()
         refreshPermissions()
         observeScreenChanges()
@@ -106,7 +135,20 @@ public final class AppController {
 
     // MARK: events
 
-    private func handle(_ event: CompanionEvent) {
+    func handle(_ event: CompanionEvent) {
+        // First run listens through the same session and the same keys as everything else.
+        if let onboarding {
+            switch event {
+            case let .userSpoke(text): onboarding.heard(text)
+            case .keysHeld: onboarding.keysHeld()
+            case let .status(text) where text.lowercased().hasPrefix("did not catch"): onboarding.heardNothing()
+            case .keysReleased: onboarding.turnEnded()
+            // A turn that could not open: no microphone, no recogniser. The mic check must hear
+            // about it, or it shows "Listening…" with nothing listening and never unlocks.
+            case .failure: onboarding.listeningFailed()
+            default: break
+            }
+        }
         record(event)
         machine.apply(event, now: CACurrentMediaTime())
         render()
@@ -157,19 +199,33 @@ public final class AppController {
         ticker = timer
     }
 
+    /// `scripted` is first run: its lines are written in English, so they are read by an English
+    /// voice whatever language was just chosen — a Tamil synthesiser reading English sentences is
+    /// the same noise as the reverse. The pace still follows at once.
+    func applySpeechSettings(scripted: Bool = false) {
+        systemSpeaker.apply(Self.speechSettings(for: configuration, scripted: scripted))
+    }
+
+    static func speechSettings(for configuration: SaathiConfiguration, scripted: Bool) -> SpeechSettings {
+        var settings = SpeechSettings(configuration)
+        if scripted { settings.language = "en-US" }
+        return settings
+    }
+
     // MARK: voice
 
     /// Swaps in a new configuration without a relaunch. The teardown order lives in
     /// `VoiceConductor.reconfigure`; a second Save while one is under way does nothing at all.
-    private func reconfigure(_ updated: SaathiConfiguration) async {
+    func reconfigure(_ updated: SaathiConfiguration) async {
         guard await voice.reconfigure(to: updated) else { return }
         configuration = updated
+        systemSpeaker.apply(SpeechSettings(updated))
         applyConfigurationToIsland()
     }
 
     /// Re-fills everything the island says about where Saathi thinks. Called at startup and after
     /// every reconfigure, so the Home tab can never describe a provider that is no longer in use.
-    private func applyConfigurationToIsland() {
+    func applyConfigurationToIsland() {
         guard let notch else { return }
         notch.model.providerTitle = Self.providerTitle(for: configuration)
         notch.model.privacyLine = Self.privacyLine(for: configuration)
@@ -208,7 +264,7 @@ public final class AppController {
     /// from `start()`, from the Talk item (a granted-while-running permission takes effect there
     /// too), and from the Fix permissions poll below — so the tap is retried wherever the grant
     /// might land, with no relaunch needed.
-    private func startHoldToTalkIfPossible() {
+    func startHoldToTalkIfPossible() {
         guard monitor == nil, HoldToTalkMonitor.isPermitted() else { return }
         let monitor = HoldToTalkMonitor { [weak self] event in
             Task { @MainActor in
@@ -228,7 +284,7 @@ public final class AppController {
         }
     }
 
-    private func refreshPermissions() {
+    func refreshPermissions() {
         let statuses = Permission.allCases.map { ($0, Permissions.status(of: $0)) }
         notch?.model.permissions = Dictionary(uniqueKeysWithValues: statuses)
         menu.setPermissionsNeeded(statuses.filter { $0.0.isRequired && $0.1 != .granted }.map { $0.0.title })
@@ -250,6 +306,7 @@ public final class AppController {
             self.startHoldToTalkIfPossible()   // a granted-while-running permission takes effect here too
             self.voice.toggleTalk()
         }
+        menu.onRunOnboarding = { [weak self] in self?.beginOnboarding(isFirstRun: false) }
         menu.onToggleCompanion = { [weak self] visible in self?.setCompanionVisible(visible) }
         menu.onToggleStartAtLogin = { [weak self] enabled in
             do {
