@@ -6,6 +6,7 @@
 //  "uh, Asha.", or "call me Ash". These pin what is kept.
 //
 
+import AVFoundation
 import XCTest
 import SaathiContract
 @testable import SaathiKit
@@ -97,5 +98,95 @@ final class OnboardingAnswersTests: XCTestCase {
 
     func testATagSaidOrTypedExactlyIsAccepted() {
         XCTAssertEqual(AnswerParser.language(from: "ta-IN", supported: ["en-US", "ta-IN"]), "ta-IN")
+    }
+}
+
+final class OnboardingLanguagesTests: XCTestCase {
+
+    func testOneEntryPerLanguageTheMachinesRegionWinsAndItsLanguageLeads() {
+        let entries = OnboardingLanguages.entries(
+            from: ["en-US", "en-GB", "en-IN", "hi-IN", "ta-IN", "ko-KR", "fr-FR", "fr-CA"], machine: "en-IN")
+        XCTAssertEqual(entries.first, .init(tag: "en-IN", name: "English"))
+        XCTAssertEqual(entries.map(\.name), ["English", "French", "Hindi", "Korean", "Tamil"])
+        XCTAssertEqual(entries.first { $0.name == "French" }?.tag, "fr-CA", "no machine region: the first alphabetically")
+    }
+
+    func testAMachineWhoseLanguageIsNotSupportedLeadsWithNothingSpecial() {
+        let entries = OnboardingLanguages.entries(from: ["en-US", "hi-IN"], machine: "ml-IN")
+        XCTAssertEqual(entries.map(\.tag), ["en-US", "hi-IN"])
+    }
+
+    func testNoRecogniserAtAllStillOffersSomething() {
+        XCTAssertEqual(OnboardingLanguages.entries(from: [], machine: "en-US"), [.init(tag: "en-US", name: "English")])
+    }
+}
+
+
+final class InputLevelTests: XCTestCase {
+
+    /// Decibels, not raw amplitude: on a linear scale ordinary speech sits in the bottom tenth and
+    /// the bars barely move, which reads as "it cannot hear me".
+    func testOrdinarySpeechMovesTheBarsAndSilenceDoesNot() {
+        XCTAssertEqual(InputLevel.normalised(rms: 0), 0)
+        XCTAssertEqual(InputLevel.normalised(rms: 0.001), 0, "room noise, -60 dB")
+        XCTAssertGreaterThan(InputLevel.normalised(rms: 0.05), 0.5, "speech at arm's length, about -26 dB")
+        XCTAssertEqual(InputLevel.normalised(rms: 0.5), 1, "close and loud is simply full")
+        XCTAssertEqual(InputLevel.normalised(rms: .nan), 0)
+        XCTAssertEqual(InputLevel.normalised(rms: -1), 0)
+    }
+
+    func testTheLevelOfABufferIsItsFirstChannelsRMS() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+        buffer.frameLength = 480
+        XCTAssertEqual(InputLevel.level(of: buffer), 0, "silence")
+        let channel = try XCTUnwrap(buffer.floatChannelData?[0])
+        for index in 0..<480 { channel[index] = index.isMultiple(of: 2) ? 0.1 : -0.1 }
+        XCTAssertEqual(InputLevel.level(of: buffer), InputLevel.normalised(rms: 0.1), accuracy: 0.0001)
+        buffer.frameLength = 0
+        XCTAssertEqual(InputLevel.level(of: buffer), 0)
+    }
+}
+
+final class LearnerProfileTests: XCTestCase {
+
+    /// An install that never ran first run gets exactly the prompt it had before.
+    func testNothingLearnedMeansNothingAdded() {
+        XCTAssertEqual(LearnerProfile.paragraph(for: SaathiConfiguration()), "")
+        XCTAssertEqual(
+            RealtimeVoiceSession.instructions(for: SaathiConfiguration(language: "en")),
+            RealtimeVoiceSession.instructions(language: "en"))
+    }
+
+    func testWhatFirstRunLearnedReachesTheModel() {
+        let configuration = SaathiConfiguration(
+            language: "ta", name: "Asha", tone: .calm, pace: .slow, firstGoal: "the tabla")
+        let prompt = RealtimeVoiceSession.instructions(for: configuration)
+        XCTAssertTrue(prompt.hasPrefix(RealtimeVoiceSession.instructions(language: "ta")), "added to, not replaced")
+        XCTAssertTrue(prompt.contains("called Asha"))
+        XCTAssertTrue(prompt.contains("\"the tabla\""))
+        XCTAssertTrue(prompt.contains("calm"))
+        XCTAssertTrue(prompt.contains("Go slowly"))
+    }
+
+    func testEachMannerSaysSomethingDifferentAndNormalPaceSaysNothing() {
+        XCTAssertNil(LearnerProfile.manner(tone: nil, pace: nil))
+        XCTAssertNil(LearnerProfile.manner(tone: nil, pace: .normal))
+        let calm = LearnerProfile.manner(tone: .calm, pace: .slow)
+        let warm = LearnerProfile.manner(tone: .encouraging, pace: .normal)
+        let plain = LearnerProfile.manner(tone: .neutral, pace: .normal)
+        XCTAssertEqual(Set([calm, warm, plain]).count, 3)
+        XCTAssertFalse(warm?.contains("slowly") ?? true)
+    }
+
+    /// A transcript can be a paragraph, and it is the learner's text going into a system prompt:
+    /// one line, no quotes to close the sentence it sits in, and clipped.
+    func testTheLearnersWordsAreFlattenedAndClipped() {
+        XCTAssertEqual(LearnerProfile.tidied("  the\n tabla  "), "the tabla")
+        XCTAssertEqual(LearnerProfile.tidied("say \"hi\""), "say 'hi'")
+        XCTAssertNil(LearnerProfile.tidied("   "))
+        XCTAssertNil(LearnerProfile.tidied(nil))
+        let long = LearnerProfile.tidied(String(repeating: "a", count: 900))
+        XCTAssertEqual(long?.count, LearnerProfile.maxFieldLength + 1)
     }
 }

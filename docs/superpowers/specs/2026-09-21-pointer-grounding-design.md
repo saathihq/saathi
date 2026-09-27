@@ -69,6 +69,12 @@ from one. `ProviderReport` wording is unchanged: it already says an image of the
   `AXManualAccessibility` on the app element. This build does not set it: it changes another
   process's behaviour and costs that process CPU, and whether it is needed is a thing to measure
   with the user present. If Spotify rows come back empty, that is the next change.
+  *Tried on the night of 2026-09-22 and not answered:* the screen was locked, and with a locked
+  screen every app's windows — Chrome's included — read as a three-node stub, so nothing measured
+  then says anything about Spotify. `macos/Saathi/scripts/ax-probe.swift` makes it one command with
+  the screen unlocked: run it plain, then with `on`, and compare the element counts. (Setting the
+  attribute was refused outright under the lock — `-25205`, attribute unsupported — which may or may
+  not survive unlocking; CEF, which Spotify uses, is not Electron.)
 - The grant is per code signature, like Input Monitoring: a Developer ID build keeps it, an ad-hoc
   build loses it on every rebuild.
 

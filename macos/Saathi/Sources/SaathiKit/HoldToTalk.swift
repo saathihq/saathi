@@ -60,6 +60,116 @@ public struct HoldToTalkTracker: Equatable, Sendable {
     }
 }
 
+/// What the four shortcuts on the Home panel ask for.
+public enum ShortcutEvent: Equatable, Sendable {
+    /// Talk: control and option held.
+    case talkBegan, talkEnded
+    /// Dictate: fn and control held. `dictateEnded` types what was said; `dictateCancelled` is a
+    /// press too short to have been speech — the first half of a Hands-free double tap, usually.
+    case dictateBegan, dictateEnded, dictateCancelled
+    /// Text: control tapped twice on its own.
+    case textRequested
+    /// Hands-free: fn and control tapped twice.
+    case handsFreeToggled
+}
+
+/// All four shortcuts, from modifier changes, ordinary key presses and the time. Pure, so every
+/// timing rule is a test rather than something found by pressing keys.
+///
+/// A tap is a press shorter than `tapLimit` with nothing else in it; a double tap is a second tap
+/// starting within `doubleTapWindow` of the first ending. Any ordinary key while control is down
+/// spoils the tap, so control-C is never a Text tap, and another modifier joining does too.
+public struct ShortcutTracker: Equatable, Sendable {
+    public static let tapLimit: TimeInterval = 0.3
+    public static let doubleTapWindow: TimeInterval = 0.4
+
+    private var talk = HoldToTalkTracker(combination: .controlOption)
+    private var dictateSince: TimeInterval?
+    private var lastDictateTap: TimeInterval?
+    /// Set by a Hands-free toggle, so its second press does not also start a dictation.
+    private var dictateSpent = false
+    private var controlSince: TimeInterval?
+    private var controlSpoiled = false
+    private var lastControlTap: TimeInterval?
+
+    public init() {}
+
+    public var isTalking: Bool { talk.isHeld }
+    public var isDictating: Bool { dictateSince != nil }
+
+    public mutating func keyPressed() {
+        controlSpoiled = true
+        lastControlTap = nil
+        lastDictateTap = nil
+    }
+
+    public mutating func update(flags: CGEventFlags, at time: TimeInterval) -> [ShortcutEvent] {
+        var events: [ShortcutEvent] = []
+        let control = flags.contains(.maskControl)
+        let option = flags.contains(.maskAlternate)
+        let fn = flags.contains(.maskSecondaryFn)
+        let others = flags.contains(.maskCommand) || flags.contains(.maskShift)
+
+        // Talk first: it is the shortcut people already use, and it wins over a dictation that
+        // was starting on the same keys.
+        switch talk.update(flags: flags) {
+        case .began?:
+            if dictateSince != nil { dictateSince = nil; events.append(.dictateCancelled) }
+            events.append(.talkBegan)
+        case .ended?:
+            events.append(.talkEnded)
+        case nil:
+            break
+        }
+
+        // Dictate, and Hands-free as its double tap.
+        let dictateChord = control && fn && !option && !talk.isHeld
+        if dictateChord, dictateSince == nil, !dictateSpent {
+            if let last = lastDictateTap, time - last <= Self.doubleTapWindow {
+                lastDictateTap = nil
+                dictateSpent = true
+                events.append(.handsFreeToggled)
+            } else {
+                dictateSince = time
+                events.append(.dictateBegan)
+            }
+        } else if !dictateChord, let since = dictateSince {
+            dictateSince = nil
+            if time - since < Self.tapLimit {
+                lastDictateTap = time
+                events.append(.dictateCancelled)
+            } else {
+                lastDictateTap = nil
+                events.append(.dictateEnded)
+            }
+        }
+        if !control && !fn { dictateSpent = false }
+
+        // Text: control on its own, tapped twice.
+        if control {
+            if controlSince == nil {
+                controlSince = time
+                controlSpoiled = option || fn || others
+            } else if option || fn || others {
+                controlSpoiled = true
+            }
+        } else if let since = controlSince {
+            controlSince = nil
+            if !controlSpoiled, time - since < Self.tapLimit {
+                if let last = lastControlTap, time - last <= Self.doubleTapWindow + Self.tapLimit {
+                    lastControlTap = nil
+                    events.append(.textRequested)
+                } else {
+                    lastControlTap = time
+                }
+            } else {
+                lastControlTap = nil
+            }
+        }
+        return events
+    }
+}
+
 public enum HoldToTalkError: Error, Equatable, CustomStringConvertible {
     case notPermitted
     case tapFailed
@@ -95,14 +205,13 @@ public final class HoldToTalkMonitor {
         CGRequestListenEventAccess()
     }
 
-    private var tracker: HoldToTalkTracker
-    private let onEvent: (HoldToTalkEvent) -> Void
+    private var tracker = ShortcutTracker()
+    private let onEvent: (ShortcutEvent) -> Void
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var relay: UnsafeMutableRawPointer?
 
-    public init(combination: HoldToTalkCombination = .controlOption, onEvent: @escaping (HoldToTalkEvent) -> Void) {
-        self.tracker = HoldToTalkTracker(combination: combination)
+    public init(onEvent: @escaping (ShortcutEvent) -> Void) {
         self.onEvent = onEvent
     }
 
@@ -111,7 +220,8 @@ public final class HoldToTalkMonitor {
         guard tap == nil else { return }
         guard Self.isPermitted() else { throw HoldToTalkError.notPermitted }
 
-        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+        // Key presses too, only so a control-C spoils a control tap; nothing is read from them.
+        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue) | CGEventMask(1 << CGEventType.keyDown.rawValue)
         let refcon = Unmanaged.passRetained(TapRelay(self)).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -156,7 +266,11 @@ public final class HoldToTalkMonitor {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
-        if let change = tracker.update(flags: event.flags) {
+        if type == .keyDown {
+            tracker.keyPressed()
+            return
+        }
+        for change in tracker.update(flags: event.flags, at: ProcessInfo.processInfo.systemUptime) {
             onEvent(change)
         }
     }

@@ -498,6 +498,27 @@ final class RealtimeVoiceNameTests: XCTestCase {
         XCTAssertTrue(instructions.contains("Call look_at_screen first, every time, before answering"))
     }
 
+    /// An English speaker was answered in Italian, Japanese and Portuguese on clean audio. One
+    /// language, from Settings, and nothing in the conversation moves it.
+    func testTheInstructionsHoldOneLanguageWhateverTheConversationDoes() {
+        let instructions = RealtimeVoiceSession.instructions(language: "en")
+        XCTAssertTrue(instructions.contains("Always speak and write in English (en)"), instructions)
+        XCTAssertTrue(instructions.contains("whatever language any earlier reply in this conversation was in"))
+        XCTAssertFalse(instructions.contains("may answer in that language"))
+        XCTAssertTrue(instructions.contains("say in English that you did not catch that"))
+    }
+
+    func testTheTranscriptIsPinnedToTheSameLanguage() throws {
+        XCTAssertEqual(RealtimeVoiceSession.transcriptionLanguage("en-US"), "en")
+        XCTAssertEqual(RealtimeVoiceSession.transcriptionLanguage("hi"), "hi")
+        let session = RealtimeVoiceSession(configuration: SaathiConfiguration(provider: .openai, openaiKey: "sk-o"))
+        let sessionObject = try XCTUnwrap(session.sessionUpdateForTesting()["session"] as? [String: Any])
+        let audio = try XCTUnwrap(sessionObject["audio"] as? [String: Any])
+        let input = try XCTUnwrap(audio["input"] as? [String: Any])
+        let transcription = try XCTUnwrap(input["transcription"] as? [String: Any])
+        XCTAssertEqual(transcription["language"] as? String, "en", "unset is English, not this Mac's language")
+    }
+
     /// Playing a reply restarts the audio engine, tap and all. The microphone light stayed on for
     /// as long as Saathi ran because nothing paused it afterwards.
     func testTheMicrophoneIsReleasedOnceTheReplyHasPlayedUnlessATurnIsOpen() {
@@ -567,4 +588,111 @@ final class VendorKeyPlumbingTests: XCTestCase {
 
 private struct SilentSpeaker: Speaker {
     func speak(_ text: String, tone: Tone) async {}
+}
+
+// MARK: - Why the realtime socket went away
+
+final class RealtimeDisconnectReasonTests: XCTestCase {
+
+    /// A refused handshake arrives as "bad server response". Pressing the keys afterwards said only
+    /// "not connected", which sent a person with a revoked key looking at their network.
+    func testARefusedHandshakeNamesTheKey() {
+        let reason = RealtimeVoiceSession.disconnectReason(
+            handshakeStatus: 401, error: "bad server response", host: "api.openai.com")
+        XCTAssertTrue(reason.contains("rejected the API key"), reason)
+        XCTAssertTrue(reason.contains("api.openai.com"), reason)
+    }
+
+    func testOtherRefusalsSayTheStatusAndPlainDropsKeepTheirError() {
+        XCTAssertTrue(RealtimeVoiceSession.disconnectReason(
+            handshakeStatus: 429, error: "x", host: nil).contains("limit"))
+        XCTAssertTrue(RealtimeVoiceSession.disconnectReason(
+            handshakeStatus: 500, error: "x", host: "h").contains("(500)"))
+        XCTAssertEqual(RealtimeVoiceSession.disconnectReason(
+            handshakeStatus: 101, error: "socket closed", host: "h"), "socket closed")
+        XCTAssertEqual(RealtimeVoiceSession.disconnectReason(
+            handshakeStatus: nil, error: "offline", host: "h"), "offline")
+    }
+}
+
+// MARK: - Keeping the realtime socket alive
+
+final class RealtimeReconnectTests: XCTestCase {
+
+    /// Saathi ran for two and a half hours on one socket; OpenAI caps a session at 60 minutes, and
+    /// the next press failed with "send failed". A socket that old is replaced before it is used.
+    func testASocketNearOpenAIsHourLimitIsReplaced() {
+        let now = Date()
+        XCTAssertFalse(RealtimeVoiceSession.isTooOld(connectedAt: now.addingTimeInterval(-10 * 60), now: now))
+        XCTAssertTrue(RealtimeVoiceSession.isTooOld(connectedAt: now.addingTimeInterval(-50 * 60), now: now))
+        XCTAssertTrue(RealtimeVoiceSession.isTooOld(connectedAt: now.addingTimeInterval(-150 * 60), now: now))
+        XCTAssertTrue(RealtimeVoiceSession.isTooOld(connectedAt: nil, now: now), "never connected")
+    }
+
+    /// A press released before any audio was captured must not be committed and answered: the
+    /// model then replies to nothing, and in OpenClicky it invented a task.
+    func testATurnWithoutAudioIsNeverSent() {
+        XCTAssertFalse(RealtimeVoiceSession.hasEnoughAudioForATurn(pcm16Bytes: 0))
+        XCTAssertFalse(RealtimeVoiceSession.hasEnoughAudioForATurn(pcm16Bytes: 4_799))
+        XCTAssertTrue(RealtimeVoiceSession.hasEnoughAudioForATurn(pcm16Bytes: 4_800))
+    }
+
+    /// Sleep can leave a socket that still looks open. One the server has been quiet on for a
+    /// while is pinged before it is spoken into; one heard from just now is not, so a press in
+    /// the middle of a conversation costs nothing.
+    func testAQuietSocketIsCheckedAndABusyOneIsTrusted() {
+        let now = Date()
+        XCTAssertFalse(RealtimeVoiceSession.needsPing(lastHeard: now.addingTimeInterval(-5), now: now))
+        XCTAssertTrue(RealtimeVoiceSession.needsPing(lastHeard: now.addingTimeInterval(-90), now: now))
+        XCTAssertTrue(RealtimeVoiceSession.needsPing(lastHeard: nil, now: now))
+    }
+}
+
+// MARK: - Hands-free
+
+final class RealtimeHandsFreeTests: XCTestCase {
+
+    /// Hands-free changes only the turn detection: the server listens for the end of speech and
+    /// answers; switching it off hands turns back to the keys.
+    func testHandsFreeHandsTurnsToTheServerAndBack() throws {
+        let on = try XCTUnwrap(RealtimeVoiceSession.turnDetectionUpdate(serverDecides: true)["session"] as? [String: Any])
+        let onInput = try XCTUnwrap((on["audio"] as? [String: Any])?["input"] as? [String: Any])
+        XCTAssertEqual((onInput["turn_detection"] as? [String: Any])?["type"] as? String, "server_vad")
+        XCTAssertEqual(on["type"] as? String, "realtime")
+        XCTAssertNil(on["instructions"], "the rest of the session is left as it was")
+
+        let off = try XCTUnwrap(RealtimeVoiceSession.turnDetectionUpdate(serverDecides: false)["session"] as? [String: Any])
+        let offInput = try XCTUnwrap((off["audio"] as? [String: Any])?["input"] as? [String: Any])
+        XCTAssertTrue(offInput["turn_detection"] is NSNull)
+    }
+
+    /// The chain lane has no socket to listen on; it says so rather than doing nothing.
+    func testTheChainLaneRefusesHandsFreeOutLoud() async {
+        let session = ChainVoiceSession(configuration: SaathiConfiguration(provider: .local), speaker: SilentSpeaker())
+        do {
+            try await session.setHandsFree(true)
+            XCTFail("expected a refusal")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Hands-free needs"), error.localizedDescription)
+        }
+        try? await session.setHandsFree(false)
+    }
+}
+
+// MARK: - Dictation through the shared microphone
+
+final class SharedFramesTests: XCTestCase {
+
+    /// Dictation hears the realtime session's frames: PCM16 bytes back into a buffer, sample for
+    /// sample, with a loudness a silent microphone can be told apart by.
+    func testSharedFramesBecomeABufferWithTheirLoudness() throws {
+        let samples: [Int16] = [0, 16384, -32768, 100]
+        let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        let buffer = try XCTUnwrap(SharedFrames.buffer(data))
+        XCTAssertEqual(buffer.frameLength, 4)
+        XCTAssertEqual(buffer.format.sampleRate, VoiceAudioEngine.sampleRate)
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: buffer.int16ChannelData![0], count: 4)), samples)
+        XCTAssertEqual(SharedFrames.peak(buffer), 1, accuracy: 0.0001)
+        XCTAssertNil(SharedFrames.buffer(Data()), "no bytes, no buffer")
+    }
 }

@@ -245,6 +245,38 @@ public enum PointerGrounding {
         return (value as! AXUIElement)
     }
 
+    /// The text the learner has highlighted in the focused app, when there is any: "what does this
+    /// line mean" with a word selected is about the word, and pixels cannot say what is selected
+    /// as reliably as the app can. Nil without the Accessibility grant, in a password field, or
+    /// when nothing is selected.
+    public static func selectedText() -> String? {
+        guard AXIsProcessTrusted() else { return nil }
+        // The front app first: asking the system-wide element for focus fails outright
+        // (kAXErrorCannotComplete) from Terminal, which answers fine when asked itself.
+        var candidates: [AXUIElement] = []
+        if let front = NSWorkspace.shared.frontmostApplication {
+            candidates.append(AXUIElementCreateApplication(front.processIdentifier))
+        }
+        candidates.append(AXUIElementCreateSystemWide())
+        var found: AXUIElement?
+        for candidate in candidates {
+            AXUIElementSetMessagingTimeout(candidate, 0.25)
+            if let element = copyElement(candidate, kAXFocusedUIElementAttribute) { found = element; break }
+        }
+        guard let focused = found else { return nil }
+        AXUIElementSetMessagingTimeout(focused, 0.25)
+        guard !secureRoles.contains(copyString(focused, kAXRoleAttribute) ?? ""),
+              let selected = copyString(focused, kAXSelectedTextAttribute) else { return nil }
+        return selection(selected)
+    }
+
+    /// Whitespace collapsed, and a longer cap than a caption's: a selected paragraph is the point.
+    static func selection(_ text: String) -> String? {
+        let collapsed = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
+        guard !collapsed.isEmpty else { return nil }
+        return collapsed.count > 600 ? String(collapsed.prefix(600)) + "…" : collapsed
+    }
+
     private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {
         guard let string = copyValue(element, attribute) as? String, !string.isEmpty else { return nil }
         return string

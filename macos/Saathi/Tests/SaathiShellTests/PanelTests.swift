@@ -394,4 +394,14 @@ final class PanelTests: XCTestCase {
         XCTAssertEqual(panel.model.state, .speaking)
         XCTAssertEqual(panel.word, "Speaking")
     }
+
+    /// Home takes the keyboard for exactly as long as "Create a skill…" is open, and never just
+    /// for being looked at.
+    func testTheIslandTakesTheKeyboardForSetupAndForTheSkillComposerOnly() {
+        XCTAssertTrue(NotchPanel.wantsKeyboard(state: .open, tab: .setup, isComposingSkill: false))
+        XCTAssertTrue(NotchPanel.wantsKeyboard(state: .open, tab: .home, isComposingSkill: true))
+        XCTAssertFalse(NotchPanel.wantsKeyboard(state: .open, tab: .home, isComposingSkill: false))
+        XCTAssertFalse(NotchPanel.wantsKeyboard(state: .compact, tab: .home, isComposingSkill: true), "a strip has no field")
+        XCTAssertFalse(NotchPanel.wantsKeyboard(state: .collapsed, tab: .setup, isComposingSkill: false))
+    }
 }

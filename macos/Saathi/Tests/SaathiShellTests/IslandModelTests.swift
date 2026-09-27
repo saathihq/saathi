@@ -382,15 +382,11 @@ final class SetupPresentationTests: XCTestCase {
 
     // MARK: the key rows
 
-    /// A saved key is one line, not a field and a Check: the field comes back only when the row is
-    /// reopened for a new key. Everything else — empty, being typed, checked either way — shows it.
-    func testASavedKeyRowIsCollapsedUntilReopened() {
-        XCTAssertFalse(IslandSetupView.showsKeyField(.saved(masked: "sk-…u6MA"), reopened: false))
-        XCTAssertTrue(IslandSetupView.showsKeyField(.saved(masked: "sk-…u6MA"), reopened: true))
-        XCTAssertTrue(IslandSetupView.showsKeyField(.empty, reopened: false))
-        XCTAssertTrue(IslandSetupView.showsKeyField(.editing, reopened: false))
-        XCTAssertTrue(IslandSetupView.showsKeyField(.checking, reopened: false))
-        XCTAssertTrue(IslandSetupView.showsKeyField(.checked(.valid), reopened: false))
+    /// One field per key, always on show; a saved key is its placeholder, so replacing it is a
+    /// paste and one Save.
+    func testASavedKeyIsTheFieldsPlaceholder() {
+        XCTAssertEqual(IslandSetupView.placeholder(for: .saved(masked: "sk-…u6MA")), "sk-…u6MA — paste to replace")
+        XCTAssertEqual(IslandSetupView.placeholder(for: .empty), "paste a key")
     }
 
     func testTheProviderTitleReadsAsAProviderAndAModel() {
@@ -434,6 +430,48 @@ final class SetupPresentationTests: XCTestCase {
     func testAnEmptyFieldFallsBackToTheStoredKey() {
         XCTAssertEqual(AppController.effectiveKey(field: "", stored: "sk-existing"), "sk-existing")
         XCTAssertEqual(AppController.effectiveKey(field: "   ", stored: "sk-existing"), "sk-existing")
+    }
+
+    /// Regression: a new key typed over a saved one and never Checked left Save disabled, the old
+    /// rejected key on disk, and the voice failing with "not connected". Save now checks it itself.
+    func testATypedKeyWithoutAnAcceptedVerdictNeedsACheckBeforeSave() {
+        XCTAssertEqual(AppController.keysNeedingCheck(
+            openAIField: "sk-new", anthropicField: "",
+            openAIState: .editing, anthropicState: .empty), [.openai])
+        XCTAssertEqual(AppController.keysNeedingCheck(
+            openAIField: "sk-new", anthropicField: "",
+            openAIState: .saved(masked: "…old1"), anthropicState: .empty), [.openai],
+            "a reopened row still carries the old key's verdict; it says nothing about the new text")
+        XCTAssertEqual(AppController.keysNeedingCheck(
+            openAIField: "sk-new", anthropicField: "sk-ant",
+            openAIState: .checked(.rejected("no")), anthropicState: .editing), [.openai, .anthropic])
+    }
+
+    /// Regression: a new key was checked ("works"), the island collapsed and took the text with it,
+    /// and Save wrote the old, rejected key from disk back under the new key's green tick.
+    func testAWorksVerdictIsOnlyAboutTheTextItChecked() {
+        let saved = KeyFieldState.saved(masked: "…old1")
+        XCTAssertEqual(AppController.verdict(.checked(.valid), forField: "", seeded: saved), saved)
+        XCTAssertEqual(AppController.verdict(.checked(.valid), forField: "", seeded: .empty), .empty)
+        XCTAssertEqual(AppController.verdict(.editing, forField: " ", seeded: saved), saved)
+        XCTAssertEqual(AppController.verdict(.checked(.valid), forField: "sk-new", seeded: saved), .checked(.valid))
+
+        // With no key on disk, a leftover "works" over an empty field must not promise a plan.
+        let decision = AppController.setupDecision(
+            openAIField: "", anthropicField: "",
+            openAIState: .checked(.valid), anthropicState: .empty,
+            configuration: SaathiConfiguration())
+        XCTAssertEqual(decision.openAIKey, "")
+        XCTAssertNotEqual(decision.plan.provider, .openai)
+    }
+
+    func testAcceptedCheckingAndEmptyFieldsNeedNoCheck() {
+        XCTAssertEqual(AppController.keysNeedingCheck(
+            openAIField: "sk-new", anthropicField: "sk-ant",
+            openAIState: .checked(.valid), anthropicState: .checking), [])
+        XCTAssertEqual(AppController.keysNeedingCheck(
+            openAIField: "  ", anthropicField: "",
+            openAIState: .saved(masked: "…old1"), anthropicState: .empty), [])
     }
 
     func testANonEmptyFieldWinsOverAnyStoredKey() {

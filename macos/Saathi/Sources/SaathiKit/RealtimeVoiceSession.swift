@@ -22,7 +22,7 @@
 import Foundation
 import SaathiContract
 
-public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Sendable {
+public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophone, @unchecked Sendable {
 
     public let lane: VoiceLane = .realtime
     public let speaksForItself = true
@@ -49,6 +49,12 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         private var _callbacks = VoiceSessionCallbacks()
         private var _socket: URLSessionWebSocketTask?
         private var _connected = false
+        private var _disconnectReason: String?
+        private var _connectedAt: Date?
+        private var _handsFree = false
+        private var _sharer: (@Sendable (Data) -> Void)?
+        private var _forwardingBeforeSharing = false
+        private var _lastHeard: Date?
         private var _forwarding = false
         private var _responseInProgress = false
         private var _activeResponseId: String?
@@ -57,6 +63,8 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         private var _pendingLooks = 0
         private var _playbackActive = false
         private var _assistantBuffer = ""
+        private var _turnAudio = Data()
+        private var _turnAudioBytes = 0
 
         func withLock<T>(_ body: (SessionState) -> T) -> T {
             lock.lock(); defer { lock.unlock() }
@@ -74,6 +82,32 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         var connected: Bool {
             get { withLock { $0._connected } }
             set { withLock { $0._connected = newValue } as Void }
+        }
+        var sharer: (@Sendable (Data) -> Void)? {
+            get { withLock { $0._sharer } }
+            set { withLock { $0._sharer = newValue } as Void }
+        }
+        var forwardingBeforeSharing: Bool {
+            get { withLock { $0._forwardingBeforeSharing } }
+            set { withLock { $0._forwardingBeforeSharing = newValue } as Void }
+        }
+        var handsFree: Bool {
+            get { withLock { $0._handsFree } }
+            set { withLock { $0._handsFree = newValue } as Void }
+        }
+        /// When this socket was opened, and when the server was last heard from on it.
+        var connectedAt: Date? {
+            get { withLock { $0._connectedAt } }
+            set { withLock { $0._connectedAt = newValue } as Void }
+        }
+        var lastHeard: Date? {
+            get { withLock { $0._lastHeard } }
+            set { withLock { $0._lastHeard = newValue } as Void }
+        }
+        /// Why the socket went away, so a later press can say so rather than just "not connected".
+        var disconnectReason: String? {
+            get { withLock { $0._disconnectReason } }
+            set { withLock { $0._disconnectReason = newValue } as Void }
         }
         var forwarding: Bool {
             get { withLock { $0._forwarding } }
@@ -107,6 +141,10 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         }
         func markCancelled(_ id: String) { withLock { _ = $0._cancelledResponseIds.insert(id) } }
         func wasCancelled(_ id: String) -> Bool { withLock { $0._cancelledResponseIds.contains(id) } }
+        func countTurnAudio(_ bytes: Int) { withLock { $0._turnAudioBytes += bytes } as Void }
+        func takeTurnAudioBytes() -> Int { withLock { let bytes = $0._turnAudioBytes; $0._turnAudioBytes = 0; return bytes } }
+        func appendTurnAudio(_ data: Data) { withLock { $0._turnAudio.append(data) } as Void }
+        func takeTurnAudio() -> Data { withLock { let d = $0._turnAudio; $0._turnAudio = Data(); return d } }
         func appendAssistant(_ text: String) { withLock { $0._assistantBuffer += text } as Void }
         func takeAssistantBuffer() -> String {
             withLock { box in
@@ -151,7 +189,32 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
 
     public func start(callbacks: VoiceSessionCallbacks) async throws {
         state.callbacks = callbacks
+        let connection = try await openSocket()
 
+        // Build the audio graph once here and release it right away in push-to-talk, so key-down is
+        // a fast engine restart rather than a full CoreAudio setup.
+        engine.setCallbacks(
+            onMicrophoneFrame: { [weak self] data, _ in self?.forwardMicrophone(data) },
+            // Playing a reply restarts the engine, microphone tap included; without this the
+            // engine stayed up after the reply and the orange microphone light stayed on for as
+            // long as Saathi ran. Pause it again once the reply has been played, unless a turn has
+            // opened meanwhile — then the microphone is exactly what is wanted.
+            onPlaybackActiveChanged: { [weak self] active in
+                guard let self else { return }
+                self.state.playbackActive = active
+                self.releaseMicrophoneIfTheReplyIsOver()
+            }
+        )
+        let audioDescription = try await engine.start()
+        if mode == .pushToTalk { engine.pause() }
+
+        try finishConnecting(connection)
+        state.callbacks.onStatus?("connected to \(connection.host) (\(connection.model)) — \(audioDescription)")
+    }
+
+    /// Resolves where to connect and opens the socket. The session is configured, and counted as
+    /// connected, only in `finishConnecting` — at launch the audio engine is built in between.
+    private func openSocket() async throws -> Connection {
         // Where to connect and what to present depends on who holds the key, and the two cases go
         // to genuinely different hosts. Getting this wrong is not a small bug: pointing the socket
         // at Saathi's backend would mean every learner's audio crossing our infrastructure, which
@@ -171,28 +234,81 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         let socket = urlSession.webSocketTask(with: request)
         state.socket = socket
         socket.resume()
+        return connection
+    }
 
-        // Build the audio graph once here and release it right away in push-to-talk, so key-down is
-        // a fast engine restart rather than a full CoreAudio setup.
-        engine.setCallbacks(
-            onMicrophoneFrame: { [weak self] data, _ in self?.forwardMicrophone(data) },
-            // Playing a reply restarts the engine, microphone tap included; without this the
-            // engine stayed up after the reply and the orange microphone light stayed on for as
-            // long as Saathi ran. Pause it again once the reply has been played, unless a turn has
-            // opened meanwhile — then the microphone is exactly what is wanted.
-            onPlaybackActiveChanged: { [weak self] active in
-                guard let self else { return }
-                self.state.playbackActive = active
-                self.releaseMicrophoneIfTheReplyIsOver()
-            }
-        )
-        let audioDescription = try await engine.start()
-        if mode == .pushToTalk { engine.pause() }
-
+    private func finishConnecting(_ connection: Connection) throws {
+        guard let socket = state.socket else { throw notConnected() }
         try send(sessionUpdate())
+        state.disconnectReason = nil
+        state.connectedAt = Date()
+        state.lastHeard = Date()
         state.connected = true
-        state.callbacks.onStatus?("connected to \(connection.host) (\(connection.model)) — \(audioDescription)")
         receiveLoop(socket)
+    }
+
+    /// OpenAI ends a realtime session after 60 minutes, and sleep or a network change kills the
+    /// socket without a word. The connection used to be opened once at launch and never again, so
+    /// the first press after any of that failed with "send failed" and kept failing until Saathi
+    /// was restarted. Every press now makes sure there is a live socket first, and reconnects —
+    /// quietly, in the key-down — when there is not.
+    private func ensureConnected() async throws {
+        let now = Date()
+        if state.connected, !Self.isTooOld(connectedAt: state.connectedAt, now: now) {
+            // Heard from recently: trust it. Quiet for a while: a sleep can leave a socket that
+            // still looks open, so ask it before speaking into it.
+            if !Self.needsPing(lastHeard: state.lastHeard, now: now) { return }
+            if let socket = state.socket, await Self.ping(socket) {
+                state.lastHeard = Date()
+                return
+            }
+        }
+        let old = state.socket
+        state.connected = false
+        state.socket = nil
+        old?.cancel(with: .goingAway, reason: nil)
+        state.callbacks.onStatus?("reconnecting…")
+        let connection = try await openSocket()
+        try finishConnecting(connection)
+        state.callbacks.onStatus?("connected to \(connection.host) (\(connection.model))")
+    }
+
+    /// OpenAI refuses to commit less than 100 ms of audio; a turn shorter than that heard nothing.
+    static func hasEnoughAudioForATurn(pcm16Bytes: Int) -> Bool {
+        pcm16Bytes >= Int(VoiceAudioEngine.sampleRate * 0.1) * MemoryLayout<Int16>.size
+    }
+
+    /// Under OpenAI's 60-minute cap with room to finish a conversation.
+    static let maximumSocketAge: TimeInterval = 50 * 60
+    /// How long without a word from the server before a press checks the socket is still there.
+    static let pingAfterSilence: TimeInterval = 60
+
+    static func isTooOld(connectedAt: Date?, now: Date) -> Bool {
+        guard let connectedAt else { return true }
+        return now.timeIntervalSince(connectedAt) >= maximumSocketAge
+    }
+
+    static func needsPing(lastHeard: Date?, now: Date) -> Bool {
+        guard let lastHeard else { return true }
+        return now.timeIntervalSince(lastHeard) >= pingAfterSilence
+    }
+
+    /// A pong within two seconds, or the socket is treated as gone.
+    private static func ping(_ socket: URLSessionWebSocketTask) async -> Bool {
+        final class Once: @unchecked Sendable {
+            private let lock = NSLock()
+            private var continuation: CheckedContinuation<Bool, Never>?
+            init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+            func resume(_ value: Bool) {
+                lock.lock(); let c = continuation; continuation = nil; lock.unlock()
+                c?.resume(returning: value)
+            }
+        }
+        return await withCheckedContinuation { continuation in
+            let once = Once(continuation)
+            socket.sendPing { error in once.resume(error == nil) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { once.resume(false) }
+        }
     }
 
     struct Connection {
@@ -277,13 +393,21 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     }
 
     public func beginTurn() async throws {
-        guard state.connected else { throw VoiceError.transport("not connected") }
+        // Hands-free is already listening, and the server decides where a turn ends.
+        if state.handsFree { return }
+        try await ensureConnected()
         // `forwarding` before the engine is asked for, not after: a reply that drains while
         // `start()` is in flight fires `onPlaybackActiveChanged(false)`, and with `forwarding`
         // still false that pauses the engine under the turn that is just opening.
+        if Self.keepsLastTurn { _ = state.takeTurnAudio() }
+        _ = state.takeTurnAudioBytes()
         state.forwarding = true
         do {
-            _ = try await engine.start()
+            let audio = try await engine.start()
+            if Self.keepsLastTurn {
+                let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".saathi/last-turn.txt")
+                try? "\(Date()) \(audio)\n".write(to: url, atomically: true, encoding: .utf8)
+            }
         } catch {
             state.forwarding = false
             throw error
@@ -294,15 +418,86 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     }
 
     public func endTurn() async throws {
-        guard state.connected else { throw VoiceError.transport("not connected") }
+        if state.handsFree { return }
+        guard state.connected else { throw notConnected() }
         // A 400 ms tail: people release a push-to-talk key before they have finished the last
         // syllable, and without this the final word is clipped off every single turn.
         try? await Task.sleep(nanoseconds: 400_000_000)
         state.forwarding = false
         engine.pause()
+        if Self.keepsLastTurn { Self.writeLastTurn(state.takeTurnAudio()) }
+        // No audio, no turn. An empty commit is refused by OpenAI ("buffer only has 0.00ms of
+        // audio") and the reply requested after it answers nothing the learner said — the sibling
+        // app OpenClicky invented a task that way and handed it to its agent.
+        let turnAudioBytes = state.takeTurnAudioBytes()
+        guard Self.hasEnoughAudioForATurn(pcm16Bytes: turnAudioBytes) else {
+            try? send(["type": "input_audio_buffer.clear"])
+            state.callbacks.onStatus?("did not catch that — hold the keys while you talk")
+            return
+        }
         try send(["type": "input_audio_buffer.commit"])
         try send(["type": "response.create"])
         state.callbacks.onStatus?("thinking…")
+    }
+
+    public func startSharing(_ sink: @escaping @Sendable (Data) -> Void) async throws {
+        // Hands-free is forwarding already; what is dictated is not said to Saathi.
+        state.forwardingBeforeSharing = state.forwarding
+        state.forwarding = false
+        state.sharer = sink
+        do {
+            _ = try await engine.start()
+        } catch {
+            stopSharing()
+            throw error
+        }
+    }
+
+    public func stopSharing() {
+        state.sharer = nil
+        state.forwarding = state.forwardingBeforeSharing
+        state.forwardingBeforeSharing = false
+        releaseMicrophoneIfTheReplyIsOver()
+    }
+
+    public func sendText(_ text: String) async throws {
+        try await ensureConnected()
+        engine.flushPlayback()
+        if state.responseInProgress { cancelActiveResponse() }
+        try send([
+            "type": "conversation.item.create",
+            "item": ["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]],
+        ])
+        try send(["type": "response.create"])
+        state.callbacks.onUserTranscript?(text)
+        state.callbacks.onStatus?("thinking…")
+    }
+
+    public func setHandsFree(_ on: Bool) async throws {
+        try await ensureConnected()
+        state.handsFree = on
+        try send(Self.turnDetectionUpdate(serverDecides: on))
+        if on {
+            state.forwarding = true
+            _ = try await engine.start()
+            state.callbacks.onStatus?("listening, hands-free")
+        } else {
+            state.forwarding = false
+            try? send(["type": "input_audio_buffer.clear"])
+            releaseMicrophoneIfTheReplyIsOver()
+            state.callbacks.onStatus?("hands-free off")
+        }
+    }
+
+    /// Only the turn detection changes; everything else in the session stays as it was set.
+    static func turnDetectionUpdate(serverDecides: Bool) -> [String: Any] {
+        let detection: Any = serverDecides
+            ? ["type": "server_vad", "create_response": true, "interrupt_response": true] as [String: Any]
+            : NSNull()
+        return [
+            "type": "session.update",
+            "session": ["type": "realtime", "audio": ["input": ["turn_detection": detection]]] as [String: Any],
+        ]
     }
 
     public func stop() async {
@@ -318,9 +513,12 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     private func sessionUpdate() -> [String: Any] {
         var input: [String: Any] = [
             "format": ["type": "audio/pcm", "rate": Int(VoiceAudioEngine.sampleRate)],
-            "transcription": ["model": "gpt-4o-mini-transcribe"],
+            // The language is named so the transcript is not a guess either: unpinned, clean English
+            // audio came back as "怎麼這樣?" and "どうぞ。", and the model read those as the learner
+            // switching language.
+            "transcription": ["model": "gpt-4o-mini-transcribe", "language": Self.transcriptionLanguage(configuration.resolvedLanguage)],
         ]
-        switch mode {
+        switch state.handsFree ? .alwaysOn : mode {
         case .pushToTalk:
             // No server VAD: the shortcut delimits the turn, and letting the server also decide
             // means two things racing to end the same sentence.
@@ -339,7 +537,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
             "type": "session.update",
             "session": [
                 "type": "realtime",
-                "instructions": Self.instructions(language: configuration.resolvedLanguage),
+                "instructions": Self.instructions(for: configuration),
                 "audio": [
                     "input": input,
                     "output": [
@@ -361,18 +559,41 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
 
     /// The prompt, with the language named rather than guessed.
     ///
+    /// Any freedom to switch was used: with "you may answer in the learner's language", and then
+    /// with "answer in the language they spoke", an English speaker was answered in Italian,
+    /// Japanese and Portuguese — the audio was clean; the model followed its own earlier replies.
+    /// So there is one language, the one in Settings, and nothing in the conversation moves it.
+    ///
     /// The old text said "Speak the language the learner speaks" and left it there. With nothing to
     /// go on the model simply picks one — it answered a Delhi user in Korean — and being replied to
     /// in a language you cannot read is a worse failure than any wording. So the language is stated,
     /// and where the config does not name one it comes from the machine's own language rather than
     /// from the model's imagination.
+    /// The prompt for a configuration: the language, and whatever first run learned about the
+    /// learner. Both lanes use this, so they are told the same things about the same person.
+    static func instructions(for configuration: SaathiConfiguration) -> String {
+        let learner = LearnerProfile.paragraph(for: configuration)
+        let prompt = instructions(language: configuration.resolvedLanguage)
+        return learner.isEmpty ? prompt : prompt + "\n\n" + learner
+    }
+
+    /// ISO-639-1, which is all the transcription model takes: "en-US" is sent as "en".
+    static func transcriptionLanguage(_ tag: String) -> String {
+        String(tag.split(whereSeparator: { $0 == "-" || $0 == "_" }).first ?? "en").lowercased()
+    }
+
     static func instructions(language: String) -> String {
         let named = Locale.current.localizedString(forLanguageCode: language) ?? language
         return base + """
 
-        Always speak and write in \(named) (\(language)). If the learner speaks to you in a \
-        different language, you may answer in that language instead — but never switch to a third \
-        language, and never guess.
+        Always speak and write in \(named) (\(language)). Every reply is in \(named): whatever \
+        language the learner seems to use, whatever language the transcript shows, and whatever \
+        language any earlier reply in this conversation was in. Only the learner changes this, in \
+        Saathi's settings.
+
+        If a turn is silent, is only noise, or is too short or unclear to make out, do not invent \
+        what was said and do not act on it: say in \(named) that you did not catch that, and ask \
+        them to say it again.
         """
     }
 
@@ -409,7 +630,16 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
         guard let socket = state.socket else { throw VoiceError.transport("not connected") }
         let data = try JSONSerialization.data(withJSONObject: object)
         socket.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] error in
-            if let error { self?.state.callbacks.onStatus?("send failed: \(error.localizedDescription)") }
+            guard let self, let error else { return }
+            // A failed send means the socket is gone. Marking it so makes the next press reconnect
+            // instead of speaking into it again.
+            if self.state.socket === socket {
+                self.state.connected = false
+                self.state.socket = nil
+                self.state.forwarding = false
+                self.state.disconnectReason = "the connection dropped (\(error.localizedDescription))"
+            }
+            self.state.callbacks.onStatus?("connection dropped — press again to reconnect")
         }
     }
 
@@ -428,15 +658,54 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
     /// Asked from both ends of a reply: when playback drains, and when the response finishes —
     /// whichever comes last is the one that finds everything quiet.
     private func releaseMicrophoneIfTheReplyIsOver() {
-        guard Self.releasesMicrophoneAfterPlayback(
-            active: state.playbackActive, mode: mode,
+        guard state.sharer == nil, Self.releasesMicrophoneAfterPlayback(
+            active: state.playbackActive, mode: state.handsFree ? .alwaysOn : mode,
             forwarding: state.forwarding, replyUnfinished: state.replyUnfinished) else { return }
         engine.pause()
     }
 
     private func forwardMicrophone(_ pcm16: Data) {
+        state.sharer?(pcm16)
         guard state.forwarding, state.connected else { return }
+        if Self.keepsLastTurn { state.appendTurnAudio(pcm16) }
+        state.countTurnAudio(pcm16.count)
         try? send(["type": "input_audio_buffer.append", "audio": pcm16.base64EncodedString()])
+    }
+
+    /// `SAATHI_KEEP_LAST_TURN=1`: the exact audio sent for the last turn, as a WAV in
+    /// `~/.saathi/last-turn.wav`, overwritten every turn and never sent anywhere. For the question
+    /// "what did the model actually hear" — an English speaker transcribed as Chinese and answered
+    /// in Japanese is either the prompt or the audio, and only listening tells which.
+    static let keepsLastTurn = ProcessInfo.processInfo.environment["SAATHI_KEEP_LAST_TURN"] == "1"
+
+    static func writeLastTurn(_ pcm16: Data) {
+        let rate = UInt32(VoiceAudioEngine.sampleRate)
+        var header = Data()
+        func put<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { header.append(contentsOf: $0) } }
+        header.append(contentsOf: Array("RIFF".utf8)); put(UInt32(36 + pcm16.count))
+        header.append(contentsOf: Array("WAVEfmt ".utf8)); put(UInt32(16)); put(UInt16(1)); put(UInt16(1))
+        put(rate); put(rate * 2); put(UInt16(2)); put(UInt16(16))
+        header.append(contentsOf: Array("data".utf8)); put(UInt32(pcm16.count))
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".saathi/last-turn.wav")
+        try? (header + pcm16).write(to: url, options: .atomic)
+    }
+
+    private func notConnected() -> VoiceError {
+        .transport("not connected" + (state.disconnectReason.map { " — \($0)" } ?? ""))
+    }
+
+    /// A refused handshake surfaces from URLSession as "bad server response", which reads as a
+    /// network fault. The status says what actually happened: a 401 is a key the provider does
+    /// not accept, and that is the one thing a person can fix from the Setup tab.
+    static func disconnectReason(handshakeStatus: Int?, error: String, host: String?) -> String {
+        let provider = host ?? "the provider"
+        switch handshakeStatus {
+        case 401: return "\(provider) rejected the API key — put a new one in Setup"
+        case 403: return "\(provider) refused this key access to the realtime model"
+        case 429: return "\(provider) says this key is over its limit or out of credit"
+        case let status? where status >= 400: return "\(provider) refused the connection (\(status))"
+        default: return error
+        }
     }
 
     private func receiveLoop(_ socket: URLSessionWebSocketTask) {
@@ -444,11 +713,17 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, @unchecked Send
             guard let self, self.state.socket === socket else { return }
             switch result {
             case let .failure(error):
+                let reason = Self.disconnectReason(
+                    handshakeStatus: (socket.response as? HTTPURLResponse)?.statusCode,
+                    error: error.localizedDescription,
+                    host: socket.originalRequest?.url?.host)
                 self.state.connected = false
                 self.state.socket = nil
                 self.state.forwarding = false
-                self.state.callbacks.onStatus?("disconnected: \(error.localizedDescription)")
+                self.state.disconnectReason = reason
+                self.state.callbacks.onStatus?("disconnected: \(reason)")
             case let .success(message):
+                self.state.lastHeard = Date()
                 if case let .string(text) = message { self.handleServerEvent(text) }
                 self.receiveLoop(socket)
             }

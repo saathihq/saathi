@@ -78,4 +78,17 @@ final class IslandHoverTests: XCTestCase {
         XCTAssertEqual(hover.tick(now: 0.5), .open)
         XCTAssertEqual(hover.tick(now: 1), .collapsed)
     }
+
+    /// Leaving the island to hold the keys is the ordinary thing to do. The open island lives out
+    /// its grace and then becomes the strip; it does not snap shut the instant listening starts.
+    func testGettingBusyDuringTheGraceDoesNotCutItShort() {
+        var hover = IslandHover()
+        hover.setHovering(true, now: 0)
+        hover.setHovering(false, now: 1)
+        XCTAssertEqual(hover.setBusy(true, now: 1.1), .open, "still inside the grace")
+        XCTAssertEqual(hover.tick(now: 1.3), .open)
+        XCTAssertEqual(hover.tick(now: 1.41), .compact, "the grace ends in the strip, because Saathi is busy")
+        hover.setBusy(false, now: 2)
+        XCTAssertEqual(hover.tick(now: 2.41), .collapsed)
+    }
 }

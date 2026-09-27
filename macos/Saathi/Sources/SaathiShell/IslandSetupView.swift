@@ -30,31 +30,12 @@ struct IslandSetupView: View {
     /// it out of the observable object means it is never published to anything else.
     @State private var openAIKey = ""
     @State private var anthropicKey = ""
-    /// The saved rows that have been reopened for a new key, each with the masked form it showed,
-    /// so "Keep" can put the line back. View-local, like the text: reopening a row is not a verdict
-    /// about the key, and it must not touch the model's `.saved` — a `.saved` replaced by `.editing`
-    /// over an empty field is exactly what makes Save demote a working install (`isUsable`).
-    @State private var reopened: [ProviderKind: String] = [:]
-
-    private var canSave: Bool {
-        model.openAIKeyState.isValid || model.anthropicKeyState.isValid
+    /// Save is the only button: it checks whatever was typed and saves it if the vendor accepts it.
+    /// Not while a check is in flight — its verdict is about to decide.
+    private func canSave(_ kind: ProviderKind) -> Bool {
+        let field = kind == .openai ? openAIKey : anthropicKey
+        return !state(of: kind).isBusy && !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-
-    /// Whether a key row shows its field and Check. A saved key is one line, not a field: the
-    /// field comes back only when the row is reopened for a new key. Everything else — empty,
-    /// being typed, checked either way — shows it.
-    static func showsKeyField(_ state: KeyFieldState, reopened: Bool) -> Bool {
-        if case .saved = state { return reopened }
-        return true
-    }
-
-    private func showsField(_ kind: ProviderKind) -> Bool {
-        Self.showsKeyField(state(of: kind), reopened: reopened[kind] != nil)
-    }
-
-    /// The Save row has something to save only while a field is on show. With every key saved and
-    /// every row collapsed it is a button that would write the file it just wrote.
-    private var showsSaveRow: Bool { showsField(.openai) || showsField(.anthropic) }
 
     private var home: String { NSHomeDirectory() }
 
@@ -72,6 +53,10 @@ struct IslandSetupView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
         }
+        // The fields are view-local and start empty every time this is built — the island
+        // collapsing tears it down — so a "works" left over from before is about a key no longer
+        // in any field.
+        .onAppear { actions.onKeyFieldsEmpty(openAIKey, anthropicKey) }
     }
 
     // MARK: - Keys
@@ -104,36 +89,7 @@ struct IslandSetupView: View {
                 noteRow(model.unusedKeyNote, emphasised: false)
             }
 
-            if showsSaveRow {
-                saveRow
-            }
         }
-    }
-
-    private var saveRow: some View {
-        HStack {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 12))
-                .foregroundColor(Color.white.opacity(0.6))
-                .frame(width: 18)
-            Text("Save and use these")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(canSave ? .white : Color.white.opacity(0.45))
-            Spacer()
-            Button(action: { actions.onSaveKeys(openAIKey, anthropicKey) }) {
-                Text("Save")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(canSave ? Color(PointerBuddyView.tint) : Color.white.opacity(0.12)))
-            }
-            .buttonStyle(.plain)
-            .pointerCursor(isEnabled: canSave)
-            .disabled(!canSave)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
     // MARK: - Conversation
@@ -345,11 +301,12 @@ struct IslandSetupView: View {
         .padding(.vertical, 8)
     }
 
-    /// A key, as a row: the same icon-and-title as every other. While a key is being entered the
-    /// field and its Check sit where a value would be, with the verdict on the line below; once it
-    /// is saved the row is one line — the masked key and a Change — because a field for a key that
-    /// is already on disk is a field nobody should type into by accident.
-    @ViewBuilder
+    /// A key, as a row: the same icon-and-title as every other, then a field and one Save. Pasting
+    /// a key and pressing Save — or Return — is the whole job: Save checks the key with the vendor
+    /// and writes it only if it is accepted. It used to be Check, then a Save row, then its Save
+    /// capsule, and a row reopened with Change before any of that; three clicks is two too many to
+    /// replace a key, and the disabled states in between read as "saved" when nothing was.
+    /// A saved key is shown as the field's placeholder, so replacing it needs no Change either.
     private func keyRow(
         systemImage: String,
         title: String,
@@ -358,70 +315,58 @@ struct IslandSetupView: View {
         state: KeyFieldState,
         kind: ProviderKind
     ) -> some View {
-        if case let .saved(masked) = state, !Self.showsKeyField(state, reopened: reopened[kind] != nil) {
+        let save = {
+            guard canSave(kind) else { return }
+            actions.onSaveKeys(openAIKey, anthropicKey)
+        }
+        return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 keyRowTitle(systemImage: systemImage, title: title, detail: detail)
                 Spacer(minLength: 8)
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(DS.Colors.success)
-                Text(masked)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Color.white.opacity(0.72))
-                smallButton("Change") { reopened[kind] = masked }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    keyRowTitle(systemImage: systemImage, title: title, detail: detail)
-                    Spacer(minLength: 8)
 
-                    // SecureField so a key is not on screen while it is typed, and not in a screenshot.
-                    SecureField("sk-…", text: text)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white)
-                        .frame(width: 150)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.10)))
-                        .onChange(of: text.wrappedValue) { value in
-                            // Typing invalidates an earlier verdict: a green tick next to a key that
-                            // has since been edited is the panel lying about what it checked. A field
-                            // emptied by Keep under a `.saved` verdict is not typing, and the verdict
-                            // it would overwrite is the one Keep just put back.
-                            if value.isEmpty, case .saved = self.state(of: kind) { return }
-                            // A reopened field typed into and then emptied by hand is the same
-                            // abandoned edit as Keep: Save would use the stored key, so the stored
-                            // key's verdict is the one that must stand.
-                            if value.isEmpty, let masked = reopened[kind] {
-                                setState(kind, .saved(masked: masked))
-                                return
-                            }
+                // SecureField so a key is not on screen while it is typed, and not in a screenshot.
+                SecureField(Self.placeholder(for: state), text: text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white)
+                    .frame(width: 150)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.10)))
+                    .onSubmit(save)
+                    .onChange(of: text.wrappedValue) { value in
+                        // Typing invalidates an earlier verdict: a green tick next to a key that has
+                        // since been edited is the panel lying about what it checked. Emptying the
+                        // field puts back the verdict the key on disk earns.
+                        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            actions.onKeyFieldsEmpty(openAIKey, anthropicKey)
+                        } else {
                             setState(kind, .editing)
                         }
+                    }
 
-                    smallButton(state.isBusy ? "…" : "Check", enabled: !state.isBusy) {
-                        actions.onCheckKey(kind, openAIKey, anthropicKey)
-                    }
-                    if let masked = reopened[kind] {
-                        // Back to the saved key, whatever was typed: the field is cleared and the
-                        // verdict it had is restored, so Save cannot mistake an abandoned edit for
-                        // a missing key.
-                        smallButton("Keep") {
-                            text.wrappedValue = ""
-                            setState(kind, .saved(masked: masked))
-                            reopened[kind] = nil
-                        }
-                    }
+                Button(action: save) {
+                    Text(state.isBusy ? "…" : "Save")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(canSave(kind) ? Color(PointerBuddyView.tint) : Color.white.opacity(0.12)))
                 }
-                verdict(for: state)
+                .buttonStyle(.plain)
+                .pointerCursor(isEnabled: canSave(kind))
+                .disabled(!canSave(kind))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            verdict(for: state)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// What an empty field shows: the key on disk, masked, when there is one.
+    static func placeholder(for state: KeyFieldState) -> String {
+        if case let .saved(masked) = state { return "\(masked) — paste to replace" }
+        return "paste a key"
     }
 
     private func keyRowTitle(systemImage: String, title: String, detail: String) -> some View {
@@ -432,21 +377,6 @@ struct IslandSetupView: View {
                 Text(detail).font(.system(size: 10)).foregroundColor(Color.white.opacity(0.5))
             }
         }
-    }
-
-    /// The small capsule the key rows use for Check, Change and Keep — one look for the three.
-    private func smallButton(_ title: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(Color.white.opacity(0.18)))
-        }
-        .buttonStyle(.plain)
-        .pointerCursor(isEnabled: enabled)
-        .disabled(!enabled)
     }
 
     private func state(of kind: ProviderKind) -> KeyFieldState {

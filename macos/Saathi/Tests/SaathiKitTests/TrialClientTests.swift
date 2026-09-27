@@ -16,6 +16,8 @@ final class TrialStubProtocol: URLProtocol {
     nonisolated(unsafe) static var shouldFail = false
     nonisolated(unsafe) static var lastRequest: URLRequest?
     nonisolated(unsafe) static var lastBody: Data?
+    /// Runs while the request is "in flight", for tests about what else happens meanwhile.
+    nonisolated(unsafe) static var duringRequest: (() -> Void)?
 
     static func reset(status: Int, body: String, shouldFail: Bool = false) {
         self.status = status; self.body = body; self.shouldFail = shouldFail
@@ -34,6 +36,8 @@ final class TrialStubProtocol: URLProtocol {
 
     override func startLoading() {
         Self.lastRequest = request
+        Self.duringRequest?()
+        Self.duringRequest = nil
         // URLProtocol hands the body over as a stream, never as `httpBody`.
         if let stream = request.httpBodyStream {
             stream.open(); defer { stream.close() }
@@ -186,6 +190,29 @@ final class TrialClientTests: XCTestCase {
         _ = try await TrialEnrollment.enroll(at: path, session: TrialStubProtocol.session)
         let sent = try JSONSerialization.jsonObject(with: try XCTUnwrap(TrialStubProtocol.lastBody)) as? [String: String]
         XCTAssertEqual(sent?["device"], afterRefusal)
+    }
+
+    /// The request takes seconds and first run saves on every change. The token goes onto what is
+    /// on disk when the answer arrives, not onto the copy loaded before asking.
+    func testWhatWasSavedWhileTheRequestWasInFlightSurvives() async throws {
+        let path = temporaryConfigPath()
+        defer { try? FileManager.default.removeItem(at: path.deletingLastPathComponent()) }
+        try ConfigurationStore.save(SaathiConfiguration(backendUrl: "https://backend.example.test"), to: path)
+        TrialStubProtocol.reset(status: 200, body: granted)
+        TrialStubProtocol.duringRequest = {
+            var meanwhile = (try? ConfigurationStore.load(from: path)) ?? SaathiConfiguration()
+            meanwhile.name = "Asha"
+            meanwhile.onboarded = true
+            try? ConfigurationStore.save(meanwhile, to: path)
+        }
+
+        let grant = try await TrialEnrollment.enroll(at: path, session: TrialStubProtocol.session)
+
+        let saved = try ConfigurationStore.load(from: path)
+        XCTAssertEqual(saved.token, grant.token)
+        XCTAssertEqual(saved.onboarded, true, "the enrolment wrote an older copy back over a newer one")
+        XCTAssertEqual(saved.name, "Asha")
+        XCTAssertNotNil(saved.deviceId)
     }
 
     func testHealthReadsWhetherTrialsAreOn() throws {

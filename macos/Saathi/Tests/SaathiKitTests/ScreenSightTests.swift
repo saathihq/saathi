@@ -11,6 +11,22 @@ import XCTest
 
 final class ScreenSightTests: XCTestCase {
 
+    /// "What is the meaning of this line?" with "reconnects" highlighted was answered about the
+    /// red triangle under the pointer. The selection is handed over and named as what "this" means.
+    func testASelectionIsWhatThisMeans() {
+        let prompt = ScreenSight.systemPrompt(question: "What is the meaning of this line?", selection: "reconnects")
+        XCTAssertTrue(prompt.contains("«reconnects»"), prompt)
+        XCTAssertTrue(prompt.contains("the selection is almost certainly what they mean"))
+        XCTAssertFalse(ScreenSight.systemPrompt(question: "q").contains("selected (highlighted)"), "no selection, no claim of one")
+    }
+
+    func testASelectionIsTidiedAndCapped() {
+        XCTAssertEqual(PointerGrounding.selection("  two\n  words "), "two words")
+        XCTAssertNil(PointerGrounding.selection(" \n "))
+        XCTAssertEqual(PointerGrounding.selection(String(repeating: "a", count: 700))?.count, 601)
+    }
+
+
     /// "How do I play this song?" is a question about the row under the pointer. The whole display
     /// alone had the vision model answering about the song that happened to be playing; a close-up
     /// with the pointer at its centre had it name the row that was pointed at.

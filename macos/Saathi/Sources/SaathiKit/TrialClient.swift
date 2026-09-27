@@ -119,8 +119,13 @@ public enum TrialEnrollment {
 
         let grant = try await TrialClient(configuration: configuration, session: session).requestTrial(device: device)
 
-        configuration.token = grant.token
-        try ConfigurationStore.save(configuration, to: path)
+        // Onto what is on disk *now*. The request takes seconds, and first run saves on every
+        // change: writing back the copy loaded before it would undo whatever was saved meanwhile —
+        // `onboarded`, if the demo was skipped while this was in flight.
+        var current = (try? ConfigurationStore.load(from: path)) ?? configuration
+        current.deviceId = device
+        current.token = grant.token
+        try ConfigurationStore.save(current, to: path)
         return grant
     }
 }

@@ -118,6 +118,38 @@ extension AppController {
         field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (stored ?? "") : field
     }
 
+    /// The verdict that stands for a field. A check is about the text that was in the field when it
+    /// ran; once the field is empty — the island collapsed and took the text with it — that verdict
+    /// is about nothing, and the key that stands in is the one on disk, with the verdict the disk
+    /// earns. Without this a new key checked, then lost to a collapse, left "works" beside an empty
+    /// field, and Save wrote the old, dead key back under it.
+    static func verdict(_ state: KeyFieldState, forField field: String, seeded: KeyFieldState) -> KeyFieldState {
+        guard field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return state }
+        switch state {
+        case .saved, .empty: return state
+        case .editing, .checking, .checked: return seeded
+        }
+    }
+
+    /// The typed keys Save has to check before it can save them: text in the field and no verdict
+    /// of "accepted" behind it. A check already in flight is left to land on its own.
+    static func keysNeedingCheck(
+        openAIField: String, anthropicField: String,
+        openAIState: KeyFieldState, anthropicState: KeyFieldState
+    ) -> [ProviderKind] {
+        func needs(_ field: String, _ state: KeyFieldState) -> Bool {
+            guard !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            switch state {
+            case .checked(.valid), .checking: return false
+            default: return true
+            }
+        }
+        var kinds: [ProviderKind] = []
+        if needs(openAIField, openAIState) { kinds.append(.openai) }
+        if needs(anthropicField, anthropicState) { kinds.append(.anthropic) }
+        return kinds
+    }
+
     /// Whether a key counts as usable for `SetupPlan`: a verdict that says so, *and* an effective
     /// key actually behind it. A `.saved` or `.checked(.valid)` verdict with no effective key
     /// (nothing on disk, an empty field) must not count.
@@ -158,10 +190,14 @@ extension AppController {
         let openAI = effectiveKey(field: openAIField, stored: configuration.credential(for: .openai))
         let anthropic = effectiveKey(
             field: anthropicField, stored: configuration.credential(for: .anthropic))
+        let seeded = seededKeyStates(for: configuration)
         return SetupDecision(
             plan: SetupPlan.make(
-                openAIKeyValid: isUsable(openAIState, effectiveKey: openAI),
-                anthropicKeyValid: isUsable(anthropicState, effectiveKey: anthropic)),
+                openAIKeyValid: isUsable(
+                    verdict(openAIState, forField: openAIField, seeded: seeded.openAI), effectiveKey: openAI),
+                anthropicKeyValid: isUsable(
+                    verdict(anthropicState, forField: anthropicField, seeded: seeded.anthropic),
+                    effectiveKey: anthropic)),
             openAIKey: openAI,
             anthropicKey: anthropic)
     }
