@@ -64,6 +64,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
         private var _playbackActive = false
         private var _assistantBuffer = ""
         private var _turnAudio = Data()
+        private var _turnAudioBytes = 0
 
         func withLock<T>(_ body: (SessionState) -> T) -> T {
             lock.lock(); defer { lock.unlock() }
@@ -140,6 +141,8 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
         }
         func markCancelled(_ id: String) { withLock { _ = $0._cancelledResponseIds.insert(id) } }
         func wasCancelled(_ id: String) -> Bool { withLock { $0._cancelledResponseIds.contains(id) } }
+        func countTurnAudio(_ bytes: Int) { withLock { $0._turnAudioBytes += bytes } as Void }
+        func takeTurnAudioBytes() -> Int { withLock { let bytes = $0._turnAudioBytes; $0._turnAudioBytes = 0; return bytes } }
         func appendTurnAudio(_ data: Data) { withLock { $0._turnAudio.append(data) } as Void }
         func takeTurnAudio() -> Data { withLock { let d = $0._turnAudio; $0._turnAudio = Data(); return d } }
         func appendAssistant(_ text: String) { withLock { $0._assistantBuffer += text } as Void }
@@ -270,6 +273,11 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
         state.callbacks.onStatus?("connected to \(connection.host) (\(connection.model))")
     }
 
+    /// OpenAI refuses to commit less than 100 ms of audio; a turn shorter than that heard nothing.
+    static func hasEnoughAudioForATurn(pcm16Bytes: Int) -> Bool {
+        pcm16Bytes >= Int(VoiceAudioEngine.sampleRate * 0.1) * MemoryLayout<Int16>.size
+    }
+
     /// Under OpenAI's 60-minute cap with room to finish a conversation.
     static let maximumSocketAge: TimeInterval = 50 * 60
     /// How long without a word from the server before a press checks the socket is still there.
@@ -392,6 +400,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
         // `start()` is in flight fires `onPlaybackActiveChanged(false)`, and with `forwarding`
         // still false that pauses the engine under the turn that is just opening.
         if Self.keepsLastTurn { _ = state.takeTurnAudio() }
+        _ = state.takeTurnAudioBytes()
         state.forwarding = true
         do {
             let audio = try await engine.start()
@@ -417,6 +426,15 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
         state.forwarding = false
         engine.pause()
         if Self.keepsLastTurn { Self.writeLastTurn(state.takeTurnAudio()) }
+        // No audio, no turn. An empty commit is refused by OpenAI ("buffer only has 0.00ms of
+        // audio") and the reply requested after it answers nothing the learner said — the sibling
+        // app OpenClicky invented a task that way and handed it to its agent.
+        let turnAudioBytes = state.takeTurnAudioBytes()
+        guard Self.hasEnoughAudioForATurn(pcm16Bytes: turnAudioBytes) else {
+            try? send(["type": "input_audio_buffer.clear"])
+            state.callbacks.onStatus?("did not catch that — hold the keys while you talk")
+            return
+        }
         try send(["type": "input_audio_buffer.commit"])
         try send(["type": "response.create"])
         state.callbacks.onStatus?("thinking…")
@@ -650,6 +668,7 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
         state.sharer?(pcm16)
         guard state.forwarding, state.connected else { return }
         if Self.keepsLastTurn { state.appendTurnAudio(pcm16) }
+        state.countTurnAudio(pcm16.count)
         try? send(["type": "input_audio_buffer.append", "audio": pcm16.base64EncodedString()])
     }
 

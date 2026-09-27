@@ -629,6 +629,14 @@ final class RealtimeReconnectTests: XCTestCase {
         XCTAssertTrue(RealtimeVoiceSession.isTooOld(connectedAt: nil, now: now), "never connected")
     }
 
+    /// A press released before any audio was captured must not be committed and answered: the
+    /// model then replies to nothing, and in OpenClicky it invented a task.
+    func testATurnWithoutAudioIsNeverSent() {
+        XCTAssertFalse(RealtimeVoiceSession.hasEnoughAudioForATurn(pcm16Bytes: 0))
+        XCTAssertFalse(RealtimeVoiceSession.hasEnoughAudioForATurn(pcm16Bytes: 4_799))
+        XCTAssertTrue(RealtimeVoiceSession.hasEnoughAudioForATurn(pcm16Bytes: 4_800))
+    }
+
     /// Sleep can leave a socket that still looks open. One the server has been quiet on for a
     /// while is pinged before it is spoken into; one heard from just now is not, so a press in
     /// the middle of a conversation costs nothing.
