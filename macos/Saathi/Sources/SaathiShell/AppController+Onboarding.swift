@@ -164,7 +164,7 @@ extension AppController {
 
         onboardingChanged(model)
         if model.opensSetupAfterwards { notch?.model.tab = .setup }
-        notch?.model.language = configuration.language ?? ""
+        notch?.model.language = configuration.resolvedLanguage
 
         // A fresh session on whatever was chosen — or the first real one, if first run was closed
         // before the listening session ever started. On the configuration as it is *after* the

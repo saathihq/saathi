@@ -39,6 +39,7 @@ private final class FakeSession: VoiceSession, @unchecked Sendable {
         if endDelay > 0 { try? await Task.sleep(nanoseconds: endDelay) }
         note("end")
     }
+    func sendText(_ text: String) async throws { note("text:\(text)") }
     func stop() async { note("stop") }
 
     func emit(_ action: SaathiAction) { callbacks.withLock { $0 }?.onAction?(action) }

@@ -70,7 +70,30 @@ public protocol VoiceSession: AnyObject, Sendable {
     func beginTurn() async throws
     /// The learner stopped. Commit and get an answer.
     func endTurn() async throws
+    /// A typed message instead of a spoken one — the Text shortcut. Answered like a turn.
+    func sendText(_ text: String) async throws
+    /// Hands-free: listen without the keys held, and answer whenever the learner stops talking.
+    func setHandsFree(_ on: Bool) async throws
     func stop() async
+}
+
+/// A session whose microphone something else can listen through — Dictate, on the realtime lane.
+///
+/// Dictate used to open a microphone of its own. Once the realtime session's voice-processing
+/// input had run, that second microphone in the same process got silence: dictation heard people
+/// until their first spoken turn and nothing after it. So it listens through this one instead.
+/// Frames are PCM16 mono at `VoiceAudioEngine.sampleRate`, and none of them go to the provider.
+public protocol SharedMicrophone: AnyObject, Sendable {
+    func startSharing(_ sink: @escaping @Sendable (Data) -> Void) async throws
+    func stopSharing()
+}
+
+extension VoiceSession {
+    public func setHandsFree(_ on: Bool) async throws {
+        guard on else { return }
+        throw VoiceError.notConfigured(
+            "Hands-free needs OpenAI's realtime voice. Add an OpenAI key in Settings to use it.")
+    }
 }
 
 /// Builds the session the configuration calls for. The only place that maps a lane to a class.

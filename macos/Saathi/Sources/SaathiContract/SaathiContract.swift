@@ -158,7 +158,7 @@ public enum SaathiTools {
       "properties": {
         "question": {
           "type": "string",
-          "description": "What to find out about the screen, in the learner's own words where possible."
+          "description": "The learner's question, word for word. Do not rephrase it or name what you think they mean: \"this line\" rewritten as \"this symbol\" sent the look to the wrong thing."
         }
       },
       "required": [
@@ -263,13 +263,12 @@ public struct SaathiConfiguration: Codable, Sendable {
         return trimmed.isEmpty ? providerRow.defaultVoice : trimmed
     }
 
-    /// The language Saathi speaks. Unset follows this machine's own language, because a
-    /// companion that guesses picks one at random — and being answered in a language you
-    /// do not read is worse than being answered plainly in the wrong one you do.
+    /// The language Saathi speaks: the one chosen in Settings, English until one is. Not the
+    /// machine's language and not the learner's: left to follow either, the realtime model
+    /// drifted — English questions answered in Italian, Japanese, Portuguese — so it is fixed.
     public var resolvedLanguage: String {
         let trimmed = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !trimmed.isEmpty { return trimmed }
-        return Locale.preferredLanguages.first.flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
+        return trimmed.isEmpty ? "en" : trimmed
     }
 
     /// The credential for a provider: its own vendor field first, then the legacy shared
@@ -381,7 +380,7 @@ public struct OpenUrlAction: Codable, Sendable, Equatable {
 public struct LookAtScreenAction: Codable, Sendable, Equatable {
     public static let wireName = "look_at_screen"
 
-    /// What to find out about the screen, in the learner's own words where possible.
+    /// The learner's question, word for word. Do not rephrase it or name what you think they mean: "this line" rewritten as "this symbol" sent the look to the wrong thing.
     public var question: String
 
     public init(question: String) {

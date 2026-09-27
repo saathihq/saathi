@@ -48,6 +48,8 @@ public final class VoiceConductor {
     /// Whether a session exists to talk to.
     public var hasSession: Bool { session != nil }
     public var isTurnOpen: Bool { turns?.isOpen ?? false }
+    /// The session's microphone, for Dictate, when the lane can share it.
+    public var sharedMicrophone: (any SharedMicrophone)? { session as? SharedMicrophone }
 
     public init(
         makeSession: @escaping SessionMaker,
@@ -168,6 +170,34 @@ public final class VoiceConductor {
             turns.close(); onEvent(.keysReleased)
         } else {
             turns.open(); onEvent(.keysHeld)
+        }
+    }
+
+    /// The Text shortcut's message, answered like a spoken turn.
+    public func sendText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if isReconfiguring { reportReconfiguring(); return }
+        guard let session else { reportNoVoice(); return }
+        Task {
+            do {
+                try await session.sendText(trimmed)
+            } catch {
+                self.onEvent(.failure(error.localizedDescription))
+            }
+        }
+    }
+
+    /// Hands-free on or off. True when the session did it; a lane that cannot says why itself.
+    public func setHandsFree(_ on: Bool) async -> Bool {
+        if isReconfiguring { reportReconfiguring(); return false }
+        guard let session else { reportNoVoice(); return false }
+        do {
+            try await session.setHandsFree(on)
+            return true
+        } catch {
+            onEvent(.failure(error.localizedDescription))
+            return false
         }
     }
 

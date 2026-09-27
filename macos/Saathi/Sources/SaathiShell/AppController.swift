@@ -34,6 +34,11 @@ public final class AppController {
     /// The voice session's whole life — start, turns, reconfigure, quit. See `VoiceConductor`.
     var voice: VoiceConductor!
     private var monitor: HoldToTalkMonitor?
+    private let dictation = Dictation()
+    /// The dictation being started, resolved to whether it did; the end waits on it.
+    private var dictationStart: Task<Bool, Never>?
+    private var handsFree = false
+    private lazy var textPrompt = TextPromptPanel { [weak self] text in self?.voice.sendText(text) }
     /// What was said, kept: `~/.saathi/conversation.log`.
     private let conversation: ConversationLog
     private var ticker: Timer?
@@ -56,6 +61,8 @@ public final class AppController {
             ?? MascotColor(hex: "#377FE6")
         machine = CompanionStateMachine(now: CACurrentMediaTime())
         companion = CompanionPanel()
+        let companion = self.companion
+        ScreenSight.concealOwnWindows = { hidden in companion.alphaValue = hidden ? 0 : 1 }
         if let screen = NSScreen.main {
             notch = NotchPanel(data: data, color: color, screen: screen)
         } else {
@@ -100,6 +107,9 @@ public final class AppController {
         menu.setStartAtLogin(SMAppService.mainApp.status == .enabled)
         render(force: true)
         startTicking()
+        // Dictate's model, fetched now if the system lacks it, so the first press is not a wait.
+        let language = configuration.resolvedLanguage
+        Task.detached(priority: .utility) { await Dictation.prepare(language: language) }
         if Self.shouldOnboard(configuration) {
             // No voice session yet: starting one asks macOS for speech recognition, and first run
             // asks for that itself, one permission at a time, with the reason said first.
@@ -218,6 +228,9 @@ public final class AppController {
     /// `VoiceConductor.reconfigure`; a second Save while one is under way does nothing at all.
     func reconfigure(_ updated: SaathiConfiguration) async {
         guard await voice.reconfigure(to: updated) else { return }
+        // A new session starts push-to-talk.
+        handsFree = false
+        notch?.model.isAlwaysListening = false
         configuration = updated
         systemSpeaker.apply(SpeechSettings(updated))
         applyConfigurationToIsland()
@@ -270,8 +283,13 @@ public final class AppController {
             Task { @MainActor in
                 guard let self else { return }
                 switch event {
-                case .began: self.voice.keysBegan()
-                case .ended: self.voice.keysEnded()
+                case .talkBegan: self.voice.keysBegan()
+                case .talkEnded: self.voice.keysEnded()
+                case .textRequested: self.toggleTextPrompt()
+                case .dictateBegan: self.beginDictation()
+                case .dictateEnded: self.endDictation(typing: true)
+                case .dictateCancelled: self.endDictation(typing: false)
+                case .handsFreeToggled: self.toggleHandsFree()
                 }
             }
         }
@@ -281,6 +299,77 @@ public final class AppController {
             refreshPermissions()
         } catch {
             self.monitor = nil
+        }
+    }
+
+    // MARK: the other three shortcuts
+
+    /// Text: control twice. First run has its own cards to answer; these three wait for it.
+    private func toggleTextPrompt() {
+        guard onboarding == nil else { return }
+        if textPrompt.isShowing { textPrompt.dismiss() } else { textPrompt.show(on: NSScreen.main) }
+    }
+
+    /// Dictate: fn and control held. Listens on this Mac only and types what was heard into the
+    /// app in front — no model, no reply.
+    private func beginDictation() {
+        guard onboarding == nil else { return }
+        let language = configuration.resolvedLanguage
+        let dictation = self.dictation
+        let microphone = voice.sharedMicrophone
+        dictationStart = Task { @MainActor in
+            do {
+                try await dictation.begin(language: language, microphone: microphone)
+                self.handle(.status("listening… (dictating)"))
+                return true
+            } catch {
+                self.handle(.failure("dictation: \(error.localizedDescription)"))
+                return false
+            }
+        }
+    }
+
+    private func endDictation(typing: Bool) {
+        guard let start = dictationStart else { return }
+        dictationStart = nil
+        let dictation = self.dictation
+        Task { @MainActor in
+            guard await start.value else { return }
+            guard typing else {
+                self.conversation.append(.action("dictation cancelled: released too quickly to be speech"))
+                dictation.cancel()
+                self.handle(.status("heard"))
+                return
+            }
+            let heard = await dictation.end()
+            guard !heard.isEmpty else {
+                self.conversation.append(.error("dictation heard nothing (\(dictation.lastReport))"))
+                // Near-silence from the microphone is a different problem from speech not being
+                // understood, and saying which is the difference between retrying and not.
+                self.handle(.failure(dictation.heardSilence
+                    ? "dictation got no sound from the microphone — try again, or check the input in Sound settings"
+                    : "did not catch that"))
+                return
+            }
+            self.handle(.status("heard"))
+            self.conversation.append(.action("dictated: \(heard)"))
+            do {
+                try await TextTyper.type(heard)
+            } catch {
+                self.handle(.failure("dictation: \(error.localizedDescription)"))
+            }
+        }
+    }
+
+    /// Hands-free: fn and control twice, on and off.
+    private func toggleHandsFree() {
+        guard onboarding == nil else { return }
+        let wanted = !handsFree
+        Task { @MainActor in
+            guard await self.voice.setHandsFree(wanted) else { return }
+            self.handsFree = wanted
+            self.notch?.model.isAlwaysListening = wanted
+            if !wanted { self.handle(.status("heard")) }
         }
     }
 
@@ -382,7 +471,7 @@ public final class AppController {
         applyConfigurationToIsland()
         notch.model.companionVisible = true
         notch.model.tab = Self.openingTab(for: configuration)
-        notch.model.language = configuration.language ?? ""
+        notch.model.language = configuration.resolvedLanguage
         // Seed both verdicts from what is already on disk — otherwise every launch shows `.empty`
         // regardless of what is stored, and the `isValid && !effectiveKey.isEmpty` gate never sees
         // a stored key as valid. Only for a vendor the config actually names; see `seededKeyStates`.
@@ -480,6 +569,16 @@ public final class AppController {
             }
         }
 
+        actions.onKeyFieldsEmpty = { [weak self] openAIField, anthropicField in
+            guard let self, let notch = self.notch else { return }
+            let seeded = Self.seededKeyStates(for: self.configuration)
+            notch.model.openAIKeyState = Self.verdict(
+                notch.model.openAIKeyState, forField: openAIField, seeded: seeded.openAI)
+            notch.model.anthropicKeyState = Self.verdict(
+                notch.model.anthropicKeyState, forField: anthropicField, seeded: seeded.anthropic)
+            self.refreshPlanExplanation(openAIField: openAIField, anthropicField: anthropicField)
+        }
+
         actions.onLanguage = { [weak self] tag in
             guard let self, let notch = self.notch else { return }
             notch.model.language = tag
@@ -504,6 +603,34 @@ public final class AppController {
             // disk naming one provider and the island showing another until relaunch.
             guard !self.voice.isReconfiguring else {
                 self.voice.reportReconfiguring()
+                return
+            }
+
+            // A key typed but never Checked is checked here, and saved only if the vendor accepts
+            // it. Save used to stay disabled until Check had been pressed, and a disabled Save
+            // looks like a Save that worked — the old key stayed on disk and the voice kept
+            // failing with nothing on screen saying why.
+            let unchecked = Self.keysNeedingCheck(
+                openAIField: openAIKey, anthropicField: anthropicKey,
+                openAIState: notch.model.openAIKeyState, anthropicState: notch.model.anthropicKeyState)
+            if !unchecked.isEmpty {
+                for kind in unchecked {
+                    if kind == .openai { notch.model.openAIKeyState = .checking }
+                    else { notch.model.anthropicKeyState = .checking }
+                }
+                Task {
+                    var allValid = true
+                    for kind in unchecked {
+                        let result = await self.validator.check(kind, key: kind == .openai ? openAIKey : anthropicKey)
+                        if result != .valid { allValid = false }
+                        if kind == .openai { notch.model.openAIKeyState = .checked(result) }
+                        else { notch.model.anthropicKeyState = .checked(result) }
+                    }
+                    self.refreshPlanExplanation(openAIField: openAIKey, anthropicField: anthropicKey)
+                    // Every typed key now carries a verdict, so this second pass saves or, with a
+                    // rejection on show under its row, does nothing.
+                    if allValid { notch.actions.onSaveKeys(openAIKey, anthropicKey) }
+                }
                 return
             }
 

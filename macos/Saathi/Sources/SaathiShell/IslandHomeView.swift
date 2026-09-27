@@ -185,8 +185,8 @@ struct IslandHomeView: View {
                     }
                     .foregroundColor(Color.white.opacity(0.75))
                     .padding(.top, 1)
-                    // The four shortcuts, in OpenClicky's order. Talk is the one Saathi recognises
-                    // today; the other three land with the shortcut recogniser.
+                    // The four shortcuts, in OpenClicky's order. `ShortcutTracker` recognises all of
+                    // them; change a row here and it must change there.
                     shortcutRow(title: "Talk", keys: ["⌃ control", "⌥ option"])
                     shortcutRow(title: "Text", keys: ["⌃ control", "2×"])
                     shortcutRow(title: "Dictate", keys: ["fn", "⌃ control"])

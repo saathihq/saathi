@@ -177,6 +177,14 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
         try await think(about: heard, callbacks: callbacks)
     }
 
+    public func sendText(_ text: String) async throws {
+        let callbacks = state.withLock { $0.callbacks }
+        callbacks.onUserTranscript?(text)
+        guard thinks else { return }
+        callbacks.onStatus?("thinking…")
+        try await think(about: text, callbacks: callbacks)
+    }
+
     public func stop() async {
         let engine = state.withLock { $0.audioEngine }
         engine?.inputNode.removeTap(onBus: 0)

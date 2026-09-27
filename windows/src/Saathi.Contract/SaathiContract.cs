@@ -154,7 +154,7 @@ public static class SaathiTools
       "properties": {
         "question": {
           "type": "string",
-          "description": "What to find out about the screen, in the learner's own words where possible."
+          "description": "The learner's question, word for word. Do not rephrase it or name what you think they mean: \"this line\" rewritten as \"this symbol\" sent the look to the wrong thing."
         }
       },
       "required": [
@@ -266,11 +266,9 @@ public sealed class SaathiConfiguration
     public string ResolvedVoice =>
         string.IsNullOrWhiteSpace(Voice) ? ProviderRow.DefaultVoice : Voice!.Trim();
 
-    /// <summary>The language Saathi speaks. Unset follows this machine's own language.</summary>
+    /// <summary>The language Saathi speaks: the one chosen in Settings, English until one is.</summary>
     public string ResolvedLanguage =>
-        string.IsNullOrWhiteSpace(Language)
-            ? (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName ?? "en")
-            : Language!.Trim();
+        string.IsNullOrWhiteSpace(Language) ? "en" : Language!.Trim();
 
     /// <summary>The credential for a provider: its own vendor field first, then the legacy
     /// shared ApiKey. Providers needing no key of their own get null.</summary>

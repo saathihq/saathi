@@ -241,7 +241,16 @@ public struct ScreenSight: Sendable {
     /// It settles *which* thing is meant — the one question pixels answer badly, since forty rows
     /// of a list look alike and a 20-pixel arrow does not survive downscaling — and the pictures
     /// answer everything else.
-    static func systemPrompt(question: String, grounding: PointerContext? = nil) -> String {
+    static func systemPrompt(question: String, grounding: PointerContext? = nil, selection: String? = nil) -> String {
+        let selected = selection.map {
+            """
+
+
+            They have selected (highlighted) this text on screen: «\($0)». When they say "this", \
+            "this line", "this word" or "this", the selection is almost certainly what they mean — \
+            answer about that text, not about whatever the pointer happens to be over.
+            """
+        } ?? ""
         let grounded = grounding.map {
             """
 
@@ -261,20 +270,39 @@ public struct ScreenSight: Sendable {
         Say what the thing actually is and where it is, in words someone who cannot see the screen \
         can act on — "the folder under your pointer is called Saathi Signing, on the right of the \
         desktop" rather than "a blue folder icon". If what they asked about is not on the screen, \
-        say so plainly rather than describing something else.\(grounded)
+        say so plainly rather than describing something else.\(grounded)\(selected)
 
         Their question: \(question)
         """
     }
 
+    /// Set by the shell: hides (true) and shows again (false) Saathi's own windows that would
+    /// otherwise be in the picture. Nil in tests and the CLI, where there are none.
+    @MainActor public static var concealOwnWindows: ((Bool) -> Void)?
+
     /// Captures the screen and answers `question` about it.
     public func look(question: String) async throws -> String {
         guard let eye = Self.eye(for: configuration) else { throw ScreenSightError.noVisionKey }
-        let frames = try capture.capture()
+        // Saathi's own pointer follows the mouse, so it sits exactly where "this" is looked for:
+        // asked about a highlighted word, the vision model described the red triangle on top of
+        // it. It is hidden for the instant of the capture. (A window's `sharingType = .none` no
+        // longer keeps it out of screenshots on current macOS, so hiding is the reliable way.)
+        let concealing = await MainActor.run { () -> Bool in
+            guard let conceal = Self.concealOwnWindows else { return false }
+            conceal(true)
+            return true
+        }
+        if concealing { try? await Task.sleep(nanoseconds: 80_000_000) }
+        let captured = Result { try capture.capture() }
+        if concealing { await MainActor.run { Self.concealOwnWindows?(false) } }
+        let frames = try captured.get()
         let pictures = [frames.display.base64EncodedString(), frames.closeUp.base64EncodedString()]
         // Nil without the Accessibility grant or over an app with no tree; sight then works from
         // the pictures alone, as it did before.
-        let system = Self.systemPrompt(question: question, grounding: PointerGrounding.context(at: frames.pointer))
+        let system = Self.systemPrompt(
+            question: question,
+            grounding: PointerGrounding.context(at: frames.pointer),
+            selection: PointerGrounding.selectedText())
 
         switch eye {
         case let .anthropic(model):

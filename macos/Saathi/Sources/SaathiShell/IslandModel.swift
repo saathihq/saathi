@@ -17,15 +17,15 @@ import SaathiKit
 ///
 /// A short list rather than every language OpenAI supports: this is a picker in a small panel, not
 /// a locale browser, and the realtime model handles anything the learner actually speaks to it. The
-/// point of the setting is to stop it *guessing* — it answered a Delhi user in Korean — so what
-/// matters is that a definite answer can be given, and that "follow this Mac" is the default.
+/// point of the setting is to stop it *guessing* — it answered a Delhi user in Korean, and an
+/// English speaker in Italian, Japanese and Portuguese — so there is always a definite answer:
+/// English until another is chosen. There is no "follow this Mac" or "follow the learner".
 public struct IslandLanguage: Identifiable, Equatable, Sendable {
     public let tag: String
     public let title: String
     public var id: String { tag }
 
     public static let all: [IslandLanguage] = [
-        IslandLanguage(tag: "", title: "Follow this Mac"),
         IslandLanguage(tag: "en", title: "English"),
         IslandLanguage(tag: "hi", title: "हिन्दी"),
         IslandLanguage(tag: "ta", title: "தமிழ்"),
@@ -126,19 +126,11 @@ public final class IslandModel: ObservableObject {
     @Published public var voiceTitle: String = ""
     @Published public var laneTitle: String = ""
 
-    /// The language row's wording: the resolved language named in its own script where the picker
-    /// offers one, so "Follow this Mac" resolves to what it actually followed rather than staying
-    /// vague about it.
+    /// The language row's wording, in the language's own script.
     public var languageTitle: String {
-        if let match = IslandLanguage.all.first(where: { !$0.tag.isEmpty && $0.tag == language }) {
-            return match.title
-        }
-        let resolved = Locale.preferredLanguages.first
-            .flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
-        let named = IslandLanguage.all.first { $0.tag == resolved }?.title
-            ?? Locale.current.localizedString(forLanguageCode: resolved)
-            ?? resolved
-        return "\(named) · this Mac"
+        IslandLanguage.all.first { $0.tag == language }?.title
+            ?? Locale.current.localizedString(forLanguageCode: language)
+            ?? "English"
     }
     /// The user's skill library, as the "Add skills" row reads it. Handed in by the shell so the
     /// panel can be built in a test without touching `~/.saathi/skills`.
@@ -200,8 +192,11 @@ public struct IslandActions {
     /// is how the panel came to promise one thing and Save do another. The panel never validates
     /// anything itself.
     public var onCheckKey: (ProviderKind, String, String) -> Void = { _, _, _ in }
-    /// Save both keys and reconfigure. Called only when at least one field is valid.
+    /// Check any typed key, then save both and reconfigure if every typed key was accepted.
     public var onSaveKeys: (String, String) -> Void = { _, _ in }
+    /// The Setup tab was built afresh, or a key field was emptied. Any verdict about text that has
+    /// since gone must go with it, and the key on disk earns its own back.
+    public var onKeyFieldsEmpty: (_ openAIField: String, _ anthropicField: String) -> Void = { _, _ in }
     /// Change the language Saathi answers in. Empty means follow this Mac.
     public var onLanguage: (String) -> Void = { _ in }
     /// Relaunch Saathi so a permission grant this process could not pick up takes effect.
