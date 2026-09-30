@@ -124,6 +124,24 @@ public class PerformingTests
 
         Assert.Empty(opener.Opened);
     }
+
+    /// <summary>
+    /// Looking is something Saathi finds out, not something it does: the answer has to go back to
+    /// the model as the tool call's output, so a voice session answers it. Performing one here
+    /// says so, rather than doing nothing and looking like a screen that could not be read.
+    /// </summary>
+    [Fact]
+    public async Task LookingAtTheScreenIsNotSomethingThePerformerDoes()
+    {
+        var speaker = new RecordingSpeaker();
+        var performer = new ActionPerformer(speaker, new RecordingUrlOpener());
+
+        var error = await Assert.ThrowsAsync<ActionException>(
+            () => performer.PerformAsync(new LookAtScreenAction("what is this?")));
+
+        Assert.Contains("answered by the voice session", error.Message, StringComparison.Ordinal);
+        Assert.Empty(speaker.Lines);
+    }
 }
 
 public class ContractTests
@@ -135,10 +153,11 @@ public class ContractTests
     [Fact]
     public void WireNamesAreWhatTheSchemaSays()
     {
-        Assert.Equal(["say", "show_step", "open_url"], SaathiActions.AllWireNames);
+        Assert.Equal(["say", "show_step", "open_url", "look_at_screen"], SaathiActions.AllWireNames);
         Assert.Equal("say", SayAction.Wire);
         Assert.Equal("show_step", ShowStepAction.Wire);
         Assert.Equal("open_url", OpenUrlAction.Wire);
+        Assert.Equal("look_at_screen", LookAtScreenAction.Wire);
     }
 
     [Fact]

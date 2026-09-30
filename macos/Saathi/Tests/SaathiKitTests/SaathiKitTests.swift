@@ -108,6 +108,22 @@ final class ActionPerformerTests: XCTestCase {
         }
         XCTAssertTrue(opener.opened.isEmpty, "nothing should reach the opener")
     }
+
+    /// Looking is something Saathi finds out, not something it does: the answer has to go back to
+    /// the model as the tool call's output, so a voice session answers it. Performing one here
+    /// says so, rather than doing nothing and looking like a screen that could not be read.
+    func testLookingAtTheScreenIsNotSomethingThePerformerDoes() async {
+        let speaker = RecordingSpeaker()
+        let performer = ActionPerformer(speaker: speaker, urlOpener: RecordingUrlOpener())
+
+        do {
+            try await performer.perform(.lookAtScreen(LookAtScreenAction(question: "what is this?")))
+            XCTFail("a look is answered by the voice session, not performed")
+        } catch {
+            XCTAssertTrue("\(error)".contains("answered by the voice session"), "got: \(error)")
+        }
+        XCTAssertTrue(speaker.lines.isEmpty)
+    }
 }
 
 final class ConfigurationTests: XCTestCase {
