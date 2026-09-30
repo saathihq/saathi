@@ -9,6 +9,7 @@
 
 import AVFoundation
 import Foundation
+import os
 import XCTest
 @testable import SaathiKit
 
@@ -45,12 +46,20 @@ final class FakeRecorder: TurnRecorder, @unchecked Sendable {
     }
 }
 
+/// A clock a test moves by hand, for how long the keys were held.
+final class HandClock: @unchecked Sendable {
+    private let time = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 0))
+
+    var now: Date { time.withLock { $0 } }
+    func advance(_ seconds: TimeInterval) { time.withLock { $0 = $0.addingTimeInterval(seconds) } }
+}
+
 final class SarvamEarsTests: XCTestCase {
 
-    private func makeEars(_ recorder: FakeRecorder, _ replies: StubHTTP.Reply...) -> SarvamEars {
-        SarvamEars(
-            client: SarvamClient(key: "sk-sarvam", urlSession: StubHTTP.session(replies)),
-            language: "ml-IN", recorder: recorder)
+    private func makeEars(_ recorder: FakeRecorder, clock: HandClock? = nil, _ replies: StubHTTP.Reply...) -> SarvamEars {
+        let client = SarvamClient(key: "sk-sarvam", urlSession: StubHTTP.session(replies))
+        guard let clock else { return SarvamEars(client: client, language: "ml-IN", recorder: recorder) }
+        return SarvamEars(client: client, language: "ml-IN", recorder: recorder, now: { clock.now })
     }
 
     func testAHeldTurnGoesToSaarasAsAWavInTheLanguageOfSettings() async throws {
@@ -99,6 +108,41 @@ final class SarvamEarsTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("quit and reopen"), error.localizedDescription)
         }
         XCTAssertTrue(StubHTTP.seen.isEmpty)
+    }
+
+    /// A closed input may hand over zeros, or may hand over nothing at all. Keys held for two
+    /// seconds with nothing recorded were not tapped: the microphone is not delivering, and "I did
+    /// not catch that" would send the person to say it again into the same closed input.
+    func testKeysHeldWithNothingRecordedIsTheMicrophoneNotATap() async throws {
+        let clock = HandClock()
+        let ears = makeEars(FakeRecorder(recording: RecordedTurn()), clock: clock, .json(["transcript": "never asked"]))
+        try await ears.begin(EarsFeedback())
+        clock.advance(2)
+        do {
+            _ = try await ears.finish()
+            XCTFail("two seconds held and nothing recorded is not a tap of the keys")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("microphone gave no sound"), error.localizedDescription)
+        }
+        XCTAssertTrue(StubHTTP.seen.isEmpty)
+    }
+
+    /// And a tap is still a tap, however little it recorded.
+    func testATapThatRecordedNothingIsStillOnlyATap() async throws {
+        let clock = HandClock()
+        let ears = makeEars(FakeRecorder(recording: RecordedTurn()), clock: clock, .json(["transcript": "never asked"]))
+        try await ears.begin(EarsFeedback())
+        clock.advance(0.2)
+        let heard = try await ears.finish()
+        XCTAssertEqual(heard, "")
+
+        // A microphone that is slow to start is not a closed one: a second of holding for a
+        // quarter of a second of sound is still given the benefit of the doubt.
+        let slow = makeEars(FakeRecorder(recording: FakeRecorder.turn(seconds: 0.25)), clock: clock, .json(["transcript": "never asked"]))
+        try await slow.begin(EarsFeedback())
+        clock.advance(1.2)
+        let again = try await slow.finish()
+        XCTAssertEqual(again, "")
     }
 
     /// Someone who held the keys and then said nothing has a working microphone in a quiet room.

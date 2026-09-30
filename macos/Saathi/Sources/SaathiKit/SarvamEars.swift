@@ -154,18 +154,28 @@ public final class SarvamEars: Ears, @unchecked Sendable {
     /// Under this the microphone gave nothing at all — not a quiet room, which has a noise floor,
     /// but an input that is closed, muted or delivering zeros.
     static let nothingAtAll: Float = 0.0001
+    /// Keys held this long with next to nothing recorded were not tapped: the microphone handed
+    /// over no sound at all. Long enough that an engine slow to start is not mistaken for one.
+    static let heldLongEnoughToHaveHeard: TimeInterval = 1.5
     /// Saaras takes thirty seconds a request; a longer turn goes up in pieces this long.
     static let longestPiece: TimeInterval = 28
 
     private let client: SarvamClient
     private let language: String
     private let recorder: any TurnRecorder
+    private let now: @Sendable () -> Date
+    /// When the keys went down, for telling a tap from a microphone that gave nothing.
+    private let began = OSAllocatedUnfairLock<Date?>(initialState: nil)
 
-    /// `language`: Sarvam's code for it, "ml-IN".
-    public init(client: SarvamClient, language: String, recorder: any TurnRecorder = MicrophoneTurnRecorder()) {
+    /// `language`: Sarvam's code for it, "ml-IN". `now` is the clock; a test moves its own.
+    public init(
+        client: SarvamClient, language: String, recorder: any TurnRecorder = MicrophoneTurnRecorder(),
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.client = client
         self.language = language
         self.recorder = recorder
+        self.now = now
     }
 
     public func prepare() async throws -> String {
@@ -175,18 +185,27 @@ public final class SarvamEars: Ears, @unchecked Sendable {
 
     public func begin(_ feedback: EarsFeedback) async throws {
         try recorder.start(onLevel: feedback.onLevel)
+        began.withLock { $0 = now() }
     }
 
     public func finish() async throws -> String {
         let turn = recorder.stop()
-        guard turn.seconds >= Self.shortestTurn else { return "" }
-        // A microphone that gave nothing at all is not a turn in which nothing was said, and
-        // "I did not catch that" would send the person to say it again into a closed input.
-        guard turn.peak >= Self.nothingAtAll else {
-            throw VoiceError.audio(
-                "the microphone gave no sound. Check the input in Sound settings — and if Saathi has "
-                + "only just switched to Sarvam, quit and reopen it.")
+        let held = began.withLock { began -> TimeInterval in
+            defer { began = nil }
+            return began.map { now().timeIntervalSince($0) } ?? 0
         }
+        // A microphone that gave nothing at all is not a turn in which nothing was said, and
+        // "I did not catch that" would send the person to say it again into a closed input. It
+        // shows up one of two ways: sound that is all zeros, or — with the keys held a good while —
+        // hardly any sound handed over at all.
+        let microphoneGaveNothing = VoiceError.audio(
+            "the microphone gave no sound. Check the input in Sound settings — and if Saathi has "
+            + "only just switched to Sarvam, quit and reopen it.")
+        guard turn.seconds >= Self.shortestTurn else {
+            if held >= Self.heldLongEnoughToHaveHeard { throw microphoneGaveNothing }
+            return ""   // the keys were tapped, not held
+        }
+        guard turn.peak >= Self.nothingAtAll else { throw microphoneGaveNothing }
         // Nobody spoke. That is for the session to say, as it does on every lane; the sound of a
         // quiet room is not sent to Sarvam to be told so.
         guard turn.peak >= Self.silence else { return "" }
@@ -202,6 +221,7 @@ public final class SarvamEars: Ears, @unchecked Sendable {
 
     public func cancel() {
         _ = recorder.stop()
+        began.withLock { $0 = nil }
     }
 
     /// A turn cut into pieces Saaras will take. Cut on a sample, never through one; a word that
