@@ -154,13 +154,20 @@ final class SetupPlanTests: XCTestCase {
         XCTAssertEqual(claude.speech, .sarvam)
         XCTAssertTrue(claude.explanation.contains("think with Claude"), claude.explanation)
         XCTAssertTrue(claude.explanation.contains("straight to Sarvam"), claude.explanation)
+        XCTAssertTrue(
+            claude.explanation.contains("and so does what I say back"),
+            "Claude's replies go to Sarvam to be spoken, which they otherwise never would: \(claude.explanation)")
         XCTAssertTrue(claude.storedButUnused.isEmpty, "the Sarvam key is in use: it hears and speaks")
 
         let local = SetupPlan.make(valid: [.sarvam], current: .local, speech: .sarvam)
         XCTAssertEqual(local.provider, .local)
         XCTAssertEqual(local.speech, .sarvam)
         XCTAssertTrue(local.explanation.contains("straight to Sarvam"), local.explanation)
+        XCTAssertTrue(local.explanation.contains("and so does what I say back"), local.explanation)
         XCTAssertFalse(local.explanation.contains("Nothing you say leaves it"), local.explanation)
+
+        // With Sarvam doing the thinking its replies were Sarvam's to begin with.
+        XCTAssertFalse(fresh(sarvam: true).explanation.contains("what I say back"))
     }
 
     func testSarvamsSpeechNeedsASarvamKeyAndTheChainLane() {

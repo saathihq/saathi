@@ -8,8 +8,10 @@
 //  Malayalam, Gujarati, Punjabi or Odia, and reads their script with an English one; Bulbul speaks
 //  all ten of the Indian languages Saathi can be set to, and English in the same voice.
 //
-//  What is sent is the text of what Saathi is about to say. That already went to the provider that
-//  wrote it, so this adds nothing to what leaves the machine — the ears are the half that does.
+//  What is sent is the text of what Saathi is about to say. With Sarvam doing the thinking that
+//  text was Sarvam's to begin with. With Claude, or a model on this Mac, doing it, the reply is one
+//  more thing that goes to Sarvam — which is why the sentence in Setup and `saathi provider` both
+//  say that what is said back goes there as well as the voice.
 //
 
 @preconcurrency import AVFoundation

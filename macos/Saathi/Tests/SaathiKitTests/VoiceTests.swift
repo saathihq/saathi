@@ -85,7 +85,8 @@ final class VoiceLaneTests: XCTestCase {
         let mixed = SaathiConfiguration(sarvamKey: "x", speech: .sarvam)
         XCTAssertTrue(VoiceLaneReport.describe(mixed).contains("your voice leaves this machine as audio, to Sarvam"))
         XCTAssertTrue(ProviderReport.describe(mixed).hasSuffix(
-            "privacy    the thinking stays on this machine; your voice leaves it, to Sarvam"))
+            "privacy    the thinking stays on this machine; your voice and what is said back go to Sarvam"),
+            "Bulbul is sent every reply to speak it: that leaves too, and the report has to say so")
         XCTAssertTrue(ProviderReport.describe(SaathiConfiguration()).hasSuffix("privacy    stays on this machine"))
         let sarvam = SaathiConfiguration(provider: .sarvam, sarvamKey: "x", speech: .sarvam)
         XCTAssertTrue(ProviderReport.describe(sarvam).hasSuffix("privacy    leaves this machine"), "all of it does")

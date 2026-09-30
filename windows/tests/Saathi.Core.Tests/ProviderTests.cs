@@ -146,8 +146,9 @@ public class ProviderTests
     public void ALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine()
     {
         var mixed = new SaathiConfiguration { SarvamKey = "x", Speech = SpeechEngine.Sarvam };
+        // Bulbul is sent every reply to speak it: that leaves too, and the report has to say so.
         Assert.EndsWith(
-            "privacy    the thinking stays on this machine; your voice leaves it, to Sarvam",
+            "privacy    the thinking stays on this machine; your voice and what is said back go to Sarvam",
             ProviderReport.Describe(mixed), StringComparison.Ordinal);
         Assert.Contains(
             "your voice leaves this machine as audio, to Sarvam", VoiceLaneReport.Describe(mixed),

@@ -145,7 +145,7 @@ struct IslandSetupView: View {
                 toggleRow(
                     systemImage: "ear",
                     title: "Hear and speak through Sarvam",
-                    detail: "Your voice leaves this Mac as audio, to Sarvam",
+                    detail: "Your voice, and what is said back, go to Sarvam",
                     isOn: Binding(get: { model.sarvamSpeechOn }, set: { actions.onSarvamSpeech($0) }))
             }
             settingRow(systemImage: "waveform", title: "Voice", value: model.voiceTitle.isEmpty ? "—" : model.voiceTitle)

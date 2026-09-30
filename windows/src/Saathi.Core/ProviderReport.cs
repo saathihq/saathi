@@ -38,15 +38,16 @@ public static class ProviderReport
         return string.Join("\n", lines);
     }
 
-    /// <summary>The thinking leaves for every provider but local. With Sarvam's ears the voice
-    /// leaves too — and in front of a model on this machine it is the only thing that does, which
-    /// is said in so many words: two lines up, the local row's own summary has just said nothing
-    /// leaves the device.</summary>
+    /// <summary>The thinking leaves for every provider but local. With Sarvam's ears and mouth the
+    /// voice leaves too, and so does every reply, which Bulbul is sent in order to speak it. In
+    /// front of a model on this machine those are the only things that do, and that is said in so
+    /// many words: two lines up, the local row's own summary has just said nothing leaves the
+    /// device.</summary>
     private static string Privacy(SaathiConfiguration configuration)
     {
         if (configuration.ProviderRow.SendsDataOffMachine) return "leaves this machine";
         if (VoiceLaneReport.SarvamSpeechIsOn(configuration))
-            return "the thinking stays on this machine; your voice leaves it, to Sarvam";
+            return "the thinking stays on this machine; your voice and what is said back go to Sarvam";
         return "stays on this machine";
     }
 

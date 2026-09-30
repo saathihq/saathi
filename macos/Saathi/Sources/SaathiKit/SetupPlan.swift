@@ -147,6 +147,10 @@ public struct SetupPlan: Equatable, Sendable {
     private static func explanation(for provider: ProviderKind, speech: SpeechEngine, hasKeys: Bool) -> String {
         let toSarvam = "Your voice leaves this machine as audio, straight to Sarvam — Saathi's servers "
             + "are not in the conversation."
+        // With someone else doing the thinking, Bulbul is also sent every reply in order to speak
+        // it. Those words would otherwise never have gone to Sarvam, so the sentence says they do.
+        let bothWays = "Your voice leaves this machine as audio, straight to Sarvam, and so does what I "
+            + "say back, to be spoken — Saathi's servers are not in the conversation."
         switch (provider, speech) {
         case (.openai, _):
             return "I will talk with you through OpenAI's realtime voice. Your voice "
@@ -162,13 +166,13 @@ public struct SetupPlan: Equatable, Sendable {
                 + "here — only the words you said are sent."
         case (.anthropic, .sarvam):
             return "I will listen and speak through Sarvam, in the language chosen below, and think "
-                + "with Claude. " + toSarvam
+                + "with Claude. " + bothWays
         case (.anthropic, .device):
             return "I will listen on this Mac and think with Claude. Your voice stays "
                 + "here — only the words you said are sent."
         case (.local, .sarvam):
             return "I will listen and speak through Sarvam, in the language chosen below, and think "
-                + "with a model on this Mac. " + toSarvam
+                + "with a model on this Mac. " + bothWays
         case (.local, .device):
             return hasKeys
                 ? "I will listen and think on this Mac, with a model already running on it — "
