@@ -521,10 +521,29 @@ final class CredentialResolutionTests: XCTestCase {
 
     /// Existing configs in the wild have only `apiKey`. They must keep working, whichever provider
     /// they named — this is the compatibility promise of keeping the field at all.
-    func testTheLegacySharedKeyIsStillReadWhenThereIsNoVendorField() {
-        let legacy = SaathiConfiguration(apiKey: "sk-legacy")
-        XCTAssertEqual(legacy.credential(for: .openai), "sk-legacy")
-        XCTAssertEqual(legacy.credential(for: .anthropic), "sk-legacy")
+    func testTheLegacySharedKeyIsStillReadForTheProviderTheFileNames() {
+        for kind in [ProviderKind.openai, .anthropic, .sarvam] {
+            XCTAssertEqual(
+                SaathiConfiguration(provider: kind, apiKey: "sk-legacy").credential(for: kind), "sk-legacy", "\(kind)")
+        }
+    }
+
+    /// It is one key, and it is the named provider's. It used to be handed to every vendor that
+    /// asked, so a config naming Sarvam gave its Sarvam key to whoever was asked next — and a look
+    /// at the screen posted the screenshot, with that key, to Anthropic.
+    func testTheLegacySharedKeyBelongsToNoOtherProvider() {
+        let sarvam = SaathiConfiguration(provider: .sarvam, apiKey: "sk-legacy")
+        XCTAssertNil(sarvam.credential(for: .anthropic))
+        XCTAssertNil(sarvam.credential(for: .openai))
+
+        let openai = SaathiConfiguration(provider: .openai, apiKey: "sk-legacy")
+        XCTAssertNil(openai.credential(for: .anthropic))
+        XCTAssertNil(openai.credential(for: .sarvam))
+
+        let unnamed = SaathiConfiguration(apiKey: "sk-legacy")
+        for kind in ProviderKind.allCases {
+            XCTAssertNil(unnamed.credential(for: kind), "\(kind): no provider is named, so the key is nobody's")
+        }
     }
 
     func testAVendorFieldWinsOverTheLegacyOne() {
@@ -553,7 +572,7 @@ final class CredentialResolutionTests: XCTestCase {
         let own = SaathiConfiguration(apiKey: "legacy", openaiKey: "sk-openai", sarvamKey: " sk-sarvam \n")
         XCTAssertEqual(own.credential(for: .sarvam), "sk-sarvam")
         XCTAssertEqual(own.credential(for: .openai), "sk-openai")
-        XCTAssertEqual(SaathiConfiguration(apiKey: "legacy").credential(for: .sarvam), "legacy")
+        XCTAssertEqual(SaathiConfiguration(provider: .sarvam, apiKey: "legacy").credential(for: .sarvam), "legacy")
         XCTAssertNil(
             SaathiConfiguration(openaiKey: "sk-openai").credential(for: .sarvam),
             "another vendor's key is not Sarvam's")

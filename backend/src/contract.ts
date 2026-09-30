@@ -13,7 +13,7 @@ export type SaathiConfiguration = {
   providerBaseUrl?: string;
   /** Overrides the provider's default model. */
   model?: string;
-  /** Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working. */
+  /** Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read — as the key of the provider this file names, and of no other — when that provider has no key of its own, so existing configs keep working. */
   apiKey?: string;
   /** Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers. */
   openaiKey?: string;

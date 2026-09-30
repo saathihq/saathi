@@ -78,7 +78,7 @@
         "name": "apiKey",
         "type": "string",
         "optional": true,
-        "doc": "Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."
+        "doc": "Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read — as the key of the provider this file names, and of no other — when that provider has no key of its own, so existing configs keep working."
       },
       {
         "name": "openaiKey",

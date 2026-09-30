@@ -178,7 +178,7 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var providerBaseUrl: String?
     /// Overrides the provider's default model.
     public var model: String?
-    /// Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.
+    /// Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read — as the key of the provider this file names, and of no other — when that provider has no key of its own, so existing configs keep working.
     public var apiKey: String?
     /// Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers.
     public var openaiKey: String?
@@ -282,19 +282,24 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var resolvedSpeech: SpeechEngine { speech ?? .device }
 
     /// The credential for a provider: its own vendor field first, then the legacy shared
-    /// `apiKey`. Vendor-specific wins, so a config holding keys for several vendors is
-    /// unambiguous — which is the whole reason the vendor fields exist. Providers that
-    /// need no key of their own get nil even when keys are present.
+    /// `apiKey` — but only for the provider this file names. Vendor-specific wins, so a
+    /// config holding keys for several vendors is unambiguous, which is the whole reason the
+    /// vendor fields exist. Providers that need no key of their own get nil even when keys
+    /// are present.
+    ///
+    /// The shared key is one key, and it is the named provider's. It used to be handed to
+    /// every vendor that asked, so a config naming Sarvam gave its Sarvam key to Anthropic
+    /// the moment something wanted an Anthropic key — with whatever that request carried.
     public func credential(for kind: ProviderKind) -> String? {
         guard SaathiProvider.of(kind).requiresKey else { return nil }
-        let candidates: [String?]
+        let own: String?
         switch kind {
-        case .openai: candidates = [openaiKey, apiKey]
-        case .anthropic: candidates = [anthropicKey, apiKey]
-        case .sarvam: candidates = [sarvamKey, apiKey]
-        default: candidates = [apiKey]
+        case .openai: own = openaiKey
+        case .anthropic: own = anthropicKey
+        case .sarvam: own = sarvamKey
+        default: own = nil
         }
-        for candidate in candidates {
+        for candidate in [own, kind == resolvedProvider ? apiKey : nil] {
             let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !trimmed.isEmpty { return trimmed }
         }

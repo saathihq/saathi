@@ -111,7 +111,24 @@ public class SharedFixtureTests
     {
         var own = new SaathiConfiguration { ApiKey = "legacy", OpenaiKey = "sk-openai", SarvamKey = " sk-sarvam " };
         Assert.Equal("sk-sarvam", own.Credential(ProviderKind.Sarvam));
-        Assert.Equal("legacy", new SaathiConfiguration { ApiKey = "legacy" }.Credential(ProviderKind.Sarvam));
+        Assert.Equal(
+            "legacy",
+            new SaathiConfiguration { Provider = ProviderKind.Sarvam, ApiKey = "legacy" }.Credential(ProviderKind.Sarvam));
         Assert.Null(new SaathiConfiguration { OpenaiKey = "sk-openai" }.Credential(ProviderKind.Sarvam));
+    }
+
+    /// <summary>The shared key is one key, and it is the named provider's. Handed to every vendor
+    /// that asked, a config naming Sarvam gave its Sarvam key to whoever was asked next.</summary>
+    [Fact]
+    public void TheLegacySharedKeyBelongsToNoOtherProvider()
+    {
+        var sarvam = new SaathiConfiguration { Provider = ProviderKind.Sarvam, ApiKey = "sk-legacy" };
+        Assert.Equal("sk-legacy", sarvam.Credential(ProviderKind.Sarvam));
+        Assert.Null(sarvam.Credential(ProviderKind.Anthropic));
+        Assert.Null(sarvam.Credential(ProviderKind.Openai));
+
+        var unnamed = new SaathiConfiguration { ApiKey = "sk-legacy" };
+        foreach (var kind in Enum.GetValues<ProviderKind>())
+            Assert.Null(unnamed.Credential(kind));
     }
 }

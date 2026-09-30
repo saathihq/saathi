@@ -262,6 +262,16 @@ final class SarvamSpeechTests: XCTestCase {
         XCTAssertEqual(try SarvamSpeech.settings(for: legacy).key, "sk-legacy")
     }
 
+    /// Another vendor's key is not a Sarvam key, however it is spelled in the file. It used to be
+    /// taken for one, and a turn's audio went up with an Anthropic key on it.
+    func testAnotherVendorsSharedKeyIsNotSentToSarvam() {
+        let claude = SaathiConfiguration(provider: .anthropic, apiKey: "sk-ant", speech: .sarvam)
+        XCTAssertThrowsError(try SarvamSpeech.settings(for: claude)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("needs a Sarvam key"), error.localizedDescription)
+        }
+        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: claude, speaker: PrintingSpeaker()))
+    }
+
     func testNoKeyIsSaidNotWorkedAround() {
         XCTAssertThrowsError(try SarvamSpeech.settings(for: SaathiConfiguration(speech: .sarvam))) { error in
             XCTAssertTrue(error.localizedDescription.contains("needs a Sarvam key"), error.localizedDescription)

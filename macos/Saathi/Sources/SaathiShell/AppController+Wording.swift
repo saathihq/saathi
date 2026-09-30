@@ -321,25 +321,16 @@ extension AppController {
     /// The verdicts Setup opens with, read from what is on disk so a stored key counts before
     /// anything has been checked this launch.
     ///
-    /// A vendor field seeds its own vendor and nothing else. The legacy shared `apiKey` seeds only
-    /// the vendor the config actually names as its provider: it is one key that could belong to
-    /// any vendor, and `credential(for:)` hands it to all of them, so seeding them all would have
-    /// the panel assert an Anthropic key exists on a config that never mentioned Anthropic —
-    /// showing that key masked under Anthropic, and lighting up Save with every field empty. A
-    /// config with a legacy key and no provider named says nothing about whose key it is, so it
-    /// seeds nothing.
+    /// A vendor field seeds its own vendor and nothing else, and the legacy shared `apiKey` seeds
+    /// only the vendor the config names as its provider: it is one key, and a config with a legacy
+    /// key and no provider named says nothing about whose it is. That rule used to be written out
+    /// here, because `credential(for:)` handed the shared key to every vendor and the panel would
+    /// otherwise have shown it masked under all three. It is `credential(for:)`'s own rule now.
     static func seededKeyStates(for configuration: SaathiConfiguration) -> KeyStates {
-        func seed(_ kind: ProviderKind, vendorKey: String?) -> KeyFieldState {
-            let vendor = vendorKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !vendor.isEmpty { return .saved(masked: IslandModel.masked(vendor)) }
-            guard configuration.provider == kind,
-                  let legacy = configuration.credential(for: kind) else { return .empty }
-            return .saved(masked: IslandModel.masked(legacy))
+        func seed(_ kind: ProviderKind) -> KeyFieldState {
+            configuration.credential(for: kind).map { .saved(masked: IslandModel.masked($0)) } ?? .empty
         }
-        return KeyStates(
-            openAI: seed(.openai, vendorKey: configuration.openaiKey),
-            sarvam: seed(.sarvam, vendorKey: configuration.sarvamKey),
-            anthropic: seed(.anthropic, vendorKey: configuration.anthropicKey))
+        return KeyStates(openAI: seed(.openai), sarvam: seed(.sarvam), anthropic: seed(.anthropic))
     }
 
     // MARK: where it could think

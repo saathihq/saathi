@@ -181,7 +181,7 @@ public sealed class SaathiConfiguration
     [JsonPropertyName("model")]
     public string? Model { get; set; }
 
-    /// <summary>Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.</summary>
+    /// <summary>Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read — as the key of the provider this file names, and of no other — when that provider has no key of its own, so existing configs keep working.</summary>
     [JsonPropertyName("apiKey")]
     public string? ApiKey { get; set; }
 
@@ -283,18 +283,20 @@ public sealed class SaathiConfiguration
     public SpeechEngine ResolvedSpeech => Speech ?? global::Saathi.Contract.SpeechEngine.Device;
 
     /// <summary>The credential for a provider: its own vendor field first, then the legacy
-    /// shared ApiKey. Providers needing no key of their own get null.</summary>
+    /// shared ApiKey — but only for the provider this file names. The shared key is one key,
+    /// and handing it to every vendor that asked sent one vendor's key to another. Providers
+    /// needing no key of their own get null.</summary>
     public string? Credential(ProviderKind kind)
     {
         if (!SaathiProvider.Of(kind).RequiresKey) return null;
-        var candidates = kind switch
+        var own = kind switch
         {
-            global::Saathi.Contract.ProviderKind.Openai => new[] { OpenaiKey, ApiKey },
-            global::Saathi.Contract.ProviderKind.Anthropic => new[] { AnthropicKey, ApiKey },
-            global::Saathi.Contract.ProviderKind.Sarvam => new[] { SarvamKey, ApiKey },
-            _ => new[] { ApiKey },
+            global::Saathi.Contract.ProviderKind.Openai => OpenaiKey,
+            global::Saathi.Contract.ProviderKind.Anthropic => AnthropicKey,
+            global::Saathi.Contract.ProviderKind.Sarvam => SarvamKey,
+            _ => null,
         };
-        foreach (var candidate in candidates)
+        foreach (var candidate in new[] { own, kind == ResolvedProvider ? ApiKey : null })
             if (!string.IsNullOrWhiteSpace(candidate)) return candidate!.Trim();
         return null;
     }

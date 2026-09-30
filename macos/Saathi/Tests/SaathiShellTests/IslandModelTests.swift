@@ -504,8 +504,8 @@ final class SeededKeyStateTests: XCTestCase {
         let decision = AppController.setupDecision(fields: VendorKeys(), states: seeded, configuration: legacy)
         XCTAssertEqual(decision.plan.provider, .openai)
         XCTAssertEqual(decision.keys.openAI, "sk-legacy-1234")
-        // `credential(for:)` still hands the legacy key to the other two vendors, but with no
-        // verdict behind it nothing counts it, and the config Save would write gains no key of theirs.
+        // The legacy key is the named provider's and nobody else's, so the config Save would
+        // write gains no key for the other two vendors.
         let written = decision.plan.applied(to: legacy, keys: decision.keys)
         XCTAssertEqual(written.openaiKey, "sk-legacy-1234")
         XCTAssertNil(written.anthropicKey, "the legacy key must not be re-filed as an Anthropic key")

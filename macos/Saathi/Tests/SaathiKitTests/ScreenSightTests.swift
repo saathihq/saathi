@@ -82,6 +82,17 @@ final class ScreenSightTests: XCTestCase {
         XCTAssertNil(ScreenSight.eye(for: .init(provider: .local)))
     }
 
+    /// A shared key is the named provider's and nobody else's. A Sarvam key is not something to
+    /// show Anthropic, with a picture of the screen attached — which is what asking for a look did.
+    func testALegacyKeyIsOnlyAnEyeForTheProviderItWasWrittenFor() {
+        XCTAssertNil(ScreenSight.eye(for: .init(provider: .sarvam, apiKey: "sk-sarvam")))
+        XCTAssertNil(ScreenSight.eye(for: .init(apiKey: "sk-whose")))
+        XCTAssertEqual(ScreenSight.eye(for: .init(provider: .openai, apiKey: "sk-o")), .openai(model: "gpt-4o-mini"))
+        XCTAssertEqual(
+            ScreenSight.eye(for: .init(provider: .anthropic, apiKey: "sk-a")),
+            .anthropic(model: "claude-haiku-4-5-20251001"))
+    }
+
     /// What Accessibility says is under the pointer settles which thing "this" is; without it the
     /// prompt is exactly what it was.
     func testThePromptCarriesWhatAccessibilitySaysIsUnderThePointer() {
