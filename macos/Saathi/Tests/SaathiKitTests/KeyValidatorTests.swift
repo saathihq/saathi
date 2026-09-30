@@ -90,6 +90,67 @@ final class KeyValidatorTests: XCTestCase {
             return XCTFail("local takes no key; there is nothing here to validate")
         }
     }
+
+    // MARK: Sarvam, whose model list is open to anyone
+
+    /// `GET /v1/models` answers 200 to no key at all — and to a wrong one — so asking it accepted
+    /// every string ever pasted. Sarvam is asked something that needs a key instead.
+    func testSarvamIsAskedSomethingThatNeedsAKey() async {
+        _ = await KeyValidator(urlSession: .keyStub(status: 400)).check(.sarvam, key: " sk-s \n")
+        let request = KeyStubProtocol.lastRequest
+        XCTAssertEqual(request?.url?.absoluteString, "https://api.sarvam.ai/v1/chat/completions")
+        XCTAssertEqual(request?.httpMethod, "POST")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer sk-s")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Content-Type"), "application/json")
+    }
+
+    /// The question is an empty request. Sarvam checks the key before it reads the body, so "your
+    /// request is missing a model" can only be said to a key it has let in — and nothing is run,
+    /// and nothing is billed.
+    func testSarvamFindingTheRequestEmptyMeansTheKeyWasLetIn() async {
+        for status in [400, 422] {
+            let result = await KeyValidator(urlSession: .keyStub(status: status)).check(.sarvam, key: "sk-s")
+            XCTAssertEqual(result, .valid, "\(status)")
+        }
+    }
+
+    /// Sarvam refuses a key with 403, not 401.
+    func testSarvamRefusingTheKeyNamesSarvam() async {
+        guard case let .rejected(message) = await KeyValidator(urlSession: .keyStub(status: 403)).check(.sarvam, key: "nope") else {
+            return XCTFail("a 403 from Sarvam is the key being refused")
+        }
+        XCTAssertEqual(message, "Sarvam did not accept that key.")
+    }
+
+    /// "Bad request" is only good news from the one vendor that is asked an empty question.
+    func testABadRequestFromAVendorAskedForItsModelsIsNotAWorkingKey() async {
+        for kind in [ProviderKind.openai, .anthropic] {
+            guard case .unreachable = await KeyValidator(urlSession: .keyStub(status: 400)).check(kind, key: "sk") else {
+                return XCTFail("\(kind): a 400 to a model list says nothing good about the key")
+            }
+        }
+    }
+
+    /// A real key on an account with nothing left is not a wrong key, and "try again shortly"
+    /// would be a lie: it will not work shortly.
+    func testAnAccountOutOfCreditsIsSaidInThoseWords() async {
+        let body = Data(#"{"error":{"message":"Credits exhausted","code":"insufficient_quota_error"}}"#.utf8)
+        let validator = KeyValidator(urlSession: .keyStub(status: 429, body: body))
+        guard case let .unreachable(message) = await validator.check(.sarvam, key: "sk-s") else {
+            return XCTFail("out of credits is not a rejected key")
+        }
+        XCTAssertTrue(message.contains("out of credits"), message)
+        XCTAssertFalse(message.contains("try again shortly"), message)
+    }
+
+    func testSarvamBeingBusyIsStillNotAboutTheKey() async {
+        let body = Data(#"{"error":{"message":"Rate limit exceeded","code":"rate_limit_exceeded_error"}}"#.utf8)
+        let validator = KeyValidator(urlSession: .keyStub(status: 429, body: body))
+        guard case let .unreachable(message) = await validator.check(.sarvam, key: "sk-s") else {
+            return XCTFail("a rate limit is not a rejected key")
+        }
+        XCTAssertTrue(message.contains("429"), message)
+    }
 }
 
 // MARK: - A URLSession that answers without a network
@@ -97,11 +158,13 @@ final class KeyValidatorTests: XCTestCase {
 final class KeyStubProtocol: URLProtocol {
     nonisolated(unsafe) static var status = 200
     nonisolated(unsafe) static var shouldFail = false
+    nonisolated(unsafe) static var body = Data("{}".utf8)
     nonisolated(unsafe) static var lastRequest: URLRequest?
 
-    static func reset(status: Int, shouldFail: Bool = false) {
+    static func reset(status: Int, shouldFail: Bool = false, body: Data = Data("{}".utf8)) {
         self.status = status
         self.shouldFail = shouldFail
+        self.body = body
         self.lastRequest = nil
     }
 
@@ -120,14 +183,14 @@ final class KeyStubProtocol: URLProtocol {
         let response = HTTPURLResponse(
             url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocol(self, didLoad: Self.body)
         client?.urlProtocolDidFinishLoading(self)
     }
 }
 
 extension URLSession {
-    static func keyStub(status: Int) -> URLSession {
-        KeyStubProtocol.reset(status: status)
+    static func keyStub(status: Int, body: Data = Data("{}".utf8)) -> URLSession {
+        KeyStubProtocol.reset(status: status, body: body)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [KeyStubProtocol.self]
         return URLSession(configuration: configuration)
