@@ -205,6 +205,10 @@ the real synthesiser or build real `AVAudioEngine`s are opt-in — `SAATHI_AUDIO
 because a test run in the background should not take the sound out of whatever else the machine is
 doing, and with a Bluetooth headset connecting mid-run they crashed inside AVFAudio.
 
+Building the macOS client needs Xcode 26 or later: Dictate uses Apple's `SpeechAnalyzer`, which is in
+the macOS 26 SDK and no earlier one. The app that comes out still runs on macOS 13. CI builds and
+tests on `macos-26` for the same reason.
+
 ### Building and signing it yourself
 
 Installing is `brew install --cask saathi` above; this is how that artifact is produced.

@@ -27,6 +27,7 @@ jobs:
               - 'contract/**'
               - 'backend/**'
               - 'package.json'
+              - 'scripts/**'
               - '.github/workflows/**'
             mac:
               - 'macos/**'
@@ -63,7 +64,13 @@ jobs:
   macos-client:
     needs: changes
     if: needs.changes.outputs.mac == 'true' || needs.changes.outputs.core == 'true'
-    runs-on: macos-15
+    # macos-26, not macos-15. Three separate things failed this job on the older image, one after
+    # another, from 21 September on: three assertions in the island's tests about the hosted
+    # SwiftUI tree (they pass on macOS 26, where the app is developed); an expression Swift 6.1
+    # rejects and 6.3 accepts; and Dictate's SpeechAnalyzer, which is in the macOS 26 SDK and no
+    # earlier one. The app still runs on macOS 13 — this is only the machine it is built and
+    # tested on.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build and test
@@ -96,7 +103,8 @@ jobs:
   parity:
     needs: changes
     if: needs.changes.outputs.core == 'true' || needs.changes.outputs.mac == 'true' || needs.changes.outputs.win == 'true'
-    runs-on: macos-15
+    # The same image as macos-client, for the same reason: it builds the same package.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
