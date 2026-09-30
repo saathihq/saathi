@@ -37,7 +37,11 @@ A row in the provider table. `provider: sarvam` sent the transcript of a turn to
      OpenAI-compatible server is obliged to accept (an assistant message with `tool_calls` and no
      `tool` message answering it);
    - the tools went out wrapped as `{"type":"function","function":{"type":"function",…}}`;
-   - holding the keys while Saathi was talking opened the microphone under its own voice.
+   - holding the keys while Saathi was talking opened the microphone under its own voice;
+   - the request went to `{base}/chat/completions`. For `local` — the default mode — that is
+     `http://localhost:11434/chat/completions`, which Ollama does not serve: its OpenAI-compatible
+     endpoint is under `/v1`. Anthropic's is too (`/chat/completions` is a 404 there, measured).
+     Sarvam and OpenAI only worked because their base URLs already end in `/v1`.
 6. **Sarvam-105B thinks before it answers unless told not to.** Reasoning is on by default, its
    tokens are billed, and they arrive before the first word of a reply that is meant to be one or
    two sentences.
@@ -101,13 +105,21 @@ the language in Settings is not one Sarvam speaks.
 - `reasoning_content` is not kept in the history, and Sarvam is asked for `reasoning_effort: null`.
 - A refusal from Sarvam is a sentence: the key was not accepted, the account is out of credits,
   slow down.
+- A base URL that names no path gets `/v1` before `/chat/completions`, so the local row and a
+  hand-written Ollama host reach the endpoint that exists. A base that names a path is taken at
+  its word.
 
 ### Setup
 
 - A third key row: **Sarvam — Indian languages, heard and spoken.**
-- `SetupPlan` knows three vendors and what is in use. See decision 3.
+- `SetupPlan` knows three vendors, what is in use, and whose ears the file asks for. See decisions
+  1 and 3.
 - "Where it thinks" is a picker whenever there is more than one place it could: each vendor with a
   key, and this Mac.
+- A switch under Voice, **Hear and speak through Sarvam**, wherever it could be switched: a Sarvam
+  key is saved and a turn is three steps. Its second line is the whole of what it means: "Your
+  voice leaves this Mac as audio, to Sarvam". It is how Claude, or a model on this Mac, gets
+  Sarvam's ears — and how Sarvam goes back to only thinking.
 - Gujarati and Punjabi join the language list.
 - The note under the keys says what each stored key is for. It said "Anthropic key saved. Nothing
   uses it yet." about a key `ScreenSight` has preferred since it was written.
@@ -142,6 +154,13 @@ microphone and no permission, and it is the first thing to run with a real key.
    every `sarvam` config — is what makes the option work without reading anything, and would have
    turned "only the transcript is sent" into "your audio is sent" for an existing config on an
    update. That is the one thing this project says it never does quietly.
+
+   The same rule decides what a Save does to `speech` afterwards. Arriving at Sarvam — its key
+   pasted, or Sarvam picked in the picker — turns its speech on. Arriving anywhere else puts speech
+   back on this Mac: someone who picks This Mac is picking somewhere their voice stays. And while
+   the provider stays where it is, `speech` stays as the file has it, in both directions: pasting
+   an Anthropic key does not start sending a thinking-only Sarvam user's voice away, and does not
+   take Sarvam's ears off someone who put them in front of Claude.
 
 2. **One request per step, not the streaming sockets.** REST is exactly what the docs specify and
    can be written against a stub with confidence; a socket protocol written blind is a guess. The
@@ -178,8 +197,12 @@ microphone and no permission, and it is the first thing to run with a real key.
    a switch the realtime session is torn down, so it should not apply; it has not been tried. A
    turn that records silence says so and asks for a relaunch instead of sending nothing to Sarvam.
 
-9. **On-device ears now listen in the language in Settings**, where the Mac can. They listened in
-   the Mac's own language whatever Settings said.
+9. **On-device ears now listen in the language in Settings**, where the Mac can do that without
+   sending audio to Apple. They listened in the Mac's own language whatever Settings said. Where
+   the Mac cannot — every Indian language but English, here — they are still the Mac's own
+   recogniser, as before, and the status line now says so and says who could hear it. Refusing to
+   start instead would have broken anyone who speaks their Mac's language and asked to be
+   *answered* in another, which is what the Language row says it sets.
 
 ## Not built
 
@@ -190,16 +213,19 @@ microphone and no permission, and it is the first thing to run with a real key.
   under the keys says so when there is neither.
 - Dictate through Saaras. Dictate promises nothing leaves the Mac.
 - Anything on Windows beyond the reports.
-- Claude as the thinker. `provider: anthropic` still posts to a path Anthropic does not serve; that
-  is its own piece of work and is not made worse here.
+- Claude as the thinker, beyond reaching it. With the `/v1` rule `provider: anthropic` now posts to
+  Anthropic's OpenAI-compatible endpoint, which exists (401 to a wrong key, measured) — it posted
+  to a 404. Whether that endpoint takes the row's `x-api-key` header, the contract's tools and the
+  row's default model has not been tried: there is no Anthropic key on this Mac either.
 
 ## Not verified
 
 Everything that needs a key: that a real key gets the 400 the validator reads as "accepted"; that
 Saaras takes the WAV this writes; that Bulbul's answer is the shape the docs show; that
-`reasoning_effort: null` is accepted; how long a turn takes; what it sounds like. And two things
-that need a person: the microphone after switching from OpenAI without a relaunch, and the new row
-and picker on a real island.
+`reasoning_effort: null` is accepted; how long a turn takes; what it sounds like. And three things
+that need a person: the microphone after switching from OpenAI without a relaunch, the new row,
+picker and switch on a real island, and a local model actually answering through `/v1` (Ollama is
+not installed on this Mac; the path is from its documentation).
 
 ## Testing
 
