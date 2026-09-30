@@ -44,7 +44,9 @@ public static class ProviderReport
     private static string KeyLine(SaathiProvider row, SaathiConfiguration configuration)
     {
         if (!row.RequiresKey) return "not needed";
-        var present = !string.IsNullOrWhiteSpace(configuration.ApiKey);
+        // The vendor's own field first, then the legacy shared one — the same question the macOS
+        // report asks. Reading ApiKey alone called a key in its vendor field MISSING.
+        var present = configuration.Credential(row.Kind) is not null;
         // Never the key itself, and never a prefix of it: a logged prefix is still a logged secret.
         return present ? "set" : "MISSING — this mode cannot run without it";
     }

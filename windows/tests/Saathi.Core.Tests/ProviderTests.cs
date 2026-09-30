@@ -121,6 +121,22 @@ public class ProviderTests
         Assert.DoesNotContain("sk-", report, StringComparison.Ordinal);
         Assert.Contains("set", report, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A key in its own vendor field is a key. The report read only the legacy shared field, so a
+    /// config written by the macOS Setup tab — which fills the vendor field — was reported here as
+    /// MISSING and there as set: the two clients disagreeing about the one line people check.
+    /// </summary>
+    [Fact]
+    public void TheReportSeesAVendorKey()
+    {
+        var report = ProviderReport.Describe(new SaathiConfiguration
+        {
+            Provider = ProviderKind.Anthropic,
+            AnthropicKey = "sk-ant",
+        });
+        Assert.Contains("your key   set", report, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
