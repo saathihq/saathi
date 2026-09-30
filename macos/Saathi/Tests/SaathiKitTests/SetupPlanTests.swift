@@ -344,6 +344,26 @@ final class SetupPlanTests: XCTestCase {
         XCTAssertNil(config.voice)
     }
 
+    /// A base URL written by hand is one provider's. Carried to the next it would post a Sarvam
+    /// key to somebody's Ollama box while the sentence said "through Sarvam" — so it goes when the
+    /// provider does, and stays when only a key is replaced.
+    func testABaseURLDoesNotFollowAChangeOfProvider() {
+        let ollama = SaathiConfiguration(providerBaseUrl: "http://192.168.1.9:11434")
+        let sarvam = SetupPlan.make(valid: [.sarvam], typed: [.sarvam])
+            .applied(to: ollama, keys: VendorKeys(sarvam: "sk-s"))
+        XCTAssertNil(sarvam.providerBaseUrl)
+        XCTAssertEqual(sarvam.resolvedProviderBaseURL, "https://api.sarvam.ai/v1")
+
+        let proxied = SaathiConfiguration(
+            provider: .openai, providerBaseUrl: "https://proxy.example/v1", openaiKey: "sk-old")
+        let sameProvider = SetupPlan.make(valid: [.openai], typed: [.openai], current: .openai)
+            .applied(to: proxied, keys: VendorKeys(openAI: "sk-new"))
+        XCTAssertEqual(sameProvider.providerBaseUrl, "https://proxy.example/v1")
+
+        let thisMac = SetupPlan.choosing(.local, valid: [.openai]).applied(to: proxied, keys: VendorKeys())
+        XCTAssertNil(thisMac.providerBaseUrl, "\"Nothing you say leaves it\" is not said over a proxy's address")
+    }
+
     /// Settings a person chose by hand are not ours to throw away because they pasted a key.
     func testApplyingAPlanKeepsUnrelatedSettings() {
         let existing = SaathiConfiguration(language: "ml", backendUrl: "https://example.test", token: "tok", name: "Asha")

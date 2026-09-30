@@ -186,15 +186,17 @@ public struct SetupPlan: Equatable, Sendable {
     /// handed than "that key was refused". A blank for a vendor that did validate keeps the key
     /// already on disk: blank means nothing was typed, not "forget it".
     ///
-    /// The model, the voice model and the voice are the new provider's when the provider changes,
-    /// and left alone when it does not — so a model chosen by hand survives a key being replaced,
-    /// and a voice chosen for one provider is never sent to another that does not have it.
+    /// The model, the voice model, the voice and the base URL are the new provider's when the
+    /// provider changes, and left alone when it does not — so a model chosen by hand survives a
+    /// key being replaced, a voice chosen for one provider is never sent to another that does not
+    /// have it, and a key is never posted to the address written for the provider before it.
     public func applied(to existing: SaathiConfiguration, keys: VendorKeys) -> SaathiConfiguration {
         var updated = existing
         if existing.resolvedProvider != provider {
             updated.model = model.isEmpty ? nil : model
             updated.voiceModel = voiceModel.isEmpty ? nil : voiceModel
             updated.voice = nil
+            updated.providerBaseUrl = nil
         }
         updated.provider = provider
         updated.speech = speech == .device ? nil : speech

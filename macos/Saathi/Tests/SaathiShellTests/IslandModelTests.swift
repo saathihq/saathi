@@ -206,6 +206,8 @@ final class SetupDecisionTests: XCTestCase {
             SaathiConfiguration(sarvamKey: "sk-stored-s", speech: .sarvam),
             SaathiConfiguration(provider: .local, speech: .sarvam),
             SaathiConfiguration(provider: .hosted, sarvamKey: "sk-stored-s", token: "tok"),
+            SaathiConfiguration(providerBaseUrl: "http://192.168.1.9:11434"),
+            SaathiConfiguration(provider: .openai, providerBaseUrl: "https://proxy.example/v1", openaiKey: "sk-stored-o"),
         ]
         var checked = 0
         for configuration in configurations {
@@ -232,6 +234,10 @@ final class SetupDecisionTests: XCTestCase {
                                         && sentence.contains("straight to OpenAI") == (written.provider == .openai)
                                         && (!toSarvam || written.credential(for: .sarvam) != nil)
                                         && (written.provider != .openai || written.credential(for: .openai) != nil)
+                                        // "through Sarvam" and "on this Mac" are about the
+                                        // provider's own address, not one left over from the last.
+                                        && (written.resolvedProvider == configuration.resolvedProvider
+                                            || written.providerBaseUrl == nil)
                                     // And the sentence on show while keys are still being
                                     // typed is about the plan Save produces once they are accepted.
                                     let typed = AppController.typed(
