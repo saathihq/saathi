@@ -37,8 +37,10 @@ public class SharedFixtureTests
         Assert.Equal("not-a-real-key", configuration.ApiKey);
         Assert.Equal("not-a-real-openai-key", configuration.OpenaiKey);
         Assert.Equal("not-a-real-anthropic-key", configuration.AnthropicKey);
+        Assert.Equal("not-a-real-sarvam-key", configuration.SarvamKey);
         Assert.Equal("not-a-real-voice-model", configuration.VoiceModel);
         Assert.Equal("not-a-real-voice", configuration.Voice);
+        Assert.Equal(SpeechEngine.Sarvam, configuration.Speech);
         Assert.Equal("ta", configuration.Language);
         Assert.Equal("https://backend.example.test", configuration.BackendUrl);
         Assert.Equal("not-a-real-token", configuration.Token);
@@ -61,6 +63,8 @@ public class SharedFixtureTests
         Assert.Equal(ProviderKind.Sarvam, configuration.ResolvedProvider);
         Assert.Equal("http://192.168.1.9:11434", configuration.ResolvedProviderBaseUrl);
         Assert.Equal("sarvam-105b-conversations", configuration.ResolvedModel);
+        Assert.Equal("not-a-real-sarvam-key", configuration.Credential(ProviderKind.Sarvam));
+        Assert.Equal(SpeechEngine.Sarvam, configuration.ResolvedSpeech);
     }
 
     /// <summary>
@@ -87,5 +91,27 @@ public class SharedFixtureTests
     {
         Assert.ThrowsAny<JsonException>(
             () => JsonSerializer.Deserialize<SaathiConfiguration>("""{"provider":"Sarvam"}"""));
+    }
+
+    /// <summary>Unset must mean this machine's: a config written before the field existed promised
+    /// the voice stays here, and an update must not change that.</summary>
+    [Fact]
+    public void SpeechIsThisMachinesUntilItIsAskedFor()
+    {
+        Assert.Equal(
+            SpeechEngine.Device,
+            new SaathiConfiguration { Provider = ProviderKind.Sarvam, ApiKey = "k" }.ResolvedSpeech);
+        Assert.Equal(SpeechEngine.Sarvam, new SaathiConfiguration { Speech = SpeechEngine.Sarvam }.ResolvedSpeech);
+    }
+
+    /// <summary>Sarvam has a field of its own, like the other two, and the legacy shared key still
+    /// stands in for it on a config written before there was one.</summary>
+    [Fact]
+    public void SarvamHasItsOwnFieldAndStillReadsTheLegacyOne()
+    {
+        var own = new SaathiConfiguration { ApiKey = "legacy", OpenaiKey = "sk-openai", SarvamKey = " sk-sarvam " };
+        Assert.Equal("sk-sarvam", own.Credential(ProviderKind.Sarvam));
+        Assert.Equal("legacy", new SaathiConfiguration { ApiKey = "legacy" }.Credential(ProviderKind.Sarvam));
+        Assert.Null(new SaathiConfiguration { OpenaiKey = "sk-openai" }.Credential(ProviderKind.Sarvam));
     }
 }

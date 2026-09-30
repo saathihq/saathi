@@ -458,8 +458,10 @@ final class SharedFixtureTests: XCTestCase {
         XCTAssertEqual(configuration.apiKey, "not-a-real-key")
         XCTAssertEqual(configuration.openaiKey, "not-a-real-openai-key")
         XCTAssertEqual(configuration.anthropicKey, "not-a-real-anthropic-key")
+        XCTAssertEqual(configuration.sarvamKey, "not-a-real-sarvam-key")
         XCTAssertEqual(configuration.voiceModel, "not-a-real-voice-model")
         XCTAssertEqual(configuration.voice, "not-a-real-voice")
+        XCTAssertEqual(configuration.speech, .sarvam, "an enum config field must parse from its wire spelling")
         XCTAssertEqual(configuration.language, "ta")
         XCTAssertEqual(configuration.backendUrl, "https://backend.example.test")
         XCTAssertEqual(configuration.token, "not-a-real-token")
@@ -482,6 +484,10 @@ final class SharedFixtureTests: XCTestCase {
         XCTAssertEqual(configuration.resolvedProvider, .sarvam)
         XCTAssertEqual(configuration.resolvedProviderBaseURL, "http://192.168.1.9:11434")
         XCTAssertEqual(configuration.resolvedModel, "sarvam-105b-conversations")
+        XCTAssertEqual(
+            configuration.credential(for: .sarvam), "not-a-real-sarvam-key",
+            "Sarvam's own field wins over the legacy shared one, as the other vendors' do")
+        XCTAssertEqual(configuration.resolvedSpeech, .sarvam)
     }
 
     /// Every enum value must survive a round trip through its wire spelling in this client, since
@@ -540,6 +546,38 @@ final class CredentialResolutionTests: XCTestCase {
         XCTAssertNil(both.credential(for: .local))
         XCTAssertNil(both.credential(for: .hosted))
     }
+
+    /// Sarvam has a field of its own, like the other two, and the legacy shared key still stands
+    /// in for it on a config written before there was one.
+    func testSarvamHasItsOwnFieldAndStillReadsTheLegacyOne() {
+        let own = SaathiConfiguration(apiKey: "legacy", openaiKey: "sk-openai", sarvamKey: " sk-sarvam \n")
+        XCTAssertEqual(own.credential(for: .sarvam), "sk-sarvam")
+        XCTAssertEqual(own.credential(for: .openai), "sk-openai")
+        XCTAssertEqual(SaathiConfiguration(apiKey: "legacy").credential(for: .sarvam), "legacy")
+        XCTAssertNil(
+            SaathiConfiguration(openaiKey: "sk-openai").credential(for: .sarvam),
+            "another vendor's key is not Sarvam's")
+    }
+}
+
+/// Whose ears and mouth a chain-lane turn uses. Unset must mean this machine's: a config written
+/// before the field existed promised that the voice stays here, and an update must not change that.
+final class SpeechEngineTests: XCTestCase {
+
+    func testUnsetMeansThisMachine() {
+        XCTAssertNil(SaathiConfiguration(provider: .sarvam, apiKey: "k").speech)
+        XCTAssertEqual(SaathiConfiguration(provider: .sarvam, apiKey: "k").resolvedSpeech, .device)
+        XCTAssertEqual(SaathiConfiguration().resolvedSpeech, .device)
+    }
+
+    func testAChoiceIsKept() {
+        XCTAssertEqual(SaathiConfiguration(speech: .sarvam).resolvedSpeech, .sarvam)
+        XCTAssertEqual(SaathiConfiguration(speech: .device).resolvedSpeech, .device)
+    }
+
+    func testTheTwoEnginesAreSpelledAsTheSchemaSpellsThem() {
+        XCTAssertEqual(SpeechEngine.allCases.map(\.rawValue), ["device", "sarvam"])
+    }
 }
 
 /// The realtime socket is opened with a VOICE model, which is a different thing from the model that
@@ -592,8 +630,8 @@ final class ConfigurationRoundTripTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let written = SaathiConfiguration(
-            provider: .openai, model: "gpt-4o", openaiKey: "sk-o", anthropicKey: "sk-a",
-            voiceModel: "gpt-realtime", voice: "cedar")
+            provider: .openai, model: "gpt-4o", openaiKey: "sk-o", anthropicKey: "sk-a", sarvamKey: "sk-s",
+            voiceModel: "gpt-realtime", voice: "cedar", speech: .sarvam)
         try ConfigurationStore.save(written, to: url)
         let read = try ConfigurationStore.load(from: url)
 
@@ -601,8 +639,10 @@ final class ConfigurationRoundTripTests: XCTestCase {
         XCTAssertEqual(read.model, "gpt-4o")
         XCTAssertEqual(read.openaiKey, "sk-o")
         XCTAssertEqual(read.anthropicKey, "sk-a")
+        XCTAssertEqual(read.sarvamKey, "sk-s")
         XCTAssertEqual(read.voiceModel, "gpt-realtime")
         XCTAssertEqual(read.voice, "cedar")
+        XCTAssertEqual(read.speech, .sarvam)
     }
 
     /// A file holding two provider keys is worth more to an attacker than one holding a single key.

@@ -1,6 +1,6 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.8.0.
+// Contract version 0.9.0.
 
 #nullable enable
 using System.Linq;
@@ -13,7 +13,7 @@ namespace Saathi.Contract;
 public static class SaathiBackend
 {
     public const string DefaultBaseUrl = "https://api.saathi.dev";
-    public const string ContractVersion = "0.8.0";
+    public const string ContractVersion = "0.9.0";
 }
 
 /// <summary>One row per provider mode: where it runs, what it needs, and whether using it
@@ -181,7 +181,7 @@ public sealed class SaathiConfiguration
     [JsonPropertyName("model")]
     public string? Model { get; set; }
 
-    /// <summary>Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.</summary>
+    /// <summary>Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.</summary>
     [JsonPropertyName("apiKey")]
     public string? ApiKey { get; set; }
 
@@ -189,17 +189,25 @@ public sealed class SaathiConfiguration
     [JsonPropertyName("openaiKey")]
     public string? OpenaiKey { get; set; }
 
-    /// <summary>Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today.</summary>
+    /// <summary>Your own Anthropic key. Looks at the screen when a turn asks about something on it, and thinks when nothing else can. Never sent to Saathi's servers.</summary>
     [JsonPropertyName("anthropicKey")]
     public string? AnthropicKey { get; set; }
+
+    /// <summary>Your own Sarvam AI key. Thinks with Sarvam, and hears and speaks with it when speech is sarvam. Never sent to Saathi's servers.</summary>
+    [JsonPropertyName("sarvamKey")]
+    public string? SarvamKey { get; set; }
 
     /// <summary>Overrides the realtime voice model. Distinct from model, which is what does the thinking.</summary>
     [JsonPropertyName("voiceModel")]
     public string? VoiceModel { get; set; }
 
-    /// <summary>The realtime voice's name. Defaults to the provider row's.</summary>
+    /// <summary>The voice's name: the realtime voice on the realtime lane, Sarvam's speaker when speech is sarvam. Defaults to the provider's.</summary>
     [JsonPropertyName("voice")]
     public string? Voice { get; set; }
+
+    /// <summary>Whose ears and mouth a chain-lane turn uses. Unset means this machine's. The realtime lane carries its own speech and does not read this.</summary>
+    [JsonPropertyName("speech")]
+    public SpeechEngine? Speech { get; set; }
 
     /// <summary>The language Saathi speaks, as a BCP-47 tag ("en", "hi", "ta", "ko"). Unset means follow this machine's language rather than let the model guess.</summary>
     [JsonPropertyName("language")]
@@ -270,6 +278,10 @@ public sealed class SaathiConfiguration
     public string ResolvedLanguage =>
         string.IsNullOrWhiteSpace(Language) ? "en" : Language!.Trim();
 
+    /// <summary>Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's
+    /// until one is made. The realtime lane carries its own speech and does not read this.</summary>
+    public SpeechEngine ResolvedSpeech => Speech ?? global::Saathi.Contract.SpeechEngine.Device;
+
     /// <summary>The credential for a provider: its own vendor field first, then the legacy
     /// shared ApiKey. Providers needing no key of their own get null.</summary>
     public string? Credential(ProviderKind kind)
@@ -279,6 +291,7 @@ public sealed class SaathiConfiguration
         {
             global::Saathi.Contract.ProviderKind.Openai => new[] { OpenaiKey, ApiKey },
             global::Saathi.Contract.ProviderKind.Anthropic => new[] { AnthropicKey, ApiKey },
+            global::Saathi.Contract.ProviderKind.Sarvam => new[] { SarvamKey, ApiKey },
             _ => new[] { ApiKey },
         };
         foreach (var candidate in candidates)
@@ -383,6 +396,27 @@ public sealed class VoiceLaneWireConverter : JsonConverter<VoiceLane>
         });
 }
 
+/// <summary>SpeechEngine on the wire. Accepts the contract's spelling only — the C# member
+/// name is not an alias, because the Swift client would not accept it either.</summary>
+public sealed class SpeechEngineWireConverter : JsonConverter<SpeechEngine>
+{
+    public override SpeechEngine Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.GetString() switch
+        {
+            "device" => SpeechEngine.Device,
+            "sarvam" => SpeechEngine.Sarvam,
+            var other => throw new JsonException($"{other} is not a valid SpeechEngine — expected one of: device, sarvam"),
+        };
+
+    public override void Write(Utf8JsonWriter writer, SpeechEngine value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value switch
+        {
+            SpeechEngine.Device => "device",
+            SpeechEngine.Sarvam => "sarvam",
+            _ => throw new JsonException($"no wire spelling for {value} — the contract is out of sync"),
+        });
+}
+
 /// <summary>Where the model actually runs. This is the choice that decides whether anything the learner says leaves their machine.</summary>
 [JsonConverter(typeof(ProviderKindWireConverter))]
 public enum ProviderKind
@@ -417,6 +451,14 @@ public enum VoiceLane
 {
     Realtime,
     Chain,
+}
+
+/// <summary>Where speech becomes text and text becomes speech on the chain lane. With device the learner's voice never leaves the machine. With sarvam it is sent to Sarvam as audio — the only way to be heard in most Indian languages, and never done unless asked for.</summary>
+[JsonConverter(typeof(SpeechEngineWireConverter))]
+public enum SpeechEngine
+{
+    Device,
+    Sarvam,
 }
 
 /// <summary>Speak a line to the learner. The companion narrates; this is the primary action.</summary>

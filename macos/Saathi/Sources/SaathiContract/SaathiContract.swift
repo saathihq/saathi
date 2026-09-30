@@ -1,13 +1,13 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.8.0.
+// Contract version 0.9.0.
 
 import Foundation
 
 /// Where the backend lives, and how this client is configured to reach it.
 public enum SaathiBackend {
     public static let defaultBaseURL = "https://api.saathi.dev"
-    public static let contractVersion = "0.8.0"
+    public static let contractVersion = "0.9.0"
 }
 
 /// One row per provider mode: where it runs, what it needs, and whether using it means
@@ -178,16 +178,20 @@ public struct SaathiConfiguration: Codable, Sendable {
     public var providerBaseUrl: String?
     /// Overrides the provider's default model.
     public var model: String?
-    /// Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.
+    /// Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working.
     public var apiKey: String?
     /// Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers.
     public var openaiKey: String?
-    /// Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today.
+    /// Your own Anthropic key. Looks at the screen when a turn asks about something on it, and thinks when nothing else can. Never sent to Saathi's servers.
     public var anthropicKey: String?
+    /// Your own Sarvam AI key. Thinks with Sarvam, and hears and speaks with it when speech is sarvam. Never sent to Saathi's servers.
+    public var sarvamKey: String?
     /// Overrides the realtime voice model. Distinct from model, which is what does the thinking.
     public var voiceModel: String?
-    /// The realtime voice's name. Defaults to the provider row's.
+    /// The voice's name: the realtime voice on the realtime lane, Sarvam's speaker when speech is sarvam. Defaults to the provider's.
     public var voice: String?
+    /// Whose ears and mouth a chain-lane turn uses. Unset means this machine's. The realtime lane carries its own speech and does not read this.
+    public var speech: SpeechEngine?
     /// The language Saathi speaks, as a BCP-47 tag ("en", "hi", "ta", "ko"). Unset means follow this machine's language rather than let the model guess.
     public var language: String?
     /// Overrides the hosted backend URL. Only used in hosted mode.
@@ -211,15 +215,17 @@ public struct SaathiConfiguration: Codable, Sendable {
     /// Whether Saathi registered itself as a login item.
     public var startAtLogin: Bool?
 
-    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, language: String? = nil, backendUrl: String? = nil, token: String? = nil, name: String? = nil, colour: String? = nil, tone: Tone? = nil, pace: Pace? = nil, firstGoal: String? = nil, onboarded: Bool? = nil, deviceId: String? = nil, startAtLogin: Bool? = nil) {
+    public init(provider: ProviderKind? = nil, providerBaseUrl: String? = nil, model: String? = nil, apiKey: String? = nil, openaiKey: String? = nil, anthropicKey: String? = nil, sarvamKey: String? = nil, voiceModel: String? = nil, voice: String? = nil, speech: SpeechEngine? = nil, language: String? = nil, backendUrl: String? = nil, token: String? = nil, name: String? = nil, colour: String? = nil, tone: Tone? = nil, pace: Pace? = nil, firstGoal: String? = nil, onboarded: Bool? = nil, deviceId: String? = nil, startAtLogin: Bool? = nil) {
         self.provider = provider
         self.providerBaseUrl = providerBaseUrl
         self.model = model
         self.apiKey = apiKey
         self.openaiKey = openaiKey
         self.anthropicKey = anthropicKey
+        self.sarvamKey = sarvamKey
         self.voiceModel = voiceModel
         self.voice = voice
+        self.speech = speech
         self.language = language
         self.backendUrl = backendUrl
         self.token = token
@@ -271,9 +277,13 @@ public struct SaathiConfiguration: Codable, Sendable {
         return trimmed.isEmpty ? "en" : trimmed
     }
 
+    /// Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's
+    /// until one is made. The realtime lane carries its own speech and does not read this.
+    public var resolvedSpeech: SpeechEngine { speech ?? .device }
+
     /// The credential for a provider: its own vendor field first, then the legacy shared
-    /// `apiKey`. Vendor-specific wins, so a config holding both an OpenAI and an Anthropic
-    /// key is unambiguous — which is the whole reason the two fields exist. Providers that
+    /// `apiKey`. Vendor-specific wins, so a config holding keys for several vendors is
+    /// unambiguous — which is the whole reason the vendor fields exist. Providers that
     /// need no key of their own get nil even when keys are present.
     public func credential(for kind: ProviderKind) -> String? {
         guard SaathiProvider.of(kind).requiresKey else { return nil }
@@ -281,6 +291,7 @@ public struct SaathiConfiguration: Codable, Sendable {
         switch kind {
         case .openai: candidates = [openaiKey, apiKey]
         case .anthropic: candidates = [anthropicKey, apiKey]
+        case .sarvam: candidates = [sarvamKey, apiKey]
         default: candidates = [apiKey]
         }
         for candidate in candidates {
@@ -323,6 +334,12 @@ public enum Pace: String, Codable, CaseIterable, Sendable {
 public enum VoiceLane: String, Codable, CaseIterable, Sendable {
     case realtime
     case chain
+}
+
+/// Where speech becomes text and text becomes speech on the chain lane. With device the learner's voice never leaves the machine. With sarvam it is sent to Sarvam as audio — the only way to be heard in most Indian languages, and never done unless asked for.
+public enum SpeechEngine: String, Codable, CaseIterable, Sendable {
+    case device
+    case sarvam
 }
 
 /// Speak a line to the learner. The companion narrates; this is the primary action.

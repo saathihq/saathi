@@ -224,9 +224,12 @@ function swift() {
   out.push("        let trimmed = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
   out.push("        return trimmed.isEmpty ? \"en\" : trimmed");
   out.push("    }\n");
+  out.push("    /// Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's");
+  out.push("    /// until one is made. The realtime lane carries its own speech and does not read this.");
+  out.push("    public var resolvedSpeech: SpeechEngine { speech ?? .device }\n");
   out.push("    /// The credential for a provider: its own vendor field first, then the legacy shared");
-  out.push("    /// `apiKey`. Vendor-specific wins, so a config holding both an OpenAI and an Anthropic");
-  out.push("    /// key is unambiguous — which is the whole reason the two fields exist. Providers that");
+  out.push("    /// `apiKey`. Vendor-specific wins, so a config holding keys for several vendors is");
+  out.push("    /// unambiguous — which is the whole reason the vendor fields exist. Providers that");
   out.push("    /// need no key of their own get nil even when keys are present.");
   out.push("    public func credential(for kind: ProviderKind) -> String? {");
   out.push("        guard SaathiProvider.of(kind).requiresKey else { return nil }");
@@ -234,6 +237,7 @@ function swift() {
   out.push("        switch kind {");
   out.push("        case .openai: candidates = [openaiKey, apiKey]");
   out.push("        case .anthropic: candidates = [anthropicKey, apiKey]");
+  out.push("        case .sarvam: candidates = [sarvamKey, apiKey]");
   out.push("        default: candidates = [apiKey]");
   out.push("        }");
   out.push("        for candidate in candidates {");
@@ -391,6 +395,9 @@ function csharp() {
   out.push("    /// <summary>The language Saathi speaks: the one chosen in Settings, English until one is.</summary>");
   out.push("    public string ResolvedLanguage =>");
   out.push("        string.IsNullOrWhiteSpace(Language) ? \"en\" : Language!.Trim();\n");
+  out.push("    /// <summary>Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's");
+  out.push("    /// until one is made. The realtime lane carries its own speech and does not read this.</summary>");
+  out.push("    public SpeechEngine ResolvedSpeech => Speech ?? global::Saathi.Contract.SpeechEngine.Device;\n");
   out.push("    /// <summary>The credential for a provider: its own vendor field first, then the legacy");
   out.push("    /// shared ApiKey. Providers needing no key of their own get null.</summary>");
   out.push("    public string? Credential(ProviderKind kind)");
@@ -400,6 +407,7 @@ function csharp() {
   out.push("        {");
   out.push("            global::Saathi.Contract.ProviderKind.Openai => new[] { OpenaiKey, ApiKey },");
   out.push("            global::Saathi.Contract.ProviderKind.Anthropic => new[] { AnthropicKey, ApiKey },");
+  out.push("            global::Saathi.Contract.ProviderKind.Sarvam => new[] { SarvamKey, ApiKey },");
   out.push("            _ => new[] { ApiKey },");
   out.push("        };");
   out.push("        foreach (var candidate in candidates)");

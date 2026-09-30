@@ -14,7 +14,7 @@
     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
     "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
   ],
-  "version": "0.8.0",
+  "version": "0.9.0",
   "backend": {
     "defaultBaseUrl": "https://api.saathi.dev",
     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
@@ -78,7 +78,7 @@
         "name": "apiKey",
         "type": "string",
         "optional": true,
-        "doc": "Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."
+        "doc": "Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."
       },
       {
         "name": "openaiKey",
@@ -90,7 +90,13 @@
         "name": "anthropicKey",
         "type": "string",
         "optional": true,
-        "doc": "Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today."
+        "doc": "Your own Anthropic key. Looks at the screen when a turn asks about something on it, and thinks when nothing else can. Never sent to Saathi's servers."
+      },
+      {
+        "name": "sarvamKey",
+        "type": "string",
+        "optional": true,
+        "doc": "Your own Sarvam AI key. Thinks with Sarvam, and hears and speaks with it when speech is sarvam. Never sent to Saathi's servers."
       },
       {
         "name": "voiceModel",
@@ -102,7 +108,13 @@
         "name": "voice",
         "type": "string",
         "optional": true,
-        "doc": "The realtime voice's name. Defaults to the provider row's."
+        "doc": "The voice's name: the realtime voice on the realtime lane, Sarvam's speaker when speech is sarvam. Defaults to the provider's."
+      },
+      {
+        "name": "speech",
+        "type": "SpeechEngine",
+        "optional": true,
+        "doc": "Whose ears and mouth a chain-lane turn uses. Unset means this machine's. The realtime lane carries its own speech and does not read this."
       },
       {
         "name": "language",
@@ -208,6 +220,14 @@
         "realtime",
         "chain"
       ]
+    },
+    {
+      "name": "SpeechEngine",
+      "doc": "Where speech becomes text and text becomes speech on the chain lane. With device the learner's voice never leaves the machine. With sarvam it is sent to Sarvam as audio — the only way to be heard in most Indian languages, and never done unless asked for.",
+      "cases": [
+        "device",
+        "sarvam"
+      ]
     }
   ],
   "actions": [
@@ -309,6 +329,12 @@
       "think, speech out as three steps) everywhere else. The chain lane is slower and says so out",
       "loud. What it is not is absent — a companion whose default mode cannot be spoken to would",
       "have the accessibility premise backwards.",
+      "",
+      "Sarvam's speech models are where that leaves a gap. The chain lane's ears and mouth are the",
+      "machine's own by default, and the machine's own cannot hear most Indian languages at all.",
+      "So `speech` — a config field, not a column here — says whose they are: `device`, or `sarvam`",
+      "for Saaras and Bulbul. It is a field rather than a column because it changes where a voice",
+      "goes, and that is the learner's to ask for, not something a provider row decides for them.",
       "",
       "`defaultVoiceModel` and `defaultVoice` are separate from `defaultModel` because they are a",
       "different thing: the model that carries a realtime socket is not the model that answers a",
