@@ -87,8 +87,8 @@ words, instead of "try again shortly".
 | `WaveFile` | PCM16 into a WAV, and back out of one |
 | `SarvamClient` | The two requests and one way of reading a refusal. No state, injected `URLSession` |
 | `Ears` | One held turn of speech into text. `DeviceEars` is the code the chain lane had; `SarvamEars` records the turn and sends it to Saaras |
-| `TurnRecorder` | The microphone for one turn, as PCM16 mono at 16 kHz. The only piece that touches hardware, and the only one without a test |
-| `SarvamSpeaker` | A `Speaker`: Bulbul's WAV through an `AudioOutput` |
+| `TurnRecorder` | The microphone for one turn, as PCM16 mono at 16 kHz. It touches hardware, so the real one has no test; the conversion it does is tested with buffers made by hand |
+| `SarvamSpeaker` | A `Speaker`: Bulbul's WAV through an `AudioOutput`. The real output, `AVAudioPlayer`, has two tests that play silence; they are opt-in and have not been run |
 | `CompanionVoice` | The app's one voice: the system's, or Sarvam's when the configuration says so |
 
 `ChainVoiceSession` takes its ears as a value. `VoiceSessionFactory` chooses them, and refuses —
@@ -123,6 +123,11 @@ the language in Settings is not one Sarvam speaks.
 - Gujarati and Punjabi join the language list.
 - The note under the keys says what each stored key is for. It said "Anthropic key saved. Nothing
   uses it yet." about a key `ScreenSight` has preferred since it was written.
+- The sentence under the keys describes what Save is about to do while a key is still being typed,
+  as an "if": "If Sarvam accepts this key: I will listen, think and speak through Sarvam…". Save
+  checks a key and saves it in one go, so the sentence used to change in the instant the key was
+  saved — after the fact, for the one sentence that says where a voice is about to go. That was
+  true of an OpenAI key before this, and is fixed for it too.
 
 ### Both clients say where the voice goes
 
@@ -136,8 +141,11 @@ the language in Settings is not one Sarvam speaks.
   your voice leaves this machine as audio, to Sarvam
 ```
 
-`saathi provider` says "leaves this machine" for it even when the thinking is local. Swift and C#
-both, the shared fixture carries the two new fields, and `check-parity.sh` compares the pair.
+`saathi provider` says "leaves this machine" for it, and for a model on this machine with Sarvam's
+ears in front of it: "the thinking stays on this machine; your voice leaves it, to Sarvam" — a bare
+"leaves this machine" there sat two lines under the local row's own "nothing leaves the device".
+Swift and C# both, the shared fixture carries the two new fields, and `check-parity.sh` compares the
+pair over four configurations with `speech` in them.
 
 ### `saathi sarvam`
 
@@ -195,7 +203,9 @@ microphone and no permission, and it is the first thing to run with a real key.
    realtime lane's voice-processing engine. Last week's finding — a second microphone goes silent
    once voice processing has run in the process — was with the realtime engine still alive. After
    a switch the realtime session is torn down, so it should not apply; it has not been tried. A
-   turn that records silence says so and asks for a relaunch instead of sending nothing to Sarvam.
+   turn in which the microphone gave nothing at all — not a quiet room, which has a noise floor —
+   says so and asks for a relaunch. A quiet room is nobody speaking: it is not sent to Sarvam, and
+   Saathi says it did not catch that, as on every other lane.
 
 9. **On-device ears now listen in the language in Settings**, where the Mac can do that without
    sending audio to Apple. They listened in the Mac's own language whatever Settings said. Where
@@ -221,8 +231,9 @@ microphone and no permission, and it is the first thing to run with a real key.
 ## Not verified
 
 Everything that needs a key: that a real key gets the 400 the validator reads as "accepted"; that
-Saaras takes the WAV this writes; that Bulbul's answer is the shape the docs show; that
-`reasoning_effort: null` is accepted; how long a turn takes; what it sounds like. And three things
+Saaras takes the WAV this writes; that Bulbul's answer is the shape the docs show and plays through
+`AVAudioPlayer`; that `reasoning_effort: null` is accepted; how long a turn takes; what it sounds
+like. And three things
 that need a person: the microphone after switching from OpenAI without a relaunch, the new row,
 picker and switch on a real island, and a local model actually answering through `/v1` (Ollama is
 not installed on this Mac; the path is from its documentation).
@@ -230,7 +241,9 @@ not installed on this Mac; the path is from its documentation).
 ## Testing
 
 Every request is built by a pure function and tested against the documented shape. Every response
-is read from a stub. The recorder and the player sit behind protocols with fakes; no test opens the
-microphone or plays a sound, and none is gated behind `SAATHI_AUDIO_TESTS` because none needs to
-be. The Setup invariant — the sentence describes the save — is extended to three vendors and to
-`speech`. The Setup tab is drawn offscreen for eyes, like the first-run cards.
+is read from a stub. The recorder and the player sit behind protocols with fakes; no test that runs
+by default opens the microphone or plays a sound. Two tests of the real player play silence through
+the real output and are gated behind `SAATHI_AUDIO_TESTS`, like the others that touch hardware. The
+Setup invariant — the sentence describes the save — is extended to three vendors and to `speech`,
+and was checked to fail when the plan is broken on purpose. The Setup tab is drawn offscreen for
+eyes, like the first-run cards, and has been looked at there.
