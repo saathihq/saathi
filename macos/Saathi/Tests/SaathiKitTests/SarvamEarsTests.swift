@@ -84,20 +84,32 @@ final class SarvamEarsTests: XCTestCase {
         XCTAssertTrue(StubHTTP.seen.isEmpty)
     }
 
-    /// A microphone that gave nothing is a different problem from speech that was not understood,
-    /// and saying which is the difference between trying again and looking at Sound settings.
-    /// Saaras is not asked to transcribe silence, and the learner's silence is not sent to it.
+    /// A microphone that gave nothing at all is a different problem from speech that was not
+    /// understood, and saying which is the difference between trying again and looking at Sound
+    /// settings. Saaras is not asked to transcribe it.
     func testAMicrophoneThatGaveNothingSaysSoInsteadOfAskingSaaras() async throws {
-        let silent = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0.004))
-        let ears = makeEars(silent, .json(["transcript": "never asked"]))
+        let dead = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0))
+        let ears = makeEars(dead, .json(["transcript": "never asked"]))
         try await ears.begin(EarsFeedback())
         do {
             _ = try await ears.finish()
-            XCTFail("two seconds of nothing is not a turn")
+            XCTFail("two seconds of nothing at all is not a turn")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("microphone gave no sound"), error.localizedDescription)
             XCTAssertTrue(error.localizedDescription.contains("quit and reopen"), error.localizedDescription)
         }
+        XCTAssertTrue(StubHTTP.seen.isEmpty)
+    }
+
+    /// Someone who held the keys and then said nothing has a working microphone in a quiet room.
+    /// They are told Saathi did not catch that, like on every other lane — not sent to their Sound
+    /// settings — and the sound of their room is not sent to Sarvam.
+    func testAQuietRoomIsNothingSaidNotABrokenMicrophone() async throws {
+        let quiet = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0.004))
+        let ears = makeEars(quiet, .json(["transcript": "never asked"]))
+        try await ears.begin(EarsFeedback())
+        let heard = try await ears.finish()
+        XCTAssertEqual(heard, "")
         XCTAssertTrue(StubHTTP.seen.isEmpty)
     }
 

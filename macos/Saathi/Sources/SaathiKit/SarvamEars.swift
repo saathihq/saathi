@@ -149,8 +149,11 @@ public final class SarvamEars: Ears, @unchecked Sendable {
     public static let sampleRate: Double = 16_000
     /// Under this a turn was the keys being tapped, not a sentence.
     static let shortestTurn: TimeInterval = 0.3
-    /// Under this the microphone gave nothing: the same line Dictate draws.
+    /// Under this nobody spoke: the same line Dictate draws. A quiet room sits well below it.
     static let silence: Float = 0.02
+    /// Under this the microphone gave nothing at all — not a quiet room, which has a noise floor,
+    /// but an input that is closed, muted or delivering zeros.
+    static let nothingAtAll: Float = 0.0001
     /// Saaras takes thirty seconds a request; a longer turn goes up in pieces this long.
     static let longestPiece: TimeInterval = 28
 
@@ -177,13 +180,16 @@ public final class SarvamEars: Ears, @unchecked Sendable {
     public func finish() async throws -> String {
         let turn = recorder.stop()
         guard turn.seconds >= Self.shortestTurn else { return "" }
-        // Not sent: Saaras would be asked to transcribe silence, and the person would be told it
-        // did not catch that, when the truth is that nothing reached it.
-        guard turn.peak >= Self.silence else {
+        // A microphone that gave nothing at all is not a turn in which nothing was said, and
+        // "I did not catch that" would send the person to say it again into a closed input.
+        guard turn.peak >= Self.nothingAtAll else {
             throw VoiceError.audio(
                 "the microphone gave no sound. Check the input in Sound settings — and if Saathi has "
                 + "only just switched to Sarvam, quit and reopen it.")
         }
+        // Nobody spoke. That is for the session to say, as it does on every lane; the sound of a
+        // quiet room is not sent to Sarvam to be told so.
+        guard turn.peak >= Self.silence else { return "" }
 
         var heard: [String] = []
         for piece in Self.pieces(of: turn.pcm16) {
