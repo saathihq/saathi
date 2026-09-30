@@ -129,6 +129,30 @@ final class SarvamSpeakerTests: XCTestCase {
         XCTAssertEqual(output.played.all.count, pieces.count)
     }
 
+    /// Bulbul's limit is 2500 code points, and in the scripts Saathi is for a letter on the page is
+    /// often two or three of them. Counted as letters, a long Malayalam reply went up whole, was
+    /// refused as too long, and came out as "I could not speak through Sarvam just now."
+    func testTheLimitIsCountedTheWayBulbulCountsIt() {
+        let sentence = "ഇത് ഒരു നീണ്ട മറുപടിയുടെ ഒരു വാക്യമാണ്, അത് തുടർന്നുകൊണ്ടേയിരിക്കുന്നു. "
+        let long = String(repeating: sentence, count: 46)
+        XCTAssertLessThan(long.count, SarvamClient.longestUtterance - 100, "short enough, counted in letters")
+        XCTAssertGreaterThan(long.unicodeScalars.count, SarvamClient.longestUtterance, "too long, counted as Bulbul counts")
+
+        let pieces = SarvamSpeaker.pieces(of: long)
+        XCTAssertGreaterThanOrEqual(pieces.count, 2)
+        for piece in pieces {
+            XCTAssertLessThanOrEqual(piece.unicodeScalars.count, SarvamClient.longestUtterance)
+            XCTAssertTrue(piece.hasSuffix("തുടർന്നുകൊണ്ടേയിരിക്കുന്നു."), "cut at the end of a sentence")
+        }
+        XCTAssertEqual(pieces.joined(separator: " "), long.trimmingCharacters(in: .whitespaces))
+
+        // A run with nowhere to cut is cut between letters, never through one.
+        let solid = String(repeating: "ക്ഷ്മ", count: 400)   // one letter on the page, five code points
+        let chunks = SarvamSpeaker.pieces(of: solid, limit: 1_000)
+        XCTAssertEqual(chunks.joined(), solid)
+        XCTAssertTrue(chunks.allSatisfy { $0.unicodeScalars.count <= 1_000 && $0.unicodeScalars.count % 5 == 0 })
+    }
+
     func testPiecesOfOrdinaryAndAwkwardText() {
         XCTAssertEqual(SarvamSpeaker.pieces(of: "  One short line.  "), ["One short line."])
         XCTAssertTrue(SarvamSpeaker.pieces(of: "   ").isEmpty)

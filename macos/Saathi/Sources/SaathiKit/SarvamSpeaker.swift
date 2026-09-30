@@ -193,7 +193,7 @@ public final class SarvamSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
     /// Bulbul will take. A reply is a sentence or two and is nearly always one piece.
     static func pieces(of text: String, limit: Int = SarvamClient.longestUtterance - 100) -> [String] {
         let whole = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard whole.count > limit else { return whole.isEmpty ? [] : [whole] }
+        guard length(whole) > limit else { return whole.isEmpty ? [] : [whole] }
 
         var pieces: [String] = []
         var current = ""
@@ -204,7 +204,7 @@ public final class SarvamSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
         }
         whole.enumerateSubstrings(in: whole.startIndex..., options: .bySentences) { sentence, _, _, _ in
             for part in hardSplit(sentence ?? "", limit: limit) {
-                if current.count + part.count > limit { close() }
+                if length(current) + length(part) > limit { close() }
                 current += part
             }
         }
@@ -212,23 +212,37 @@ public final class SarvamSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
         return pieces
     }
 
+    /// How long Bulbul will find a piece of text: in code points, which is how its limit is
+    /// written. Not in letters as they appear on the page — in Malayalam or Tamil one of those is
+    /// often two or three code points, and a reply that looked well inside the limit was not.
+    private static func length(_ text: some StringProtocol) -> Int {
+        text.unicodeScalars.count
+    }
+
     /// A sentence too long for one request, cut at spaces — and, for a run with no spaces in it,
-    /// wherever the limit falls. There is nowhere better.
+    /// wherever the limit falls, between letters and never through one. There is nowhere better.
     private static func hardSplit(_ sentence: String, limit: Int) -> [String] {
-        guard sentence.count > limit else { return [sentence] }
+        guard length(sentence) > limit else { return [sentence] }
         var parts: [String] = []
         var current = ""
         for word in sentence.split(separator: " ", omittingEmptySubsequences: false) {
             var word = String(word) + " "
-            while word.count > limit {
+            while length(word) > limit {
                 if !current.isEmpty {
                     parts.append(current)
                     current = ""
                 }
-                parts.append(String(word.prefix(limit)))
-                word = String(word.dropFirst(limit))
+                var head = ""
+                for letter in word {
+                    if length(head) + letter.unicodeScalars.count > limit { break }
+                    head.append(letter)
+                }
+                // One letter longer than the whole limit cannot be cut at all; it goes as it is.
+                if head.isEmpty { head = String(word.prefix(1)) }
+                parts.append(head)
+                word = String(word.dropFirst(head.count))
             }
-            if current.count + word.count > limit {
+            if length(current) + length(word) > limit {
                 parts.append(current)
                 current = ""
             }
