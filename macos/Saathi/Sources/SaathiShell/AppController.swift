@@ -30,8 +30,9 @@ public final class AppController {
     let notch: NotchPanel?
     let menu: MenuBarController
 
-    /// The voice underneath `speaker`, kept so its language and pace can follow the configuration.
-    private let systemSpeaker: SystemSpeaker
+    /// The voice underneath `speaker` — this Mac's, or Sarvam's when the configuration asks for
+    /// it — kept so it can follow the configuration as that changes.
+    private let companionVoice: CompanionVoice
     var speaker: ObservedSpeaker!
     private var performer: ActionPerformer!
     /// The voice session's whole life — start, turns, reconfigure, quit. See `VoiceConductor`.
@@ -73,9 +74,14 @@ public final class AppController {
         }
         menu = MenuBarController(icon: MenuBarIcon.image(data: data), installStatusItem: true)
 
-        systemSpeaker = SystemSpeaker(settings: SpeechSettings(configuration))
-        speaker = ObservedSpeaker(systemSpeaker) { [weak self] speaking in
+        companionVoice = CompanionVoice(configuration: configuration)
+        speaker = ObservedSpeaker(companionVoice) { [weak self] speaking in
             Task { @MainActor in self?.handle(.speakingChanged(speaking)) }
+        }
+        // When Sarvam cannot speak a line this Mac's voice takes it; this is the island and the
+        // log being told why the voice changed.
+        companionVoice.reportFailures { [weak self] message in
+            Task { @MainActor in self?.handle(.failure(message)) }
         }
         performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
         let speaker = self.speaker!
@@ -212,17 +218,11 @@ public final class AppController {
         ticker = timer
     }
 
-    /// `scripted` is first run: its lines are written in English, so they are read by an English
-    /// voice whatever language was just chosen — a Tamil synthesiser reading English sentences is
-    /// the same noise as the reverse. The pace still follows at once.
+    /// `scripted` is first run: its lines are written in English, so they are read by this Mac's
+    /// English voice whatever language — and whoever's voice — was just chosen. The pace still
+    /// follows at once. See `CompanionVoice.deviceSettings`.
     func applySpeechSettings(scripted: Bool = false) {
-        systemSpeaker.apply(Self.speechSettings(for: configuration, scripted: scripted))
-    }
-
-    static func speechSettings(for configuration: SaathiConfiguration, scripted: Bool) -> SpeechSettings {
-        var settings = SpeechSettings(configuration)
-        if scripted { settings.language = "en-US" }
-        return settings
+        companionVoice.apply(configuration, scripted: scripted)
     }
 
     // MARK: voice
@@ -235,7 +235,7 @@ public final class AppController {
         handsFree = false
         notch?.model.isAlwaysListening = false
         configuration = updated
-        systemSpeaker.apply(SpeechSettings(updated))
+        companionVoice.apply(updated)
         applyConfigurationToIsland()
     }
 
