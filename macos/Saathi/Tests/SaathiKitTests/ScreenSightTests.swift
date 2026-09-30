@@ -66,6 +66,14 @@ final class ScreenSightTests: XCTestCase {
         XCTAssertTrue(prompt.hasSuffix("how do I play this song"))
     }
 
+    /// Both lanes hand a failed look back to the model as words it can repeat: "I need Screen
+    /// Recording permission" is a useful thing to be told, and silence is not. With no key to look
+    /// with, nothing is captured at all.
+    func testAFailedLookIsASentenceForTheModelToRepeat() async {
+        let answer = await ScreenSight(configuration: .init(provider: .local)).answer("what is this?")
+        XCTAssertEqual(answer, "could not look: seeing the screen needs an OpenAI or Anthropic key. Add one in Setup.")
+    }
+
     func testTheEyeIsAnthropicFirstThenOpenAI() {
         XCTAssertEqual(ScreenSight.eye(for: .init(provider: .openai, openaiKey: "sk-o")), .openai(model: "gpt-4o-mini"))
         XCTAssertEqual(

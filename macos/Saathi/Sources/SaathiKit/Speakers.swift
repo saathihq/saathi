@@ -91,7 +91,7 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
 /// Wraps any speaker and reports when speech starts and stops, so the companion's face can follow
 /// its own voice without the speaker protocol knowing about faces. Stop is reported on every exit,
 /// including cancellation.
-public final class ObservedSpeaker: Speaker, @unchecked Sendable {
+public final class ObservedSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable {
     private let inner: any Speaker
     private let onSpeakingChanged: @Sendable (Bool) -> Void
 

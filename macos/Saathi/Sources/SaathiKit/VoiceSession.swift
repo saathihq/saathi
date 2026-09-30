@@ -74,6 +74,9 @@ public protocol VoiceSession: AnyObject, Sendable {
     func sendText(_ text: String) async throws
     /// Hands-free: listen without the keys held, and answer whenever the learner stops talking.
     func setHandsFree(_ on: Bool) async throws
+    /// The learner has started talking over Saathi. Whatever is being said stops, and an answer
+    /// still on its way is dropped rather than spoken over them. Called before a turn opens.
+    func interrupt()
     func stop() async
 }
 
@@ -94,6 +97,10 @@ extension VoiceSession {
         throw VoiceError.notConfigured(
             "Hands-free needs OpenAI's realtime voice. Add an OpenAI key in Settings to use it.")
     }
+
+    /// Nothing to do on the realtime lane: opening a turn there already flushes what is playing
+    /// and cancels the response in flight.
+    public func interrupt() {}
 }
 
 /// Builds the session the configuration calls for. The only place that maps a lane to a class.

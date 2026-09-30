@@ -9,158 +9,100 @@
 //
 //  - It is the ONLY lane that works in `local` mode, which is Saathi's default. A companion whose
 //    default mode cannot be spoken to would have the accessibility premise backwards.
-//  - Both ends run on-device (`SFSpeechRecognizer` with on-device recognition required,
-//    `AVSpeechSynthesizer`), so even with a cloud provider doing the thinking, the learner's VOICE
-//    never leaves the machine — only the transcript does. For someone narrating what they are
-//    struggling with, that is a materially different promise from the realtime lane, and
-//    `VoiceLaneReport` says so out loud.
+//  - By default both ends run on-device (`DeviceEars`, the system voice), so even with a cloud
+//    provider doing the thinking, the learner's VOICE never leaves the machine — only the
+//    transcript does. For someone narrating what they are struggling with, that is a materially
+//    different promise from the realtime lane, and `VoiceLaneReport` says so out loud.
+//  - It is the lane Sarvam rides: with `speech: sarvam` the ears are Saaras and the mouth is
+//    Bulbul, which is the only way to be heard in most Indian languages. The voice then does leave
+//    the machine, and the same report says that instead.
 //
-//  The thinking step talks to an OpenAI-compatible `/chat/completions` with the generated contract
-//  tools attached, which is why Ollama, LM Studio, llama.cpp and Sarvam all work through one code
-//  path. Anthropic's messages API has a different tool envelope; that is handled at the request
-//  boundary rather than by a second session class.
+//  The session does not know whose ears it has. It is handed a pair, and a speaker, and does the
+//  step in the middle: an OpenAI-compatible `/chat/completions` with the generated contract tools
+//  attached, which is why Ollama, LM Studio, llama.cpp and Sarvam all work through one code path.
 //
 
-import AVFoundation
 import Foundation
 import os
 import SaathiContract
-import Speech
 
-public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendable {
+public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
 
     public let lane: VoiceLane = .chain
     public let speaksForItself = false
 
     private let configuration: SaathiConfiguration
     private let speaker: any Speaker
+    let ears: any Ears
     private let urlSession: URLSession
+    private let look: @Sendable (String) async -> String
     /// False for a session that only listens: a turn ends with the transcript and nothing is sent
     /// to any model. First run uses it — "can I hear you?" and "what should I call you?" are
     /// answered by what was heard, and must work before a model has been chosen at all.
     public let thinks: Bool
 
-    /// Everything touched from both the caller and the recognition callback, behind one scoped
-    /// lock. `NSLock.lock()` is unavailable from an async context in the Swift 6 language mode —
-    /// and rightly so, since holding a lock across a suspension point is how deadlocks are made.
-    /// `withLock` cannot span an `await`, which is the property that matters.
+    /// How many times the model may be asked in one turn: once, and again after it has looked at
+    /// the screen or been told a tool call could not be done. A model that keeps asking is
+    /// stopped here rather than left to spend the learner's patience and their credit.
+    static let mostRequestsPerTurn = 3
+
+    /// Everything touched from more than one thread, behind one scoped lock. `withLock` cannot
+    /// span an `await`, which is the property that matters.
     private struct State {
         var callbacks = VoiceSessionCallbacks()
-        var request: SFSpeechAudioBufferRecognitionRequest?
-        var recognitionTask: SFSpeechRecognitionTask?
-        var audioEngine: AVAudioEngine?
-        var latestTranscript = ""
+        /// Bumped whenever the learner starts something new. An answer from before it is never
+        /// spoken: they have moved on, and talking over them is the one thing a companion that
+        /// listens must not do.
+        var epoch = 0
+        /// The request to the model that is in flight, so an interruption can drop it at once
+        /// instead of waiting seconds for an answer nobody wants.
+        var request: Task<(Data, URLResponse), any Error>?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    private var recognizer: SFSpeechRecognizer?
     /// The conversation so far. The chain lane has no server-side session, so continuity is this.
-    /// Only ever touched from `think`, which is serial per turn.
+    /// Only ever touched from a turn, and turns are serial.
     private var history: [[String: Any]] = []
 
+    /// `ears`: on-device ones in the language of Settings unless a pair is handed in.
+    /// `look`: what answers a `look_at_screen`; `ScreenSight` unless a test says otherwise.
     public init(
         configuration: SaathiConfiguration,
         speaker: any Speaker,
+        ears: (any Ears)? = nil,
         urlSession: URLSession = URLSession(configuration: .default),
-        thinks: Bool = true
+        thinks: Bool = true,
+        look: (@Sendable (String) async -> String)? = nil
     ) {
         self.configuration = configuration
         self.speaker = speaker
+        self.ears = ears ?? DeviceEars(language: configuration.resolvedLanguage)
         self.urlSession = urlSession
         self.thinks = thinks
-        super.init()
+        self.look = look ?? { question in
+            await ScreenSight(configuration: configuration).answer(question)
+        }
     }
 
     public func start(callbacks: VoiceSessionCallbacks) async throws {
         state.withLock { $0.callbacks = callbacks }
-
-        // Ask once, up front, and say what is being asked for. Being surprised by a permission
-        // dialog mid-sentence is exactly the kind of thing this project should not do.
-        let authorized = await Self.requestSpeechAuthorization()
-        guard authorized else {
-            throw VoiceError.notConfigured(
-                "Saathi needs permission to use speech recognition. Grant it in System Settings → Privacy & Security → Speech Recognition.")
-        }
-
-        let recognizer = SFSpeechRecognizer()
-        guard let recognizer, recognizer.isAvailable else {
-            throw VoiceError.notConfigured("no speech recogniser is available for this locale")
-        }
-        // The on-device requirement is the promise, not an optimisation. Without it Apple may send
-        // audio to its own servers, which would make the report's "your voice stays on this
-        // machine" line false — so an unavailable on-device recogniser is an error, not a fallback.
-        guard recognizer.supportsOnDeviceRecognition else {
-            throw VoiceError.notConfigured(
-                "on-device speech recognition is not available for \(recognizer.locale.identifier). "
-                + "Add the language under System Settings → Keyboard → Dictation to download it.")
-        }
-        self.recognizer = recognizer
-        callbacks.onStatus?("ready — on-device speech recognition (\(recognizer.locale.identifier))")
+        // The ears ask for what they need, once, up front, and say what is being asked for. Being
+        // surprised by a permission dialog mid-sentence is exactly what this project should not do.
+        callbacks.onStatus?(try await ears.prepare())
     }
 
     public func beginTurn() async throws {
-        guard let recognizer else { throw VoiceError.notConfigured("start() was not called") }
-
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
-
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw VoiceError.audio("no microphone input available")
-        }
-        let onInputLevel = state.withLock { $0.callbacks.onInputLevel }
-        inputNode.installTap(onBus: 0, bufferSize: 2400, format: format) { buffer, _ in
-            request.append(buffer)
-            onInputLevel?(InputLevel.level(of: buffer))
-        }
-        engine.prepare()
-        try engine.start()
-
-        let callbacks = state.withLock { box -> VoiceSessionCallbacks in
-            box.request = request
-            box.audioEngine = engine
-            box.latestTranscript = ""
-            return box.callbacks
-        }
-
+        let callbacks = state.withLock { $0.callbacks }
+        try await ears.begin(EarsFeedback(
+            onLevel: callbacks.onInputLevel, onPartial: callbacks.onPartialTranscript))
         callbacks.onStatus?("listening…")
-        let task = recognizer.recognitionTask(with: request) { [weak self] result, _ in
-            guard let self, let result else { return }
-            let text = result.bestTranscription.formattedString
-            self.state.withLock { $0.latestTranscript = text }
-            callbacks.onPartialTranscript?(text)
-        }
-        state.withLock { $0.recognitionTask = task }
     }
 
     public func endTurn() async throws {
-        let (engine, request, callbacks) = state.withLock { box in
-            (box.audioEngine, box.request, box.callbacks)
-        }
+        let (callbacks, epoch) = state.withLock { ($0.callbacks, $0.epoch) }
 
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        request?.endAudio()
-
-        // Recognition finishes slightly after the audio does. Poll briefly rather than racing it —
-        // the alternative is dropping the last word of every turn.
-        var transcript = ""
-        for _ in 0..<20 {
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            transcript = state.withLock { $0.latestTranscript }
-            if !transcript.isEmpty { break }
-        }
-        state.withLock { box in
-            box.recognitionTask?.cancel()
-            box.recognitionTask = nil
-            box.audioEngine = nil
-            box.request = nil
-        }
-
-        let heard = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heard = try await ears.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isCurrent(epoch) else { return }
         guard !heard.isEmpty else {
             callbacks.onStatus?("did not catch that")
             // A listen-only session leaves the asking-again to whoever is listening through it.
@@ -173,38 +115,167 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
             return
         }
         callbacks.onStatus?("thinking…")
-
-        try await think(about: heard, callbacks: callbacks)
+        try await answer(heard, epoch: epoch, callbacks: callbacks)
     }
 
     public func sendText(_ text: String) async throws {
-        let callbacks = state.withLock { $0.callbacks }
+        // A typed question supersedes whatever was being said or thought about, as a held turn does.
+        interrupt()
+        let (callbacks, epoch) = state.withLock { ($0.callbacks, $0.epoch) }
         callbacks.onUserTranscript?(text)
         guard thinks else { return }
         callbacks.onStatus?("thinking…")
-        try await think(about: text, callbacks: callbacks)
+        try await answer(text, epoch: epoch, callbacks: callbacks)
+    }
+
+    /// The learner has started talking. Whatever Saathi was saying stops, and whatever it was
+    /// about to say is dropped — the request for it included, so the microphone is not kept
+    /// waiting on an answer nobody wants any more.
+    public func interrupt() {
+        let request = state.withLock { state -> Task<(Data, URLResponse), any Error>? in
+            state.epoch += 1
+            return state.request
+        }
+        request?.cancel()
+        (speaker as? StoppableSpeaker)?.stop()
     }
 
     public func stop() async {
-        let engine = state.withLock { $0.audioEngine }
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        state.withLock { box in
-            box.recognitionTask?.cancel()
-            box.recognitionTask = nil
-            box.audioEngine = nil
-            box.request = nil
-        }
+        interrupt()
+        ears.cancel()
+    }
+
+    private func isCurrent(_ epoch: Int) -> Bool {
+        state.withLock { $0.epoch == epoch }
     }
 
     // MARK: The thinking step
 
-    private func think(about transcript: String, callbacks: VoiceSessionCallbacks) async throws {
-        history.append(["role": "user", "content": transcript])
+    /// A turn the learner talked over ends quietly: its request was cancelled on purpose, and
+    /// reporting that as a failure would put an alert on the island for doing the right thing.
+    private func answer(_ said: String, epoch: Int, callbacks: VoiceSessionCallbacks) async throws {
+        do {
+            try await think(about: said, epoch: epoch, callbacks: callbacks)
+        } catch {
+            guard isCurrent(epoch) else { return }
+            throw error
+        }
+    }
 
+    private func think(about said: String, epoch: Int, callbacks: VoiceSessionCallbacks) async throws {
+        history.append(["role": "user", "content": said])
+
+        var spoke = false
+        var acted = false
+
+        for _ in 0..<Self.mostRequestsPerTurn {
+            let message = try await complete()
+            guard isCurrent(epoch) else { return }
+
+            let calls = Self.toolCalls(in: message)
+            let content = (message["content"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let looks = calls.contains { $0.name == LookAtScreenAction.wireName }
+
+            // Words that come with a look are said before it: "let me see" belongs in front of the
+            // pause, not after it. Everything else keeps the other order — doing the thing before
+            // narrating it reads as competent, and a failed tool call changes what there is to say.
+            if looks, !content.isEmpty {
+                callbacks.onSaathiTranscript?(content)
+                await speaker.speak(content, tone: .neutral)
+                spoke = true
+                guard isCurrent(epoch) else { return }
+            }
+
+            // What this round adds to the conversation: the reply, and an answer to every tool call
+            // in it. Kept aside until the round is whole, because a reply with tool calls and no
+            // answers to them is a conversation the next request would be refused for.
+            var round: [[String: Any]] = [Self.kept(message)]
+            var owesAnAnswer = false
+            for call in calls {
+                if call.name == LookAtScreenAction.wireName {
+                    // Looking is the one tool whose *answer* is the point. It goes back to the
+                    // model, which then says what it saw.
+                    let question = (call.arguments["question"] as? String) ?? said
+                    callbacks.onStatus?("looking at the screen…")
+                    let seen = await look(question)
+                    guard isCurrent(epoch) else { return }
+                    callbacks.onScreenLook?(question, seen)
+                    round.append(Self.toolResult(call.id, seen))
+                    owesAnAnswer = true
+                    continue
+                }
+                switch VoiceToolCall.parse(name: call.name, arguments: call.arguments) {
+                case let .success(action):
+                    callbacks.onAction?(action)
+                    acted = true
+                    round.append(Self.toolResult(call.id, "done"))
+                case let .failure(failure):
+                    // Handed back rather than dropped, so the model can say something true instead
+                    // of narrating an action that never happened.
+                    callbacks.onStatus?("ignored a tool call: \(failure.description)")
+                    round.append(Self.toolResult(call.id, "not done — \(failure.description)"))
+                    owesAnAnswer = true
+                }
+            }
+            history.append(contentsOf: round)
+
+            if !looks, !content.isEmpty {
+                callbacks.onSaathiTranscript?(content)
+                await speaker.speak(content, tone: .neutral)
+                spoke = true
+                guard isCurrent(epoch) else { return }
+            }
+
+            guard owesAnAnswer else { break }
+            callbacks.onStatus?("thinking…")
+        }
+
+        if !spoke, !acted, isCurrent(epoch) {
+            // Neither words nor an action. Saying nothing at all reads as a hang to someone who
+            // cannot see a spinner.
+            await speaker.speak("I am not sure what to do with that.", tone: .calm)
+        }
+    }
+
+    /// One request to the model with the conversation so far, and the message it answered with.
+    private func complete() async throws -> [String: Any] {
+        let request = try Self.completionRequest(configuration: configuration, history: history)
+        let urlSession = self.urlSession
+        let inFlight = Task { try await urlSession.data(for: request) }
+        state.withLock { $0.request = inFlight }
+        defer { state.withLock { $0.request = nil } }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await withTaskCancellationHandler {
+                try await inFlight.value
+            } onCancel: {
+                inFlight.cancel()
+            }
+        } catch {
+            throw Self.unreachable(error, configuration: configuration)
+        }
+
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw Self.refusal(
+                status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data, configuration: configuration)
+        }
+        guard let message = Self.message(in: data) else {
+            throw VoiceError.transport("could not read the model's answer")
+        }
+        return message
+    }
+
+    // MARK: What is sent, and what is kept
+
+    /// The request for one reply. Pure, so what a provider is actually sent can be read in a test
+    /// — and so `saathi sarvam` can send exactly what a turn would.
+    static func completionRequest(configuration: SaathiConfiguration, history: [[String: Any]]) throws -> URLRequest {
         let row = configuration.providerRow
         let base = configuration.resolvedProviderBaseURL
-        guard let url = URL(string: "\(base.hasSuffix("/") ? String(base.dropLast()) : base)/chat/completions") else {
+        guard let url = chatCompletionsURL(base: base) else {
             throw VoiceError.transport("\(base) is not a usable base URL")
         }
 
@@ -218,71 +289,143 @@ public final class ChainVoiceSession: NSObject, VoiceSession, @unchecked Sendabl
             request.setValue(header.value, forHTTPHeaderField: header.name)
         }
 
-        var messages: [[String: Any]] = [["role": "system", "content": RealtimeVoiceSession.instructions(for: configuration)]]
-        messages.append(contentsOf: history)
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        let instructions: [String: Any] = [
+            "role": "system", "content": RealtimeVoiceSession.instructions(for: configuration),
+        ]
+        var body: [String: Any] = [
             "model": configuration.resolvedModel,
-            "messages": messages,
-            "tools": try VoiceToolCall.toolDefinitions().map { ["type": "function", "function": $0] },
+            "messages": [instructions] + history,
+            "tools": try chatTools(),
             "tool_choice": "auto",
-        ])
+        ]
+        // Sarvam-105B reasons before it answers unless told not to, and bills the reasoning. A
+        // spoken reply is a sentence or two; the pause in front of it is the cost that matters.
+        if row.kind == .sarvam { body["reasoning_effort"] = NSNull() }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
 
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let detail = String(data: data, encoding: .utf8) ?? "no response body"
-            if configuration.resolvedProvider == .local {
-                throw VoiceError.transport(
-                    "the local model at \(base) did not answer. Is Ollama or LM Studio running? (\(detail))")
-            }
-            throw VoiceError.transport(detail)
-        }
+    /// Where a provider's chat completions live: `/chat/completions` on its base, and a base that
+    /// names no path at all gets `/v1` first.
+    ///
+    /// Every OpenAI-compatible server Saathi is pointed at serves them under `/v1` — Ollama,
+    /// LM Studio, llama.cpp, Anthropic's compatibility layer. The local row's base is
+    /// `http://localhost:11434`, which is also how anyone would write another Ollama host, and
+    /// `/chat/completions` straight on that is a 404 from the very server the default mode is for.
+    /// A base that already names a path is taken at its word.
+    static func chatCompletionsURL(base: String) -> URL? {
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let root = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+        guard let url = URL(string: root), url.scheme != nil, url.host != nil else { return nil }
+        return URL(string: "\(root)\(url.path.isEmpty ? "/v1" : "")/chat/completions")
+    }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any] else {
-            throw VoiceError.transport("could not read the model's answer")
-        }
-        history.append(message)
-
-        // Tool calls first: doing the thing before narrating it is the order that reads as
-        // competent, and a failed tool call changes what there is to say.
-        var performedAnything = false
-        if let toolCalls = message["tool_calls"] as? [[String: Any]] {
-            for call in toolCalls {
-                guard let function = call["function"] as? [String: Any],
-                      let name = function["name"] as? String else { continue }
-                var arguments: [String: Any] = [:]
-                if let argumentsText = function["arguments"] as? String,
-                   let parsed = try? JSONSerialization.jsonObject(with: Data(argumentsText.utf8)) as? [String: Any] {
-                    arguments = parsed
-                }
-                switch VoiceToolCall.parse(name: name, arguments: arguments) {
-                case let .success(action):
-                    callbacks.onAction?(action)
-                    performedAnything = true
-                case let .failure(failure):
-                    callbacks.onStatus?("ignored a tool call: \(failure.description)")
-                }
-            }
-        }
-
-        if let content = (message["content"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !content.isEmpty {
-            callbacks.onSaathiTranscript?(content)
-            await speaker.speak(content, tone: .neutral)
-        } else if !performedAnything {
-            // Neither words nor an action. Saying nothing at all reads as a hang to someone who
-            // cannot see a spinner.
-            await speaker.speak("I am not sure what to do with that.", tone: .calm)
+    /// The contract's tools in the chat-completions envelope: `{"type": "function", "function":
+    /// {name, description, parameters}}`. The generated list is in the realtime socket's shape,
+    /// with `type` beside the name, and it used to be nested as it stood — so every server was
+    /// handed a `function` with a `type` inside it, which a strict one is entitled to refuse.
+    static func chatTools() throws -> [[String: Any]] {
+        try VoiceToolCall.toolDefinitions().map { tool in
+            var function = tool
+            function.removeValue(forKey: "type")
+            return ["type": "function", "function": function]
         }
     }
 
-    private static func requestSpeechAuthorization() async -> Bool {
-        await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
+    static func message(in data: Data) -> [String: Any]? {
+        guard let answer = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let choices = answer["choices"] as? [[String: Any]] else { return nil }
+        return choices.first?["message"] as? [String: Any]
+    }
+
+    struct ToolCall {
+        let id: String
+        let name: String
+        let arguments: [String: Any]
+    }
+
+    /// Every tool call in a reply, a malformed one included: each has an id the next request must
+    /// answer, so one that cannot be read is kept — with no name, which nothing will accept — and
+    /// answered with why, rather than left as a hole in the conversation.
+    static func toolCalls(in message: [String: Any]) -> [ToolCall] {
+        ((message["tool_calls"] as? [[String: Any]]) ?? []).map { call in
+            let function = call["function"] as? [String: Any]
+            var arguments: [String: Any] = [:]
+            if let text = function?["arguments"] as? String,
+               let parsed = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
+                arguments = parsed
+            } else if let object = function?["arguments"] as? [String: Any] {
+                // Ollama sends the arguments as an object rather than as a string of JSON.
+                arguments = object
             }
+            return ToolCall(
+                id: (call["id"] as? String) ?? "",
+                name: (function?["name"] as? String) ?? "",
+                arguments: arguments)
         }
+    }
+
+    static func toolResult(_ id: String, _ content: String) -> [String: Any] {
+        ["role": "tool", "tool_call_id": id, "content": content]
+    }
+
+    /// What of a reply goes back to the model next turn: its words and its tool calls. Not
+    /// `reasoning_content` — Sarvam's thinking, which it would bill a second time for being sent
+    /// back — nor anything else a server adds to its own messages.
+    static func kept(_ message: [String: Any]) -> [String: Any] {
+        var kept: [String: Any] = ["role": "assistant"]
+        let content = message["content"] as? String
+        if let calls = message["tool_calls"] as? [[String: Any]], !calls.isEmpty {
+            kept["tool_calls"] = calls
+            // A reply that is only tool calls has no words, and says so with a null.
+            if let content { kept["content"] = content } else { kept["content"] = NSNull() }
+        } else {
+            kept["content"] = content ?? ""
+        }
+        return kept
+    }
+
+    // MARK: When it does not work
+
+    /// A provider's no, as a sentence someone can act on.
+    static func refusal(status: Int, body: Data, configuration: SaathiConfiguration) -> any Error {
+        switch configuration.resolvedProvider {
+        case .sarvam:
+            return SarvamError.refusal(status: status, body: body)
+        case .local:
+            return VoiceError.transport(
+                "the local model at \(configuration.resolvedProviderBaseURL) did not answer. "
+                + "Is Ollama or LM Studio running? (\(statedReason(in: body)))")
+        default:
+            return VoiceError.transport(statedReason(in: body))
+        }
+    }
+
+    /// No answer at all. A cancelled request stays a cancellation: it was dropped on purpose.
+    static func unreachable(_ error: any Error, configuration: SaathiConfiguration) -> any Error {
+        if error is CancellationError { return error }
+        if let url = error as? URLError, url.code == .cancelled { return CancellationError() }
+        switch configuration.resolvedProvider {
+        case .sarvam:
+            return SarvamError.unreachable(error.localizedDescription)
+        case .local:
+            return VoiceError.transport(
+                "the local model at \(configuration.resolvedProviderBaseURL) did not answer. "
+                + "Is Ollama or LM Studio running? (\(error.localizedDescription))")
+        default:
+            return VoiceError.transport(error.localizedDescription)
+        }
+    }
+
+    /// A server's own words for a refusal — `error.message`, or `error`, or `detail` — and the
+    /// body itself, clipped, when it is none of those. A page of JSON is not a sentence.
+    static func statedReason(in body: Data) -> String {
+        if let answer = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] {
+            if let stated = (answer["error"] as? [String: Any])?["message"] as? String { return stated }
+            if let stated = answer["error"] as? String { return stated }
+            if let stated = answer["detail"] as? String { return stated }
+        }
+        let text = String(decoding: body.prefix(300), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "no response body" : text
     }
 }

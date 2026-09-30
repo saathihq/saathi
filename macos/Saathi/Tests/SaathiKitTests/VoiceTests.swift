@@ -696,3 +696,48 @@ final class SharedFramesTests: XCTestCase {
         XCTAssertNil(SharedFrames.buffer(Data()), "no bytes, no buffer")
     }
 }
+
+// MARK: - Which recogniser the on-device ears ask for
+
+final class DeviceEarsTests: XCTestCase {
+
+    private let supported = ["en-US", "en-GB", "en-IN", "fr-CA", "fr-FR", "hi-IN", "de-DE", "pt-BR"]
+
+    /// It used to be the Mac's own language whatever Settings said: someone who chose French on an
+    /// English Mac was heard as English words and answered in French.
+    func testTheEarsAskForTheLanguageOfSettingsNotTheMacsOwn() {
+        XCTAssertEqual(DeviceEars.choice(language: "hi", machine: "en_US", supported: supported), .locale("hi-IN"))
+        XCTAssertEqual(DeviceEars.choice(language: "de-DE", machine: "en-US", supported: supported), .locale("de-DE"))
+        XCTAssertEqual(
+            DeviceEars.choice(language: "fr", machine: "en_US", supported: supported), .locale("fr-FR"),
+            "a bare language gets its usual region, not the first in the alphabet")
+        XCTAssertEqual(DeviceEars.choice(language: "fr-CA", machine: "en_US", supported: supported), .locale("fr-CA"))
+        XCTAssertEqual(
+            DeviceEars.choice(language: "pt", machine: "en_US", supported: supported), .locale("pt-BR"),
+            "with no usual region on offer, whichever there is")
+    }
+
+    /// The Mac's own recogniser when it speaks the language: it knows which English its owner means.
+    func testTheMacsOwnRecogniserIsKeptForItsOwnLanguage() {
+        XCTAssertEqual(DeviceEars.choice(language: "en", machine: "en_US", supported: supported), .own)
+        XCTAssertEqual(DeviceEars.choice(language: "en-IN", machine: "en_GB", supported: supported), .own)
+    }
+
+    func testALanguageThisMacHasNoRecogniserForIsNone() {
+        for language in ["ml", "ta-IN", "or"] {
+            XCTAssertEqual(DeviceEars.choice(language: language, machine: "en_US", supported: supported), .none, language)
+        }
+    }
+
+    /// The Mac's own recogniser standing in is what this lane always did. It is said now, and the
+    /// way out is named where there is one: Sarvam hears ten Indian languages this Mac cannot.
+    func testSettlingForTheMacsOwnRecogniserIsSaidAndSoIsWhoCouldHear() {
+        XCTAssertEqual(
+            DeviceEars.settledFor("en-US", insteadOf: "ml"),
+            "ready — on-device speech recognition (en-US). This Mac cannot hear Malayalam on its own. "
+                + "Sarvam can hear it: add a Sarvam key, or turn its speech on, in Setup.")
+        XCTAssertEqual(
+            DeviceEars.settledFor("en-US", insteadOf: "sw"),
+            "ready — on-device speech recognition (en-US). This Mac cannot hear Swahili on its own.")
+    }
+}

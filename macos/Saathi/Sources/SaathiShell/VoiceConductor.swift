@@ -150,6 +150,10 @@ public final class VoiceConductor {
     public func keysBegan() {
         guard let turns else { reportNoVoice(); return }
         if isReconfiguring { reportReconfiguring(); return }
+        // Talking over Saathi stops it, and drops an answer still on its way. Before the turn
+        // opens: the begin is queued behind whatever the last turn is still doing, and on the
+        // chain lane that is the very reply being talked over.
+        if !turns.isOpen { session?.interrupt() }
         if turns.open() { onEvent(.keysHeld) }
     }
 
@@ -169,6 +173,7 @@ public final class VoiceConductor {
         if turns.isOpen {
             turns.close(); onEvent(.keysReleased)
         } else {
+            session?.interrupt()
             turns.open(); onEvent(.keysHeld)
         }
     }

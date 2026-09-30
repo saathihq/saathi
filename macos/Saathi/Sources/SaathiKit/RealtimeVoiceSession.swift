@@ -810,14 +810,9 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
             Task { [weak self] in
                 guard let self else { return }
                 defer { self.state.endLook() }
-                let answer: String
-                do {
-                    answer = try await ScreenSight(configuration: self.configuration).look(question: question)
-                } catch {
-                    // The model is told what went wrong so it can say something true — "I need
-                    // Screen Recording permission" is a useful sentence; silence is not.
-                    answer = "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
-                }
+                // A look that failed comes back as the reason, so the model can say something
+                // true about it. See `ScreenSight.answer`.
+                let answer = await ScreenSight(configuration: self.configuration).answer(question)
                 self.state.callbacks.onScreenLook?(question, answer)
                 try? self.send([
                     "type": "conversation.item.create",
