@@ -241,7 +241,7 @@ npm install
 npm run generate        # rewrite the generated contract for all three targets
 npm run check:contract  # fail if what is checked in is stale (CI runs this on every PR)
 npm test                # backend             (64 tests)
-npm run test:mac        # swift test          (about 400, silent: see below)
+npm run test:mac        # swift test          (about 630, silent: see below)
 npm run test:win        # dotnet test
 bash scripts/check-parity.sh   # run both clients and diff them
 ```

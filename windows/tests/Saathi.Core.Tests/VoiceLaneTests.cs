@@ -71,7 +71,6 @@ public class VoiceLaneTests
         Assert.DoesNotContain("only the transcript is sent", report);
     }
 
-    /// <summary>Same input, same bytes — what check-parity.sh diffs against the macOS client.</summary>
     /// <summary>With Sarvam's speech the voice does leave, and the report says so and to whom.</summary>
     [Fact]
     public void SarvamsSpeechSaysTheVoiceLeavesAndWhereTo()
@@ -100,6 +99,7 @@ public class VoiceLaneTests
         Assert.Equal(ProviderReport.Describe(plain), ProviderReport.Describe(withSpeech));
     }
 
+    /// <summary>Same input, same bytes — what check-parity.sh diffs against the macOS client.</summary>
     [Fact]
     public void TheReportIsDeterministic()
     {
