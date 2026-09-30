@@ -82,11 +82,10 @@ like; the blur behind the real window replaces the flat gradient.
 
 ## 5. Sarvam (branch `sarvam/heard-and-spoken`, 0.9.0)
 
-Written 2026-09-30, again with nobody at the machine, and with one thing more missing than usual:
-**there is no Sarvam key on this Mac**, so nothing in this section has run against the real service
-— not the key check, not a transcript, not a syllable. Get a key at
-[dashboard.sarvam.ai](https://dashboard.sarvam.ai) (it comes with free credits) and start at the top;
-each step only makes sense once the one before it works.
+Written 2026-09-30 with nobody at the machine. Later that day the user handed over a key, and the
+command below passed all four lines in Malayalam, Hindi, Tamil and English; the key is in
+`~/.saathi/shell.json` as `sarvamKey`. **The app has still not been tried with Sarvam's speech** —
+start at "Then the app".
 
 **Before the app, the command.** It needs no microphone and no permission.
 

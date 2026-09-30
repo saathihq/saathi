@@ -169,10 +169,10 @@ saathi sarvam --play   # ...and play what Bulbul said
 Four lines, one for each thing Saathi asks of Sarvam, each saying what came back or exactly what
 refused. It needs no microphone: what Saaras is asked to hear is what Bulbul has just said.
 
-**This has not been run against a real Sarvam key.** Every request is written, field for field,
-from Sarvam's reference as it stood on 2026-09-30 and tested against the documented responses; what
-is measured against the live service is what can be measured without a key (the paths, the header,
-and the shape of a refusal). `saathi sarvam` is the first thing to run with one.
+`saathi sarvam` has passed all four lines against the live service, in Malayalam, Hindi, Tamil and
+English (2026-09-30): the key check, Bulbul, Saaras hearing Bulbul back, and Sarvam-105B answering
+with the tools attached. What has not yet been tried is the app itself with Sarvam's speech — the
+microphone, the player, and a held turn — which is the hand test in `docs/HAND-TEST.md`.
 
 The languages are the eleven Bulbul speaks: Bengali, English, Gujarati, Hindi, Kannada, Malayalam,
 Marathi, Odia, Punjabi, Tamil and Telugu. Any other language with `speech: sarvam` is refused out

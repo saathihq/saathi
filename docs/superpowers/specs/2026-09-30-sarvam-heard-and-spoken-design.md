@@ -2,8 +2,9 @@
 
 Date: 2026-09-30. Status: written and built while the user was away, on "make sure the Sarvam AI
 integration is done". Nobody approved any of it. The decisions are in their own section, each with
-its reason, for them to be argued with. **Nothing here has run against a real Sarvam key**: there
-is none on this Mac. `saathi sarvam` is the one command that says whether it works.
+its reason, for them to be argued with. It was built with no Sarvam key on this Mac; later the same
+day the user provided one, and `saathi sarvam` passed all four lines in Malayalam, Hindi, Tamil and
+English. The app itself has not yet been tried with Sarvam's speech.
 
 ## What "the Sarvam integration" was
 
@@ -234,10 +235,10 @@ microphone and no permission, and it is the first thing to run with a real key.
 
 ## Not verified
 
-Everything that needs a key: that a real key gets the 400 the validator reads as "accepted"; that
-Saaras takes the WAV this writes; that Bulbul's answer is the shape the docs show and plays through
-`AVAudioPlayer`; that `reasoning_effort: null` is accepted; how long a turn takes; what it sounds
-like. And three things
+Now verified with a key, through `saathi sarvam`: a real key gets the 400 the validator reads as
+"accepted"; Saaras takes the WAV this writes; Bulbul's answer is the shape the docs show;
+`reasoning_effort: null` and the tools are accepted. Still not: that Bulbul's audio plays through
+`AVAudioPlayer`; how long a turn takes; what it sounds like. And three things
 that need a person: the microphone after switching from OpenAI without a relaunch, the new row,
 picker and switch on a real island, and a local model actually answering through `/v1` (Ollama is
 not installed on this Mac; the path is from its documentation).
