@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-30-sarvam-heard-and-spoken-design.md`
 
-**Code blocks in this plan are the code as built.** It was drafted before anything was compiled, and regenerated from the files once the work was done, so a block here and the file in the tree are the same bytes.
+**Code blocks in this plan are the code as built.** It was drafted before anything was compiled, and regenerated from the repository once the work was done: a whole file shown here is that file as it stands at the end of the branch, and a diff is what that task's own commit did to the file. Where building changed the plan, **What building it changed**, at the end, says what and why.
 
 ## Global Constraints
 
@@ -80,201 +80,256 @@ All Swift paths are relative to `macos/Saathi/`.
 - Produces (Swift): `SaathiConfiguration.sarvamKey: String?`, `.speech: SpeechEngine?`, `.resolvedSpeech: SpeechEngine`; `enum SpeechEngine: String { case device, sarvam }`; `credential(for: .sarvam)` reads `sarvamKey` then `apiKey`. Memberwise init gains `sarvamKey:` after `anthropicKey:` and `speech:` after `voice:`.
 - Produces (C#): `SarvamKey`, `Speech`, `ResolvedSpeech`, `SpeechEngine.Device/.Sarvam`, `Credential(ProviderKind.Sarvam)`.
 
-- [ ] **Step 1: Write the failing tests (Swift).** In `SaathiKitTests.swift`:
+- [ ] **Step 1: Write the failing tests (Swift).** The fixture's two new fields, Sarvam's own key with the legacy one behind it, and `SpeechEngineTests`: unset means this machine.
 
-In `SharedFixtureTests.testTheSharedConfigFixtureParses`, after the `anthropicKey` assertion add:
-
-```swift
-        XCTAssertEqual(configuration.sarvamKey, "not-a-real-sarvam-key")
-```
-
-and after the `voice` assertion add:
-
-```swift
-        XCTAssertEqual(configuration.speech, .sarvam, "an enum config field must parse from its wire spelling")
-```
-
-In `testResolutionThroughTheFixtureMatches` add:
-
-```swift
-        XCTAssertEqual(
-            configuration.credential(for: .sarvam), "not-a-real-sarvam-key",
-            "Sarvam's own field wins over the legacy shared one, as the other vendors' do")
-        XCTAssertEqual(configuration.resolvedSpeech, .sarvam)
-```
-
-In `CredentialResolutionTests` add:
-
-```swift
-    /// Sarvam has a field of its own, like the other two, and the legacy shared key still stands
-    /// in for it on a config written before there was one.
-    func testSarvamHasItsOwnFieldAndStillReadsTheLegacyOne() {
-        let own = SaathiConfiguration(apiKey: "legacy", openaiKey: "sk-openai", sarvamKey: " sk-sarvam \n")
-        XCTAssertEqual(own.credential(for: .sarvam), "sk-sarvam")
-        XCTAssertEqual(own.credential(for: .openai), "sk-openai")
-        XCTAssertEqual(SaathiConfiguration(apiKey: "legacy").credential(for: .sarvam), "legacy")
-        XCTAssertNil(
-            SaathiConfiguration(openaiKey: "sk-openai").credential(for: .sarvam),
-            "another vendor's key is not Sarvam's")
-    }
-```
-
-After `CredentialResolutionTests` add a new class:
-
-```swift
-/// Whose ears and mouth a chain-lane turn uses. Unset must mean this machine's: a config written
-/// before the field existed promised that the voice stays here, and an update must not change that.
-final class SpeechEngineTests: XCTestCase {
-
-    func testUnsetMeansThisMachine() {
-        XCTAssertNil(SaathiConfiguration(provider: .sarvam, apiKey: "k").speech)
-        XCTAssertEqual(SaathiConfiguration(provider: .sarvam, apiKey: "k").resolvedSpeech, .device)
-        XCTAssertEqual(SaathiConfiguration().resolvedSpeech, .device)
-    }
-
-    func testAChoiceIsKept() {
-        XCTAssertEqual(SaathiConfiguration(speech: .sarvam).resolvedSpeech, .sarvam)
-        XCTAssertEqual(SaathiConfiguration(speech: .device).resolvedSpeech, .device)
-    }
-
-    func testTheTwoEnginesAreSpelledAsTheSchemaSpellsThem() {
-        XCTAssertEqual(SpeechEngine.allCases.map(\.rawValue), ["device", "sarvam"])
-    }
-}
-```
-
-In `ConfigurationRoundTripTests.testEveryNewFieldSurvivesAWriteAndARead` replace the `written` value and add two assertions:
-
-```swift
-        let written = SaathiConfiguration(
-            provider: .openai, model: "gpt-4o", openaiKey: "sk-o", anthropicKey: "sk-a", sarvamKey: "sk-s",
-            voiceModel: "gpt-realtime", voice: "cedar", speech: .sarvam)
-```
-
-```swift
-        XCTAssertEqual(read.sarvamKey, "sk-s")
-        XCTAssertEqual(read.speech, .sarvam)
+```diff
+diff --git a/macos/Saathi/Tests/SaathiKitTests/SaathiKitTests.swift b/macos/Saathi/Tests/SaathiKitTests/SaathiKitTests.swift
+index 7281504..68d6600 100644
+--- a/macos/Saathi/Tests/SaathiKitTests/SaathiKitTests.swift
++++ b/macos/Saathi/Tests/SaathiKitTests/SaathiKitTests.swift
+@@ -458,8 +458,10 @@ final class SharedFixtureTests: XCTestCase {
+         XCTAssertEqual(configuration.apiKey, "not-a-real-key")
+         XCTAssertEqual(configuration.openaiKey, "not-a-real-openai-key")
+         XCTAssertEqual(configuration.anthropicKey, "not-a-real-anthropic-key")
++        XCTAssertEqual(configuration.sarvamKey, "not-a-real-sarvam-key")
+         XCTAssertEqual(configuration.voiceModel, "not-a-real-voice-model")
+         XCTAssertEqual(configuration.voice, "not-a-real-voice")
++        XCTAssertEqual(configuration.speech, .sarvam, "an enum config field must parse from its wire spelling")
+         XCTAssertEqual(configuration.language, "ta")
+         XCTAssertEqual(configuration.backendUrl, "https://backend.example.test")
+         XCTAssertEqual(configuration.token, "not-a-real-token")
+@@ -482,6 +484,10 @@ final class SharedFixtureTests: XCTestCase {
+         XCTAssertEqual(configuration.resolvedProvider, .sarvam)
+         XCTAssertEqual(configuration.resolvedProviderBaseURL, "http://192.168.1.9:11434")
+         XCTAssertEqual(configuration.resolvedModel, "sarvam-105b-conversations")
++        XCTAssertEqual(
++            configuration.credential(for: .sarvam), "not-a-real-sarvam-key",
++            "Sarvam's own field wins over the legacy shared one, as the other vendors' do")
++        XCTAssertEqual(configuration.resolvedSpeech, .sarvam)
+     }
+ 
+     /// Every enum value must survive a round trip through its wire spelling in this client, since
+@@ -540,6 +546,38 @@ final class CredentialResolutionTests: XCTestCase {
+         XCTAssertNil(both.credential(for: .local))
+         XCTAssertNil(both.credential(for: .hosted))
+     }
++
++    /// Sarvam has a field of its own, like the other two, and the legacy shared key still stands
++    /// in for it on a config written before there was one.
++    func testSarvamHasItsOwnFieldAndStillReadsTheLegacyOne() {
++        let own = SaathiConfiguration(apiKey: "legacy", openaiKey: "sk-openai", sarvamKey: " sk-sarvam \n")
++        XCTAssertEqual(own.credential(for: .sarvam), "sk-sarvam")
++        XCTAssertEqual(own.credential(for: .openai), "sk-openai")
++        XCTAssertEqual(SaathiConfiguration(apiKey: "legacy").credential(for: .sarvam), "legacy")
++        XCTAssertNil(
++            SaathiConfiguration(openaiKey: "sk-openai").credential(for: .sarvam),
++            "another vendor's key is not Sarvam's")
++    }
++}
++
++/// Whose ears and mouth a chain-lane turn uses. Unset must mean this machine's: a config written
++/// before the field existed promised that the voice stays here, and an update must not change that.
++final class SpeechEngineTests: XCTestCase {
++
++    func testUnsetMeansThisMachine() {
++        XCTAssertNil(SaathiConfiguration(provider: .sarvam, apiKey: "k").speech)
++        XCTAssertEqual(SaathiConfiguration(provider: .sarvam, apiKey: "k").resolvedSpeech, .device)
++        XCTAssertEqual(SaathiConfiguration().resolvedSpeech, .device)
++    }
++
++    func testAChoiceIsKept() {
++        XCTAssertEqual(SaathiConfiguration(speech: .sarvam).resolvedSpeech, .sarvam)
++        XCTAssertEqual(SaathiConfiguration(speech: .device).resolvedSpeech, .device)
++    }
++
++    func testTheTwoEnginesAreSpelledAsTheSchemaSpellsThem() {
++        XCTAssertEqual(SpeechEngine.allCases.map(\.rawValue), ["device", "sarvam"])
++    }
+ }
+ 
+ /// The realtime socket is opened with a VOICE model, which is a different thing from the model that
+@@ -592,8 +630,8 @@ final class ConfigurationRoundTripTests: XCTestCase {
+         defer { try? FileManager.default.removeItem(at: url) }
+ 
+         let written = SaathiConfiguration(
+-            provider: .openai, model: "gpt-4o", openaiKey: "sk-o", anthropicKey: "sk-a",
+-            voiceModel: "gpt-realtime", voice: "cedar")
++            provider: .openai, model: "gpt-4o", openaiKey: "sk-o", anthropicKey: "sk-a", sarvamKey: "sk-s",
++            voiceModel: "gpt-realtime", voice: "cedar", speech: .sarvam)
+         try ConfigurationStore.save(written, to: url)
+         let read = try ConfigurationStore.load(from: url)
+ 
+@@ -601,8 +639,10 @@ final class ConfigurationRoundTripTests: XCTestCase {
+         XCTAssertEqual(read.model, "gpt-4o")
+         XCTAssertEqual(read.openaiKey, "sk-o")
+         XCTAssertEqual(read.anthropicKey, "sk-a")
++        XCTAssertEqual(read.sarvamKey, "sk-s")
+         XCTAssertEqual(read.voiceModel, "gpt-realtime")
+         XCTAssertEqual(read.voice, "cedar")
++        XCTAssertEqual(read.speech, .sarvam)
+     }
+ 
+     /// A file holding two provider keys is worth more to an attacker than one holding a single key.
 ```
 
 - [ ] **Step 2: Run them to see them fail.**
 
-Run: `cd macos/Saathi && swift build --build-tests 2>&1 | grep -E "error:" | head`
-Expected: FAIL to compile — `value of type 'SaathiConfiguration' has no member 'sarvamKey'`, `cannot find 'SpeechEngine' in scope`.
+Run: `cd macos/Saathi && swift build --build-tests 2>&1 | grep "error:"`
+Expected: `value of type 'SaathiConfiguration' has no member 'speech'`, `… no member 'resolvedSpeech'`, `extra argument 'sarvamKey' in call`.
 
-- [ ] **Step 3: Change the schema.** In `contract/schema/saathi.json`:
+- [ ] **Step 3: Change the schema.** The only hand-edited contract file.
 
-`"version": "0.8.0"` → `"version": "0.9.0"`.
-
-Replace the `apiKey` doc with `"Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."`
-
-Replace the `anthropicKey` field and add `sarvamKey` after it:
-
-```json
-      {
-        "name": "anthropicKey",
-        "type": "string",
-        "optional": true,
-        "doc": "Your own Anthropic key. Looks at the screen when a turn asks about something on it, and thinks when nothing else can. Never sent to Saathi's servers."
-      },
-      {
-        "name": "sarvamKey",
-        "type": "string",
-        "optional": true,
-        "doc": "Your own Sarvam AI key. Thinks with Sarvam, and hears and speaks with it when speech is sarvam. Never sent to Saathi's servers."
-      },
+```diff
+diff --git a/contract/schema/saathi.json b/contract/schema/saathi.json
+index 75c17a5..8dedf6c 100644
+--- a/contract/schema/saathi.json
++++ b/contract/schema/saathi.json
+@@ -14,7 +14,7 @@
+     "Why closed enums: a speech pipeline mishears. When a misheard word can only produce a wrong",
+     "VALUE inside a known set, never a wrong COMMAND, the blast radius of a mishearing stays small."
+   ],
+-  "version": "0.8.0",
++  "version": "0.9.0",
+   "backend": {
+     "defaultBaseUrl": "https://api.saathi.dev",
+     "$comment": "Hosted is the default; a local backend is an explicit override, not the other way round.",
+@@ -78,7 +78,7 @@
+         "name": "apiKey",
+         "type": "string",
+         "optional": true,
+-        "doc": "Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."
++        "doc": "Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working."
+       },
+       {
+         "name": "openaiKey",
+@@ -90,7 +90,13 @@
+         "name": "anthropicKey",
+         "type": "string",
+         "optional": true,
+-        "doc": "Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today."
++        "doc": "Your own Anthropic key. Looks at the screen when a turn asks about something on it, and thinks when nothing else can. Never sent to Saathi's servers."
++      },
++      {
++        "name": "sarvamKey",
++        "type": "string",
++        "optional": true,
++        "doc": "Your own Sarvam AI key. Thinks with Sarvam, and hears and speaks with it when speech is sarvam. Never sent to Saathi's servers."
+       },
+       {
+         "name": "voiceModel",
+@@ -102,7 +108,13 @@
+         "name": "voice",
+         "type": "string",
+         "optional": true,
+-        "doc": "The realtime voice's name. Defaults to the provider row's."
++        "doc": "The voice's name: the realtime voice on the realtime lane, Sarvam's speaker when speech is sarvam. Defaults to the provider's."
++      },
++      {
++        "name": "speech",
++        "type": "SpeechEngine",
++        "optional": true,
++        "doc": "Whose ears and mouth a chain-lane turn uses. Unset means this machine's. The realtime lane carries its own speech and does not read this."
+       },
+       {
+         "name": "language",
+@@ -208,6 +220,14 @@
+         "realtime",
+         "chain"
+       ]
++    },
++    {
++      "name": "SpeechEngine",
++      "doc": "Where speech becomes text and text becomes speech on the chain lane. With device the learner's voice never leaves the machine. With sarvam it is sent to Sarvam as audio — the only way to be heard in most Indian languages, and never done unless asked for.",
++      "cases": [
++        "device",
++        "sarvam"
++      ]
+     }
+   ],
+   "actions": [
+@@ -310,6 +330,12 @@
+       "loud. What it is not is absent — a companion whose default mode cannot be spoken to would",
+       "have the accessibility premise backwards.",
+       "",
++      "Sarvam's speech models are where that leaves a gap. The chain lane's ears and mouth are the",
++      "machine's own by default, and the machine's own cannot hear most Indian languages at all.",
++      "So `speech` — a config field, not a column here — says whose they are: `device`, or `sarvam`",
++      "for Saaras and Bulbul. It is a field rather than a column because it changes where a voice",
++      "goes, and that is the learner's to ask for, not something a provider row decides for them.",
++      "",
+       "`defaultVoiceModel` and `defaultVoice` are separate from `defaultModel` because they are a",
+       "different thing: the model that carries a realtime socket is not the model that answers a",
+       "chat completion, and a client that opened the socket with `defaultModel` would be rejected by",
 ```
 
-Replace the `voice` field and add `speech` after it:
+- [ ] **Step 4: Change the generator.** `resolvedSpeech` for Swift and C#, and Sarvam's own field in `credential(for:)`.
 
-```json
-      {
-        "name": "voice",
-        "type": "string",
-        "optional": true,
-        "doc": "The voice's name: the realtime voice on the realtime lane, Sarvam's speaker when speech is sarvam. Defaults to the provider's."
-      },
-      {
-        "name": "speech",
-        "type": "SpeechEngine",
-        "optional": true,
-        "doc": "Whose ears and mouth a chain-lane turn uses. Unset means this machine's. The realtime lane carries its own speech and does not read this."
-      },
+```diff
+diff --git a/contract/generate.mjs b/contract/generate.mjs
+index 6870faf..c9b4705 100644
+--- a/contract/generate.mjs
++++ b/contract/generate.mjs
+@@ -224,9 +224,12 @@ function swift() {
+   out.push("        let trimmed = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? \"\"");
+   out.push("        return trimmed.isEmpty ? \"en\" : trimmed");
+   out.push("    }\n");
++  out.push("    /// Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's");
++  out.push("    /// until one is made. The realtime lane carries its own speech and does not read this.");
++  out.push("    public var resolvedSpeech: SpeechEngine { speech ?? .device }\n");
+   out.push("    /// The credential for a provider: its own vendor field first, then the legacy shared");
+-  out.push("    /// `apiKey`. Vendor-specific wins, so a config holding both an OpenAI and an Anthropic");
+-  out.push("    /// key is unambiguous — which is the whole reason the two fields exist. Providers that");
++  out.push("    /// `apiKey`. Vendor-specific wins, so a config holding keys for several vendors is");
++  out.push("    /// unambiguous — which is the whole reason the vendor fields exist. Providers that");
+   out.push("    /// need no key of their own get nil even when keys are present.");
+   out.push("    public func credential(for kind: ProviderKind) -> String? {");
+   out.push("        guard SaathiProvider.of(kind).requiresKey else { return nil }");
+@@ -234,6 +237,7 @@ function swift() {
+   out.push("        switch kind {");
+   out.push("        case .openai: candidates = [openaiKey, apiKey]");
+   out.push("        case .anthropic: candidates = [anthropicKey, apiKey]");
++  out.push("        case .sarvam: candidates = [sarvamKey, apiKey]");
+   out.push("        default: candidates = [apiKey]");
+   out.push("        }");
+   out.push("        for candidate in candidates {");
+@@ -391,6 +395,9 @@ function csharp() {
+   out.push("    /// <summary>The language Saathi speaks: the one chosen in Settings, English until one is.</summary>");
+   out.push("    public string ResolvedLanguage =>");
+   out.push("        string.IsNullOrWhiteSpace(Language) ? \"en\" : Language!.Trim();\n");
++  out.push("    /// <summary>Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's");
++  out.push("    /// until one is made. The realtime lane carries its own speech and does not read this.</summary>");
++  out.push("    public SpeechEngine ResolvedSpeech => Speech ?? global::Saathi.Contract.SpeechEngine.Device;\n");
+   out.push("    /// <summary>The credential for a provider: its own vendor field first, then the legacy");
+   out.push("    /// shared ApiKey. Providers needing no key of their own get null.</summary>");
+   out.push("    public string? Credential(ProviderKind kind)");
+@@ -400,6 +407,7 @@ function csharp() {
+   out.push("        {");
+   out.push("            global::Saathi.Contract.ProviderKind.Openai => new[] { OpenaiKey, ApiKey },");
+   out.push("            global::Saathi.Contract.ProviderKind.Anthropic => new[] { AnthropicKey, ApiKey },");
++  out.push("            global::Saathi.Contract.ProviderKind.Sarvam => new[] { SarvamKey, ApiKey },");
+   out.push("            _ => new[] { ApiKey },");
+   out.push("        };");
+   out.push("        foreach (var candidate in candidates)");
 ```
 
-Add an enum after `VoiceLane`:
+- [ ] **Step 5: The fixture.**
 
-```json
-    {
-      "name": "SpeechEngine",
-      "doc": "Where speech becomes text and text becomes speech on the chain lane. With device the learner's voice never leaves the machine. With sarvam it is sent to Sarvam as audio — the only way to be heard in most Indian languages, and never done unless asked for.",
-      "cases": [
-        "device",
-        "sarvam"
-      ]
-    }
-```
-
-In the `providers` `$comment` array, after the line `"have the accessibility premise backwards.",` add:
-
-```json
-      "",
-      "Sarvam's speech models are where that leaves a gap. The chain lane's ears and mouth are the",
-      "machine's own by default, and the machine's own cannot hear most Indian languages at all.",
-      "So `speech` — a config field, not a column here — says whose they are: `device`, or `sarvam`",
-      "for Saaras and Bulbul. It is a field rather than a column because it changes where a voice",
-      "goes, and that is the learner's to ask for, not something a provider row decides for them.",
-```
-
-- [ ] **Step 4: Change the generator.** In `contract/generate.mjs`, Swift section — after the `resolvedLanguage` block (the line `out.push("    }\n");` that follows `return trimmed.isEmpty ? \"en\" : trimmed`) add:
-
-```js
-  out.push("    /// Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's");
-  out.push("    /// until one is made. The realtime lane carries its own speech and does not read this.");
-  out.push("    public var resolvedSpeech: SpeechEngine { speech ?? .device }\n");
-```
-
-Replace the four `credential` comment lines and the switch:
-
-```js
-  out.push("    /// The credential for a provider: its own vendor field first, then the legacy shared");
-  out.push("    /// `apiKey`. Vendor-specific wins, so a config holding keys for several vendors is");
-  out.push("    /// unambiguous — which is the whole reason the vendor fields exist. Providers that");
-  out.push("    /// need no key of their own get nil even when keys are present.");
-  out.push("    public func credential(for kind: ProviderKind) -> String? {");
-  out.push("        guard SaathiProvider.of(kind).requiresKey else { return nil }");
-  out.push("        let candidates: [String?]");
-  out.push("        switch kind {");
-  out.push("        case .openai: candidates = [openaiKey, apiKey]");
-  out.push("        case .anthropic: candidates = [anthropicKey, apiKey]");
-  out.push("        case .sarvam: candidates = [sarvamKey, apiKey]");
-  out.push("        default: candidates = [apiKey]");
-  out.push("        }");
-```
-
-C# section — after the `ResolvedLanguage` lines add:
-
-```js
-  out.push("    /// <summary>Whose ears and mouth a chain-lane turn uses: the config's choice, this machine's");
-  out.push("    /// until one is made. The realtime lane carries its own speech and does not read this.</summary>");
-  out.push("    public SpeechEngine ResolvedSpeech => Speech ?? global::Saathi.Contract.SpeechEngine.Device;\n");
-```
-
-and in `Credential` add one arm after the Anthropic one:
-
-```js
-  out.push("            global::Saathi.Contract.ProviderKind.Sarvam => new[] { SarvamKey, ApiKey },");
-```
-
-- [ ] **Step 5: The fixture.** In `contract/fixtures/config.json` add after `"anthropicKey"`:
-
-```json
-  "sarvamKey": "not-a-real-sarvam-key",
-```
-
-and after `"voice"`:
-
-```json
-  "speech": "sarvam",
+```diff
+diff --git a/contract/fixtures/config.json b/contract/fixtures/config.json
+index 16a108d..9c4af52 100644
+--- a/contract/fixtures/config.json
++++ b/contract/fixtures/config.json
+@@ -6,8 +6,10 @@
+   "apiKey": "not-a-real-key",
+   "openaiKey": "not-a-real-openai-key",
+   "anthropicKey": "not-a-real-anthropic-key",
++  "sarvamKey": "not-a-real-sarvam-key",
+   "voiceModel": "not-a-real-voice-model",
+   "voice": "not-a-real-voice",
++  "speech": "sarvam",
+   "language": "ta",
+   "backendUrl": "https://backend.example.test",
+   "token": "not-a-real-token",
 ```
 
 - [ ] **Step 6: Regenerate, and the C# tests.**
@@ -282,53 +337,63 @@ and after `"voice"`:
 Run: `npm run generate && npm run check:contract`
 Expected: three files written; `contract 0.9.0: generated files are up to date`.
 
-In `windows/tests/Saathi.Core.Tests/SharedFixtureTests.cs`, in `TheSharedConfigFixtureParses` add:
-
-```csharp
-        Assert.Equal("not-a-real-sarvam-key", configuration.SarvamKey);
-        Assert.Equal(SpeechEngine.Sarvam, configuration.Speech);
+```diff
+diff --git a/windows/tests/Saathi.Core.Tests/SharedFixtureTests.cs b/windows/tests/Saathi.Core.Tests/SharedFixtureTests.cs
+index 2dd20bb..e5cf9b1 100644
+--- a/windows/tests/Saathi.Core.Tests/SharedFixtureTests.cs
++++ b/windows/tests/Saathi.Core.Tests/SharedFixtureTests.cs
+@@ -37,8 +37,10 @@ public class SharedFixtureTests
+         Assert.Equal("not-a-real-key", configuration.ApiKey);
+         Assert.Equal("not-a-real-openai-key", configuration.OpenaiKey);
+         Assert.Equal("not-a-real-anthropic-key", configuration.AnthropicKey);
++        Assert.Equal("not-a-real-sarvam-key", configuration.SarvamKey);
+         Assert.Equal("not-a-real-voice-model", configuration.VoiceModel);
+         Assert.Equal("not-a-real-voice", configuration.Voice);
++        Assert.Equal(SpeechEngine.Sarvam, configuration.Speech);
+         Assert.Equal("ta", configuration.Language);
+         Assert.Equal("https://backend.example.test", configuration.BackendUrl);
+         Assert.Equal("not-a-real-token", configuration.Token);
+@@ -61,6 +63,8 @@ public class SharedFixtureTests
+         Assert.Equal(ProviderKind.Sarvam, configuration.ResolvedProvider);
+         Assert.Equal("http://192.168.1.9:11434", configuration.ResolvedProviderBaseUrl);
+         Assert.Equal("sarvam-105b-conversations", configuration.ResolvedModel);
++        Assert.Equal("not-a-real-sarvam-key", configuration.Credential(ProviderKind.Sarvam));
++        Assert.Equal(SpeechEngine.Sarvam, configuration.ResolvedSpeech);
+     }
+ 
+     /// <summary>
+@@ -88,4 +92,26 @@ public class SharedFixtureTests
+         Assert.ThrowsAny<JsonException>(
+             () => JsonSerializer.Deserialize<SaathiConfiguration>("""{"provider":"Sarvam"}"""));
+     }
++
++    /// <summary>Unset must mean this machine's: a config written before the field existed promised
++    /// the voice stays here, and an update must not change that.</summary>
++    [Fact]
++    public void SpeechIsThisMachinesUntilItIsAskedFor()
++    {
++        Assert.Equal(
++            SpeechEngine.Device,
++            new SaathiConfiguration { Provider = ProviderKind.Sarvam, ApiKey = "k" }.ResolvedSpeech);
++        Assert.Equal(SpeechEngine.Sarvam, new SaathiConfiguration { Speech = SpeechEngine.Sarvam }.ResolvedSpeech);
++    }
++
++    /// <summary>Sarvam has a field of its own, like the other two, and the legacy shared key still
++    /// stands in for it on a config written before there was one.</summary>
++    [Fact]
++    public void SarvamHasItsOwnFieldAndStillReadsTheLegacyOne()
++    {
++        var own = new SaathiConfiguration { ApiKey = "legacy", OpenaiKey = "sk-openai", SarvamKey = " sk-sarvam " };
++        Assert.Equal("sk-sarvam", own.Credential(ProviderKind.Sarvam));
++        Assert.Equal("legacy", new SaathiConfiguration { ApiKey = "legacy" }.Credential(ProviderKind.Sarvam));
++        Assert.Null(new SaathiConfiguration { OpenaiKey = "sk-openai" }.Credential(ProviderKind.Sarvam));
++    }
+ }
 ```
 
-in `ResolutionThroughTheFixtureMatches` add:
+- [ ] **Step 7: Run everything.** `bash <scratchpad>/ci-local.sh` — every job ✓; both CLIs' `actions` line now reads `contract 0.9.0`.
 
-```csharp
-        Assert.Equal("not-a-real-sarvam-key", configuration.Credential(ProviderKind.Sarvam));
-        Assert.Equal(SpeechEngine.Sarvam, configuration.ResolvedSpeech);
-```
-
-and add two tests:
-
-```csharp
-    /// <summary>Unset must mean this machine's: a config written before the field existed promised
-    /// the voice stays here, and an update must not change that.</summary>
-    [Fact]
-    public void SpeechIsThisMachinesUntilItIsAskedFor()
-    {
-        Assert.Equal(SpeechEngine.Device, new SaathiConfiguration { Provider = ProviderKind.Sarvam, ApiKey = "k" }.ResolvedSpeech);
-        Assert.Equal(SpeechEngine.Sarvam, new SaathiConfiguration { Speech = SpeechEngine.Sarvam }.ResolvedSpeech);
-    }
-
-    [Fact]
-    public void SarvamHasItsOwnFieldAndStillReadsTheLegacyOne()
-    {
-        var own = new SaathiConfiguration { ApiKey = "legacy", OpenaiKey = "sk-openai", SarvamKey = " sk-sarvam " };
-        Assert.Equal("sk-sarvam", own.Credential(ProviderKind.Sarvam));
-        Assert.Equal("legacy", new SaathiConfiguration { ApiKey = "legacy" }.Credential(ProviderKind.Sarvam));
-        Assert.Null(new SaathiConfiguration { OpenaiKey = "sk-openai" }.Credential(ProviderKind.Sarvam));
-    }
-```
-
-- [ ] **Step 7: Run everything.**
-
-Run: `bash <scratchpad>/ci-local.sh`
-Expected: every job ✓. The `actions` line of both CLIs now reads `contract 0.9.0`.
-
-- [ ] **Step 8: Commit.**
-
-```bash
-git add contract backend/src/contract.ts macos/Saathi/Sources/SaathiContract macos/Saathi/Tests/SaathiKitTests/SaathiKitTests.swift windows
-git commit   # "Sarvam has a key of its own, and a config can ask for its ears and mouth (contract 0.9.0)"
-```
+- [ ] **Step 8: Commit** — "Sarvam has a key of its own, and a config can ask for its ears and mouth (contract 0.9.0)".
 
 ---
 
@@ -342,185 +407,234 @@ git commit   # "Sarvam has a key of its own, and a config can ask for its ears a
 - Consumes: `SaathiProvider.authorizationHeader(credential:)`.
 - Produces: `KeyValidator.check(.sarvam, key:)` → `.valid` for 2xx/400/422, `.rejected` for 401/403, `.unreachable` otherwise (with a sentence about credits for 429 `insufficient_quota_error`). Signature unchanged.
 
-- [ ] **Step 1: Write the failing tests.** In `KeyValidatorTests.swift`, let the stub carry a body: replace the three `static` lines and `reset` in `KeyStubProtocol` with
+- [ ] **Step 1: Write the failing tests.** The stub learns to carry a body; six tests for Sarvam's probe.
 
-```swift
-    nonisolated(unsafe) static var status = 200
-    nonisolated(unsafe) static var shouldFail = false
-    nonisolated(unsafe) static var body = Data("{}".utf8)
-    nonisolated(unsafe) static var lastRequest: URLRequest?
-
-    static func reset(status: Int, shouldFail: Bool = false, body: Data = Data("{}".utf8)) {
-        self.status = status
-        self.shouldFail = shouldFail
-        self.body = body
-        self.lastRequest = nil
-    }
-```
-
-replace `client?.urlProtocol(self, didLoad: Data("{}".utf8))` with `client?.urlProtocol(self, didLoad: Self.body)`, and replace `keyStub(status:)` with
-
-```swift
-    static func keyStub(status: Int, body: Data = Data("{}".utf8)) -> URLSession {
-        KeyStubProtocol.reset(status: status, body: body)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [KeyStubProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-```
-
-Then add to `KeyValidatorTests`:
-
-```swift
-    // MARK: Sarvam, whose model list is open to anyone
-
-    /// `GET /v1/models` answers 200 to no key at all — and to a wrong one — so asking it accepted
-    /// every string ever pasted. Sarvam is asked something that needs a key instead.
-    func testSarvamIsAskedSomethingThatNeedsAKey() async {
-        _ = await KeyValidator(urlSession: .keyStub(status: 400)).check(.sarvam, key: " sk-s \n")
-        let request = KeyStubProtocol.lastRequest
-        XCTAssertEqual(request?.url?.absoluteString, "https://api.sarvam.ai/v1/chat/completions")
-        XCTAssertEqual(request?.httpMethod, "POST")
-        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer sk-s")
-        XCTAssertEqual(request?.value(forHTTPHeaderField: "Content-Type"), "application/json")
-    }
-
-    /// The question is an empty request. Sarvam checks the key before it reads the body, so "your
-    /// request is missing a model" can only be said to a key it has let in — and nothing is run,
-    /// and nothing is billed.
-    func testSarvamFindingTheRequestEmptyMeansTheKeyWasLetIn() async {
-        for status in [400, 422] {
-            let result = await KeyValidator(urlSession: .keyStub(status: status)).check(.sarvam, key: "sk-s")
-            XCTAssertEqual(result, .valid, "\(status)")
-        }
-    }
-
-    /// Sarvam refuses a key with 403, not 401.
-    func testSarvamRefusingTheKeyNamesSarvam() async {
-        guard case let .rejected(message) = await KeyValidator(urlSession: .keyStub(status: 403)).check(.sarvam, key: "nope") else {
-            return XCTFail("a 403 from Sarvam is the key being refused")
-        }
-        XCTAssertEqual(message, "Sarvam did not accept that key.")
-    }
-
-    /// "Bad request" is only good news from the one vendor that is asked an empty question.
-    func testABadRequestFromAVendorAskedForItsModelsIsNotAWorkingKey() async {
-        for kind in [ProviderKind.openai, .anthropic] {
-            guard case .unreachable = await KeyValidator(urlSession: .keyStub(status: 400)).check(kind, key: "sk") else {
-                return XCTFail("\(kind): a 400 to a model list says nothing good about the key")
-            }
-        }
-    }
-
-    /// A real key on an account with nothing left is not a wrong key, and "try again shortly"
-    /// would be a lie: it will not work shortly.
-    func testAnAccountOutOfCreditsIsSaidInThoseWords() async {
-        let body = Data(#"{"error":{"message":"Credits exhausted","code":"insufficient_quota_error"}}"#.utf8)
-        let validator = KeyValidator(urlSession: .keyStub(status: 429, body: body))
-        guard case let .unreachable(message) = await validator.check(.sarvam, key: "sk-s") else {
-            return XCTFail("out of credits is not a rejected key")
-        }
-        XCTAssertTrue(message.contains("out of credits"), message)
-        XCTAssertFalse(message.contains("try again shortly"), message)
-    }
-
-    func testSarvamBeingBusyIsStillNotAboutTheKey() async {
-        let body = Data(#"{"error":{"message":"Rate limit exceeded","code":"rate_limit_exceeded_error"}}"#.utf8)
-        let validator = KeyValidator(urlSession: .keyStub(status: 429, body: body))
-        guard case let .unreachable(message) = await validator.check(.sarvam, key: "sk-s") else {
-            return XCTFail("a rate limit is not a rejected key")
-        }
-        XCTAssertTrue(message.contains("429"), message)
-    }
+```diff
+diff --git a/macos/Saathi/Tests/SaathiKitTests/KeyValidatorTests.swift b/macos/Saathi/Tests/SaathiKitTests/KeyValidatorTests.swift
+index a069c16..a7372d2 100644
+--- a/macos/Saathi/Tests/SaathiKitTests/KeyValidatorTests.swift
++++ b/macos/Saathi/Tests/SaathiKitTests/KeyValidatorTests.swift
+@@ -90,6 +90,67 @@ final class KeyValidatorTests: XCTestCase {
+             return XCTFail("local takes no key; there is nothing here to validate")
+         }
+     }
++
++    // MARK: Sarvam, whose model list is open to anyone
++
++    /// `GET /v1/models` answers 200 to no key at all — and to a wrong one — so asking it accepted
++    /// every string ever pasted. Sarvam is asked something that needs a key instead.
++    func testSarvamIsAskedSomethingThatNeedsAKey() async {
++        _ = await KeyValidator(urlSession: .keyStub(status: 400)).check(.sarvam, key: " sk-s \n")
++        let request = KeyStubProtocol.lastRequest
++        XCTAssertEqual(request?.url?.absoluteString, "https://api.sarvam.ai/v1/chat/completions")
++        XCTAssertEqual(request?.httpMethod, "POST")
++        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer sk-s")
++        XCTAssertEqual(request?.value(forHTTPHeaderField: "Content-Type"), "application/json")
++    }
++
++    /// The question is an empty request. Sarvam checks the key before it reads the body, so "your
++    /// request is missing a model" can only be said to a key it has let in — and nothing is run,
++    /// and nothing is billed.
++    func testSarvamFindingTheRequestEmptyMeansTheKeyWasLetIn() async {
++        for status in [400, 422] {
++            let result = await KeyValidator(urlSession: .keyStub(status: status)).check(.sarvam, key: "sk-s")
++            XCTAssertEqual(result, .valid, "\(status)")
++        }
++    }
++
++    /// Sarvam refuses a key with 403, not 401.
++    func testSarvamRefusingTheKeyNamesSarvam() async {
++        guard case let .rejected(message) = await KeyValidator(urlSession: .keyStub(status: 403)).check(.sarvam, key: "nope") else {
++            return XCTFail("a 403 from Sarvam is the key being refused")
++        }
++        XCTAssertEqual(message, "Sarvam did not accept that key.")
++    }
++
++    /// "Bad request" is only good news from the one vendor that is asked an empty question.
++    func testABadRequestFromAVendorAskedForItsModelsIsNotAWorkingKey() async {
++        for kind in [ProviderKind.openai, .anthropic] {
++            guard case .unreachable = await KeyValidator(urlSession: .keyStub(status: 400)).check(kind, key: "sk") else {
++                return XCTFail("\(kind): a 400 to a model list says nothing good about the key")
++            }
++        }
++    }
++
++    /// A real key on an account with nothing left is not a wrong key, and "try again shortly"
++    /// would be a lie: it will not work shortly.
++    func testAnAccountOutOfCreditsIsSaidInThoseWords() async {
++        let body = Data(#"{"error":{"message":"Credits exhausted","code":"insufficient_quota_error"}}"#.utf8)
++        let validator = KeyValidator(urlSession: .keyStub(status: 429, body: body))
++        guard case let .unreachable(message) = await validator.check(.sarvam, key: "sk-s") else {
++            return XCTFail("out of credits is not a rejected key")
++        }
++        XCTAssertTrue(message.contains("out of credits"), message)
++        XCTAssertFalse(message.contains("try again shortly"), message)
++    }
++
++    func testSarvamBeingBusyIsStillNotAboutTheKey() async {
++        let body = Data(#"{"error":{"message":"Rate limit exceeded","code":"rate_limit_exceeded_error"}}"#.utf8)
++        let validator = KeyValidator(urlSession: .keyStub(status: 429, body: body))
++        guard case let .unreachable(message) = await validator.check(.sarvam, key: "sk-s") else {
++            return XCTFail("a rate limit is not a rejected key")
++        }
++        XCTAssertTrue(message.contains("429"), message)
++    }
+ }
+ 
+ // MARK: - A URLSession that answers without a network
+@@ -97,11 +158,13 @@ final class KeyValidatorTests: XCTestCase {
+ final class KeyStubProtocol: URLProtocol {
+     nonisolated(unsafe) static var status = 200
+     nonisolated(unsafe) static var shouldFail = false
++    nonisolated(unsafe) static var body = Data("{}".utf8)
+     nonisolated(unsafe) static var lastRequest: URLRequest?
+ 
+-    static func reset(status: Int, shouldFail: Bool = false) {
++    static func reset(status: Int, shouldFail: Bool = false, body: Data = Data("{}".utf8)) {
+         self.status = status
+         self.shouldFail = shouldFail
++        self.body = body
+         self.lastRequest = nil
+     }
+ 
+@@ -120,14 +183,14 @@ final class KeyStubProtocol: URLProtocol {
+         let response = HTTPURLResponse(
+             url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!
+         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+-        client?.urlProtocol(self, didLoad: Data("{}".utf8))
++        client?.urlProtocol(self, didLoad: Self.body)
+         client?.urlProtocolDidFinishLoading(self)
+     }
+ }
+ 
+ extension URLSession {
+-    static func keyStub(status: Int) -> URLSession {
+-        KeyStubProtocol.reset(status: status)
++    static func keyStub(status: Int, body: Data = Data("{}".utf8)) -> URLSession {
++        KeyStubProtocol.reset(status: status, body: body)
+         let configuration = URLSessionConfiguration.ephemeral
+         configuration.protocolClasses = [KeyStubProtocol.self]
+         return URLSession(configuration: configuration)
 ```
 
 - [ ] **Step 2: Run to see them fail.**
 
-Run: `cd macos/Saathi && swift test --filter KeyValidatorTests 2>&1 | grep -E "error:|failed|Executed" | tail`
-Expected: `testSarvamIsAskedSomethingThatNeedsAKey` fails (`…/v1/models`, `GET`), `testSarvamFindingTheRequestEmptyMeansTheKeyWasLetIn` fails (`.unreachable`), `testAnAccountOutOfCreditsIsSaidInThoseWords` fails.
+Run: `cd macos/Saathi && swift test --filter KeyValidatorTests`
+Expected: three fail — Sarvam is asked `GET …/v1/models`; a 400 and a 422 are "unreachable"; out of credits says "try again shortly". The other three new ones already pass, and are there so they go on passing: a 403 names Sarvam, a 400 from a model list is not a working key, a rate limit is not about the key.
 
-- [ ] **Step 3: Implement.** In `KeyValidator.swift` replace the header comment's last line, the `Probe` struct and `probe(for:)`, and the request and status handling in `check`:
+- [ ] **Step 3: Implement.**
 
-```swift
-//  OpenAI and Anthropic are asked for their model lists: free, instant, and unambiguous about
-//  authentication. Sarvam's model list is public, so it is asked something else — see `probe`.
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/KeyValidator.swift b/macos/Saathi/Sources/SaathiKit/KeyValidator.swift
+index 5d8ec0f..5b2132f 100644
+--- a/macos/Saathi/Sources/SaathiKit/KeyValidator.swift
++++ b/macos/Saathi/Sources/SaathiKit/KeyValidator.swift
+@@ -8,7 +8,8 @@
+ //  send a person to two completely different places. Collapsing them would send someone who is
+ //  simply offline off to generate a replacement key.
+ //
+-//  Both endpoints are model lists: free, instant, and unambiguous about authentication.
++//  OpenAI and Anthropic are asked for their model lists: free, instant, and unambiguous about
++//  authentication. Sarvam's model list is public, so it is asked something else — see `probe`.
+ //
+ 
+ import Foundation
+@@ -16,8 +17,8 @@ import SaathiContract
+ 
+ public enum KeyCheck: Equatable, Sendable {
+     case valid
+-    /// The vendor said no. The message names which vendor, because a panel with two key fields in
+-    /// it needs to say which of them is the problem.
++    /// The vendor said no. The message names which vendor, because a panel with three key fields
++    /// in it needs to say which of them is the problem.
+     case rejected(String)
+     /// Nothing could be concluded — no network, DNS failure, or the vendor having a bad day.
+     case unreachable(String)
+@@ -31,17 +32,28 @@ public struct KeyValidator: Sendable {
+         self.urlSession = urlSession
+     }
+ 
+-    /// Where each vendor is asked, and what it is called when telling a person it said no.
++    /// How each vendor is asked, and what it is called when telling a person it said no.
+     private struct Probe {
+-        let url: URL
+         let name: String
++        let url: URL
++        var method = "GET"
++        var body: Data?
++        /// Statuses beyond 2xx that still mean the key was let in.
++        var letIn: Set<Int> = []
+     }
+ 
+     private func probe(for kind: ProviderKind) -> Probe? {
+         switch kind {
+-        case .openai: return Probe(url: URL(string: "https://api.openai.com/v1/models")!, name: "OpenAI")
+-        case .anthropic: return Probe(url: URL(string: "https://api.anthropic.com/v1/models")!, name: "Anthropic")
+-        case .sarvam: return Probe(url: URL(string: "https://api.sarvam.ai/v1/models")!, name: "Sarvam")
++        case .openai: return Probe(name: "OpenAI", url: URL(string: "https://api.openai.com/v1/models")!)
++        case .anthropic: return Probe(name: "Anthropic", url: URL(string: "https://api.anthropic.com/v1/models")!)
++        case .sarvam:
++            // Sarvam's model list answers 200 to no key at all, so asking it proved nothing and
++            // every string ever pasted passed as a key. Its chat endpoint does check, and checks
++            // before it reads the body: an empty request is refused with 403 for a wrong key and
++            // with 400 — "missing model" — for a right one. Nothing is run and nothing is billed.
++            return Probe(
++                name: "Sarvam", url: URL(string: "https://api.sarvam.ai/v1/chat/completions")!,
++                method: "POST", body: Data("{}".utf8), letIn: [400, 422])
+         case .local, .hosted: return nil
+         }
+     }
+@@ -57,7 +69,11 @@ public struct KeyValidator: Sendable {
+         }
+ 
+         var request = URLRequest(url: probe.url)
+-        request.httpMethod = "GET"
++        request.httpMethod = probe.method
++        if let body = probe.body {
++            request.httpBody = body
++            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++        }
+         // The header and its prefix come from the contract row, so a new vendor is a row in the
+         // schema rather than another branch here.
+         let row = SaathiProvider.of(kind)
+@@ -71,15 +87,22 @@ public struct KeyValidator: Sendable {
+         }
+ 
+         do {
+-            let (_, response) = try await urlSession.data(for: request)
++            let (data, response) = try await urlSession.data(for: request)
+             guard let http = response as? HTTPURLResponse else {
+                 return .unreachable("\(probe.name) gave an answer that could not be read.")
+             }
+             switch http.statusCode {
+             case 200...299:
+                 return .valid
++            case let status where probe.letIn.contains(status):
++                return .valid
+             case 401, 403:
+                 return .rejected("\(probe.name) did not accept that key.")
++            case 429 where Self.errorCode(in: data) == "insufficient_quota_error":
++                // The key is real and the account behind it is empty. Not a wrong key, and not
++                // something that waiting will fix.
++                return .unreachable(
++                    "\(probe.name) knows that key, but its account is out of credits. Top it up, then save the key again.")
+             default:
+                 // Anything else says nothing about the key — a 429 or a 500 is the vendor's state,
+                 // not the credential's, and telling someone their key is bad on a 500 is a lie.
+@@ -89,4 +112,10 @@ public struct KeyValidator: Sendable {
+             return .unreachable("Could not reach \(probe.name). Are you online?")
+         }
+     }
++
++    /// `error.code` in a vendor's refusal, when it has one.
++    private static func errorCode(in body: Data) -> String? {
++        let answer = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
++        return (answer?["error"] as? [String: Any])?["code"] as? String
++    }
+ }
 ```
 
-```swift
-    /// How each vendor is asked, and what it is called when telling a person it said no.
-    private struct Probe {
-        let name: String
-        let url: URL
-        var method = "GET"
-        var body: Data?
-        /// Statuses beyond 2xx that still mean the key was let in.
-        var letIn: Set<Int> = []
-    }
-
-    private func probe(for kind: ProviderKind) -> Probe? {
-        switch kind {
-        case .openai: return Probe(name: "OpenAI", url: URL(string: "https://api.openai.com/v1/models")!)
-        case .anthropic: return Probe(name: "Anthropic", url: URL(string: "https://api.anthropic.com/v1/models")!)
-        case .sarvam:
-            // Sarvam's model list answers 200 to no key at all, so asking it proved nothing and
-            // every string ever pasted passed as a key. Its chat endpoint does check, and checks
-            // before it reads the body: an empty request is refused with 403 for a wrong key and
-            // with 400 — "missing model" — for a right one. Nothing is run and nothing is billed.
-            return Probe(
-                name: "Sarvam", url: URL(string: "https://api.sarvam.ai/v1/chat/completions")!,
-                method: "POST", body: Data("{}".utf8), letIn: [400, 422])
-        case .local, .hosted: return nil
-        }
-    }
-```
-
-```swift
-        var request = URLRequest(url: probe.url)
-        request.httpMethod = probe.method
-        if let body = probe.body {
-            request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
-```
-
-```swift
-        do {
-            let (data, response) = try await urlSession.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                return .unreachable("\(probe.name) gave an answer that could not be read.")
-            }
-            switch http.statusCode {
-            case 200...299:
-                return .valid
-            case let status where probe.letIn.contains(status):
-                return .valid
-            case 401, 403:
-                return .rejected("\(probe.name) did not accept that key.")
-            case 429 where Self.errorCode(in: data) == "insufficient_quota_error":
-                // The key is real and the account behind it is empty. Not a wrong key, and not
-                // something that waiting will fix.
-                return .unreachable("\(probe.name) knows that key, but its account is out of credits. Top it up, then save the key again.")
-            default:
-                // Anything else says nothing about the key — a 429 or a 500 is the vendor's state,
-                // not the credential's, and telling someone their key is bad on a 500 is a lie.
-                return .unreachable("\(probe.name) answered \(http.statusCode). That is not about your key; try again shortly.")
-            }
-        } catch {
-            return .unreachable("Could not reach \(probe.name). Are you online?")
-        }
-    }
-
-    /// `error.code` in a vendor's refusal, when it has one.
-    private static func errorCode(in body: Data) -> String? {
-        let answer = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
-        return (answer?["error"] as? [String: Any])?["code"] as? String
-    }
-```
-
-- [ ] **Step 4: Run to see them pass.**
-
-Run: `cd macos/Saathi && swift test --filter KeyValidatorTests 2>&1 | grep -E "error:|failed|Executed" | tail -3`
-Expected: all pass, the nine older ones included.
+- [ ] **Step 4: Run to see them pass.** `swift test --filter KeyValidatorTests` → 15 pass.
 
 - [ ] **Step 5: Check the two facts this rests on against the live API (no key is used).**
 
@@ -813,7 +927,7 @@ In `RealtimeVoiceSession.swift` replace the body of `writeLastTurn` — the hand
 import Foundation
 import os
 
-final class StubHTTP: URLProtocol, @unchecked Sendable {
+final class StubHTTP: URLProtocol {
 
     struct Reply {
         var status = 200
@@ -1917,113 +2031,180 @@ final class ChainLaneTests: XCTestCase {
 }
 ```
 
-In `Tests/SaathiKitTests/VoiceTests.swift` add a class:
+Which recogniser the on-device ears ask for, at the end of `VoiceTests.swift`:
 
-```swift
-// MARK: - Which recogniser the on-device ears ask for
-
-final class DeviceEarsTests: XCTestCase {
-
-    private let supported = ["en-US", "en-GB", "en-IN", "fr-CA", "fr-FR", "hi-IN", "de-DE", "pt-BR"]
-
-    /// It used to be the Mac's own language whatever Settings said: someone who chose French on an
-    /// English Mac was heard as English words and answered in French.
-    func testTheEarsAskForTheLanguageOfSettingsNotTheMacsOwn() {
-        XCTAssertEqual(DeviceEars.choice(language: "hi", machine: "en_US", supported: supported), .locale("hi-IN"))
-        XCTAssertEqual(DeviceEars.choice(language: "de-DE", machine: "en-US", supported: supported), .locale("de-DE"))
-        XCTAssertEqual(
-            DeviceEars.choice(language: "fr", machine: "en_US", supported: supported), .locale("fr-FR"),
-            "a bare language gets its usual region, not the first in the alphabet")
-        XCTAssertEqual(DeviceEars.choice(language: "fr-CA", machine: "en_US", supported: supported), .locale("fr-CA"))
-        XCTAssertEqual(
-            DeviceEars.choice(language: "pt", machine: "en_US", supported: supported), .locale("pt-BR"),
-            "with no usual region on offer, whichever there is")
-    }
-
-    /// The Mac's own recogniser when it speaks the language: it knows which English its owner means.
-    func testTheMacsOwnRecogniserIsKeptForItsOwnLanguage() {
-        XCTAssertEqual(DeviceEars.choice(language: "en", machine: "en_US", supported: supported), .own)
-        XCTAssertEqual(DeviceEars.choice(language: "en-IN", machine: "en_GB", supported: supported), .own)
-    }
-
-    func testALanguageThisMacHasNoRecogniserForIsNone() {
-        for language in ["ml", "ta-IN", "or"] {
-            XCTAssertEqual(DeviceEars.choice(language: language, machine: "en_US", supported: supported), .none, language)
-        }
-    }
-
-    /// The Mac's own recogniser standing in is what this lane always did. It is said now, and the
-    /// way out is named where there is one: Sarvam hears ten Indian languages this Mac cannot.
-    func testSettlingForTheMacsOwnRecogniserIsSaidAndSoIsWhoCouldHear() {
-        XCTAssertEqual(
-            DeviceEars.settledFor("en-US", insteadOf: "ml"),
-            "ready — on-device speech recognition (en-US). This Mac cannot hear Malayalam on its own. "
-                + "Sarvam can hear it: add a Sarvam key, or turn its speech on, in Setup.")
-        XCTAssertEqual(
-            DeviceEars.settledFor("en-US", insteadOf: "sw"),
-            "ready — on-device speech recognition (en-US). This Mac cannot hear Swahili on its own.")
-    }
-}
+```diff
+diff --git a/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift b/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift
+index ed8bdfd..e10e4c0 100644
+--- a/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift
++++ b/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift
+@@ -696,3 +696,48 @@ final class SharedFramesTests: XCTestCase {
+         XCTAssertNil(SharedFrames.buffer(Data()), "no bytes, no buffer")
+     }
+ }
++
++// MARK: - Which recogniser the on-device ears ask for
++
++final class DeviceEarsTests: XCTestCase {
++
++    private let supported = ["en-US", "en-GB", "en-IN", "fr-CA", "fr-FR", "hi-IN", "de-DE", "pt-BR"]
++
++    /// It used to be the Mac's own language whatever Settings said: someone who chose French on an
++    /// English Mac was heard as English words and answered in French.
++    func testTheEarsAskForTheLanguageOfSettingsNotTheMacsOwn() {
++        XCTAssertEqual(DeviceEars.choice(language: "hi", machine: "en_US", supported: supported), .locale("hi-IN"))
++        XCTAssertEqual(DeviceEars.choice(language: "de-DE", machine: "en-US", supported: supported), .locale("de-DE"))
++        XCTAssertEqual(
++            DeviceEars.choice(language: "fr", machine: "en_US", supported: supported), .locale("fr-FR"),
++            "a bare language gets its usual region, not the first in the alphabet")
++        XCTAssertEqual(DeviceEars.choice(language: "fr-CA", machine: "en_US", supported: supported), .locale("fr-CA"))
++        XCTAssertEqual(
++            DeviceEars.choice(language: "pt", machine: "en_US", supported: supported), .locale("pt-BR"),
++            "with no usual region on offer, whichever there is")
++    }
++
++    /// The Mac's own recogniser when it speaks the language: it knows which English its owner means.
++    func testTheMacsOwnRecogniserIsKeptForItsOwnLanguage() {
++        XCTAssertEqual(DeviceEars.choice(language: "en", machine: "en_US", supported: supported), .own)
++        XCTAssertEqual(DeviceEars.choice(language: "en-IN", machine: "en_GB", supported: supported), .own)
++    }
++
++    func testALanguageThisMacHasNoRecogniserForIsNone() {
++        for language in ["ml", "ta-IN", "or"] {
++            XCTAssertEqual(DeviceEars.choice(language: language, machine: "en_US", supported: supported), .none, language)
++        }
++    }
++
++    /// The Mac's own recogniser standing in is what this lane always did. It is said now, and the
++    /// way out is named where there is one: Sarvam hears ten Indian languages this Mac cannot.
++    func testSettlingForTheMacsOwnRecogniserIsSaidAndSoIsWhoCouldHear() {
++        XCTAssertEqual(
++            DeviceEars.settledFor("en-US", insteadOf: "ml"),
++            "ready — on-device speech recognition (en-US). This Mac cannot hear Malayalam on its own. "
++                + "Sarvam can hear it: add a Sarvam key, or turn its speech on, in Setup.")
++        XCTAssertEqual(
++            DeviceEars.settledFor("en-US", insteadOf: "sw"),
++            "ready — on-device speech recognition (en-US). This Mac cannot hear Swahili on its own.")
++    }
++}
 ```
 
-In `Tests/SaathiShellTests/VoiceConductorTests.swift` give `FakeSession` an optional note of interruptions — add a stored property and an init parameter, and the method:
+That opening a turn interrupts, in `VoiceConductorTests.swift` — a session that can note interruptions, and a class of its own for the two tests:
 
-```swift
-    let notesInterruptions: Bool
+```diff
+diff --git a/macos/Saathi/Tests/SaathiShellTests/VoiceConductorTests.swift b/macos/Saathi/Tests/SaathiShellTests/VoiceConductorTests.swift
+index 7e5360c..9a7258f 100644
+--- a/macos/Saathi/Tests/SaathiShellTests/VoiceConductorTests.swift
++++ b/macos/Saathi/Tests/SaathiShellTests/VoiceConductorTests.swift
+@@ -21,13 +21,19 @@ private final class FakeSession: VoiceSession, @unchecked Sendable {
+     let name: String
+     let log: OSAllocatedUnfairLock<[String]>
+     let endDelay: UInt64
++    /// Off unless a test is about interruptions, so every other test's log reads as it always did.
++    let notesInterruptions: Bool
+     private let callbacks = OSAllocatedUnfairLock<VoiceSessionCallbacks?>(initialState: nil)
+ 
+-    init(_ name: String, log: OSAllocatedUnfairLock<[String]>, speaksForItself: Bool = false, endDelay: UInt64 = 0) {
++    init(
++        _ name: String, log: OSAllocatedUnfairLock<[String]>, speaksForItself: Bool = false,
++        endDelay: UInt64 = 0, notesInterruptions: Bool = false
++    ) {
+         self.name = name
+         self.log = log
+         self.speaksForItself = speaksForItself
+         self.endDelay = endDelay
++        self.notesInterruptions = notesInterruptions
+     }
+ 
+     func start(callbacks: VoiceSessionCallbacks) async throws {
+@@ -40,6 +46,7 @@ private final class FakeSession: VoiceSession, @unchecked Sendable {
+         note("end")
+     }
+     func sendText(_ text: String) async throws { note("text:\(text)") }
++    func interrupt() { if notesInterruptions { note("interrupt") } }
+     func stop() async { note("stop") }
+ 
+     func emit(_ action: SaathiAction) { callbacks.withLock { $0 }?.onAction?(action) }
+@@ -202,3 +209,52 @@ final class VoiceConductorTests: XCTestCase {
+         XCTAssertEqual(log.withLock { $0 }.sorted(), ["s.begin", "s.end", "s.start"])
+     }
+ }
++
++// MARK: - Talking over it
++
++@MainActor
++final class VoiceConductorInterruptionTests: XCTestCase {
++
++    private let log = OSAllocatedUnfairLock(initialState: [String]())
++
++    private func conductor() -> VoiceConductor {
++        let log = self.log
++        return VoiceConductor(
++            makeSession: { _ in FakeSession("s", log: log, notesInterruptions: true) },
++            perform: { _ in },
++            stopSpeaking: {},
++            onEvent: { _ in })
++    }
++
++    /// Holding the keys while Saathi is talking, or thinking, stops it — before the turn opens,
++    /// not after the answer nobody wanted has been said.
++    func testOpeningATurnInterruptsWhateverWasUnderWay() async {
++        let voice = conductor()
++        voice.start(with: SaathiConfiguration(provider: .local))
++        await voice.settle()
++
++        voice.keysBegan()
++        voice.keysEnded()
++        await voice.settle()
++        XCTAssertEqual(log.withLock { $0 }, ["s.start", "s.interrupt", "s.begin", "s.end"])
++
++        log.withLock { $0.removeAll() }
++        voice.toggleTalk()
++        voice.toggleTalk()
++        await voice.settle()
++        XCTAssertEqual(log.withLock { $0 }, ["s.interrupt", "s.begin", "s.end"], "the menu's Talk does the same")
++    }
++
++    /// A second key-down while the turn is already open is not a second interruption.
++    func testATurnAlreadyOpenIsNotInterruptedAgain() async {
++        let voice = conductor()
++        voice.start(with: SaathiConfiguration(provider: .local))
++        await voice.settle()
++
++        voice.keysBegan()
++        voice.keysBegan()
++        voice.keysEnded()
++        await voice.settle()
++        XCTAssertEqual(log.withLock { $0 }.filter { $0 == "s.interrupt" }.count, 1)
++    }
++}
 ```
 
-```swift
-    init(_ name: String, log: OSAllocatedUnfairLock<[String]>, speaksForItself: Bool = false, endDelay: UInt64 = 0, notesInterruptions: Bool = false) {
-        self.name = name
-        self.log = log
-        self.speaksForItself = speaksForItself
-        self.endDelay = endDelay
-        self.notesInterruptions = notesInterruptions
-    }
+And that a failed look is a sentence, in `ScreenSightTests.swift`:
+
+```diff
+diff --git a/macos/Saathi/Tests/SaathiKitTests/ScreenSightTests.swift b/macos/Saathi/Tests/SaathiKitTests/ScreenSightTests.swift
+index 4113dbd..6c4df82 100644
+--- a/macos/Saathi/Tests/SaathiKitTests/ScreenSightTests.swift
++++ b/macos/Saathi/Tests/SaathiKitTests/ScreenSightTests.swift
+@@ -66,6 +66,14 @@ final class ScreenSightTests: XCTestCase {
+         XCTAssertTrue(prompt.hasSuffix("how do I play this song"))
+     }
+ 
++    /// Both lanes hand a failed look back to the model as words it can repeat: "I need Screen
++    /// Recording permission" is a useful thing to be told, and silence is not. With no key to look
++    /// with, nothing is captured at all.
++    func testAFailedLookIsASentenceForTheModelToRepeat() async {
++        let answer = await ScreenSight(configuration: .init(provider: .local)).answer("what is this?")
++        XCTAssertEqual(answer, "could not look: seeing the screen needs an OpenAI or Anthropic key. Add one in Setup.")
++    }
++
+     func testTheEyeIsAnthropicFirstThenOpenAI() {
+         XCTAssertEqual(ScreenSight.eye(for: .init(provider: .openai, openaiKey: "sk-o")), .openai(model: "gpt-4o-mini"))
+         XCTAssertEqual(
 ```
 
-```swift
-    func interrupt() { if notesInterruptions { note("interrupt") } }
-```
-
-and add two tests to `VoiceConductorTests`:
-
-```swift
-    /// Holding the keys while Saathi is talking, or thinking, stops it — before the turn opens,
-    /// not after the answer nobody wanted has been said.
-    func testOpeningATurnInterruptsWhateverWasUnderWay() async {
-        let log = self.log
-        let voice = conductor { _ in FakeSession("s", log: log, notesInterruptions: true) }
-        voice.start(with: SaathiConfiguration(provider: .local))
-        await voice.settle()
-
-        voice.keysBegan()
-        voice.keysEnded()
-        await voice.settle()
-        XCTAssertEqual(log.withLock { $0 }, ["s.start", "s.interrupt", "s.begin", "s.end"])
-
-        log.withLock { $0.removeAll() }
-        voice.toggleTalk()
-        voice.toggleTalk()
-        await voice.settle()
-        XCTAssertEqual(log.withLock { $0 }, ["s.interrupt", "s.begin", "s.end"], "the menu's Talk does the same")
-    }
-
-    /// A second key-down while the turn is already open is not a second interruption.
-    func testATurnAlreadyOpenIsNotInterruptedAgain() async {
-        let log = self.log
-        let voice = conductor { _ in FakeSession("s", log: log, notesInterruptions: true) }
-        voice.start(with: SaathiConfiguration(provider: .local))
-        await voice.settle()
-        voice.keysBegan()
-        voice.keysBegan()
-        voice.keysEnded()
-        await voice.settle()
-        XCTAssertEqual(log.withLock { $0 }.filter { $0 == "s.interrupt" }.count, 1)
-    }
-```
-
-- [ ] **Step 2: Run to see them fail.** `swift build --build-tests` → `cannot find type 'Ears' in scope`, `extra argument 'ears' in call`, `type 'ChainVoiceSession' has no member 'completionRequest'`, `'FakeSession' does not …`.
+- [ ] **Step 2: Run to see them fail.** `swift build --build-tests` → `cannot find type 'Ears' in scope`, `cannot find type 'EarsFeedback' in scope`.
 
 - [ ] **Step 3: The ears.** Create `Sources/SaathiKit/Ears.swift`:
 
@@ -2723,81 +2904,142 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
 }
 ```
 
-- [ ] **Step 5: The small changes it leans on.**
+- [ ] **Step 5: The small changes it leans on.** `interrupt()` on the protocol, with a default that does nothing:
 
-`VoiceSession.swift` — in the protocol, after `setHandsFree`:
-
-```swift
-    /// The learner has started talking over Saathi. Whatever is being said stops, and an answer
-    /// still on its way is dropped rather than spoken over them. Called before a turn opens.
-    func interrupt()
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/VoiceSession.swift b/macos/Saathi/Sources/SaathiKit/VoiceSession.swift
+index 99b6bfc..927ec7f 100644
+--- a/macos/Saathi/Sources/SaathiKit/VoiceSession.swift
++++ b/macos/Saathi/Sources/SaathiKit/VoiceSession.swift
+@@ -74,6 +74,9 @@ public protocol VoiceSession: AnyObject, Sendable {
+     func sendText(_ text: String) async throws
+     /// Hands-free: listen without the keys held, and answer whenever the learner stops talking.
+     func setHandsFree(_ on: Bool) async throws
++    /// The learner has started talking over Saathi. Whatever is being said stops, and an answer
++    /// still on its way is dropped rather than spoken over them. Called before a turn opens.
++    func interrupt()
+     func stop() async
+ }
+ 
+@@ -94,6 +97,10 @@ extension VoiceSession {
+         throw VoiceError.notConfigured(
+             "Hands-free needs OpenAI's realtime voice. Add an OpenAI key in Settings to use it.")
+     }
++
++    /// Nothing to do on the realtime lane: opening a turn there already flushes what is playing
++    /// and cancels the response in flight.
++    public func interrupt() {}
+ }
+ 
+ /// Builds the session the configuration calls for. The only place that maps a lane to a class.
 ```
 
-and in the `extension VoiceSession` a default:
+`ObservedSpeaker` says it can be stopped, which it always could:
 
-```swift
-    /// The realtime lane needs nothing here: opening a turn on it already flushes playback and
-    /// cancels the response in flight.
-    public func interrupt() {}
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/Speakers.swift b/macos/Saathi/Sources/SaathiKit/Speakers.swift
+index 5cf9f7e..de0691c 100644
+--- a/macos/Saathi/Sources/SaathiKit/Speakers.swift
++++ b/macos/Saathi/Sources/SaathiKit/Speakers.swift
+@@ -91,7 +91,7 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
+ /// Wraps any speaker and reports when speech starts and stops, so the companion's face can follow
+ /// its own voice without the speaker protocol knowing about faces. Stop is reported on every exit,
+ /// including cancellation.
+-public final class ObservedSpeaker: Speaker, @unchecked Sendable {
++public final class ObservedSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable {
+     private let inner: any Speaker
+     private let onSpeakingChanged: @Sendable (Bool) -> Void
 ```
 
-`Speakers.swift` — `public final class ObservedSpeaker: Speaker, @unchecked Sendable {` becomes
+One way of turning a failed look into a sentence, used by both lanes:
 
-```swift
-public final class ObservedSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable {
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/ScreenSight.swift b/macos/Saathi/Sources/SaathiKit/ScreenSight.swift
+index 34d8f60..a050e6b 100644
+--- a/macos/Saathi/Sources/SaathiKit/ScreenSight.swift
++++ b/macos/Saathi/Sources/SaathiKit/ScreenSight.swift
+@@ -280,6 +280,16 @@ public struct ScreenSight: Sendable {
+     /// otherwise be in the picture. Nil in tests and the CLI, where there are none.
+     @MainActor public static var concealOwnWindows: ((Bool) -> Void)?
+ 
++    /// `look`, with a failure turned into a sentence for the model to repeat. "I need Screen
++    /// Recording permission" is a useful thing to be told; silence is not.
++    public func answer(_ question: String) async -> String {
++        do {
++            return try await look(question: question)
++        } catch {
++            return "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
++        }
++    }
++
+     /// Captures the screen and answers `question` about it.
+     public func look(question: String) async throws -> String {
+         guard let eye = Self.eye(for: configuration) else { throw ScreenSightError.noVisionKey }
 ```
 
-`ScreenSight.swift` — after `look(question:)`:
-
-```swift
-    /// `look`, with a failure turned into a sentence for the model to repeat. "I need Screen
-    /// Recording permission" is a useful thing to be told; silence is not.
-    public func answer(_ question: String) async -> String {
-        do {
-            return try await look(question: question)
-        } catch {
-            return "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
-        }
-    }
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/RealtimeVoiceSession.swift b/macos/Saathi/Sources/SaathiKit/RealtimeVoiceSession.swift
+index 38c39f1..3105d4b 100644
+--- a/macos/Saathi/Sources/SaathiKit/RealtimeVoiceSession.swift
++++ b/macos/Saathi/Sources/SaathiKit/RealtimeVoiceSession.swift
+@@ -810,14 +810,9 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
+             Task { [weak self] in
+                 guard let self else { return }
+                 defer { self.state.endLook() }
+-                let answer: String
+-                do {
+-                    answer = try await ScreenSight(configuration: self.configuration).look(question: question)
+-                } catch {
+-                    // The model is told what went wrong so it can say something true — "I need
+-                    // Screen Recording permission" is a useful sentence; silence is not.
+-                    answer = "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
+-                }
++                // A look that failed comes back as the reason, so the model can say something
++                // true about it. See `ScreenSight.answer`.
++                let answer = await ScreenSight(configuration: self.configuration).answer(question)
+                 self.state.callbacks.onScreenLook?(question, answer)
+                 try? self.send([
+                     "type": "conversation.item.create",
 ```
 
-`RealtimeVoiceSession.swift` — in `handleToolCall`, the `do`/`catch` that computes `answer` becomes
+And opening a turn interrupts:
 
-```swift
-                // The model is told what went wrong so it can say something true — "I need
-                // Screen Recording permission" is a useful sentence; silence is not.
-                let answer = await ScreenSight(configuration: self.configuration).answer(question)
+```diff
+diff --git a/macos/Saathi/Sources/SaathiShell/VoiceConductor.swift b/macos/Saathi/Sources/SaathiShell/VoiceConductor.swift
+index 578038f..63b2b02 100644
+--- a/macos/Saathi/Sources/SaathiShell/VoiceConductor.swift
++++ b/macos/Saathi/Sources/SaathiShell/VoiceConductor.swift
+@@ -150,6 +150,10 @@ public final class VoiceConductor {
+     public func keysBegan() {
+         guard let turns else { reportNoVoice(); return }
+         if isReconfiguring { reportReconfiguring(); return }
++        // Talking over Saathi stops it, and drops an answer still on its way. Before the turn
++        // opens: the begin is queued behind whatever the last turn is still doing, and on the
++        // chain lane that is the very reply being talked over.
++        if !turns.isOpen { session?.interrupt() }
+         if turns.open() { onEvent(.keysHeld) }
+     }
+ 
+@@ -169,6 +173,7 @@ public final class VoiceConductor {
+         if turns.isOpen {
+             turns.close(); onEvent(.keysReleased)
+         } else {
++            session?.interrupt()
+             turns.open(); onEvent(.keysHeld)
+         }
+     }
 ```
 
-`VoiceConductor.swift` — in `keysBegan()`, before `if turns.open()`:
+- [ ] **Step 6: Run to see them pass.** `swift test --filter "ChainLaneTests|DeviceEarsTests|VoiceConductor|VoiceSessionFactoryTests|ScreenSightTests"`. The two conductor tests are also run with the `VoiceConductor.swift` change taken out, to see them fail for the right reason: `["s.start", "s.begin", "s.end"]` where `s.interrupt` should be.
 
-```swift
-        // Talking over Saathi stops it, and drops an answer still on its way. Before the turn
-        // opens: the begin is queued behind whatever the last turn is still doing, and on the
-        // chain lane that is the very reply being talked over.
-        if !turns.isOpen { session?.interrupt() }
-```
-
-and in `toggleTalk()`, the `else` branch becomes
-
-```swift
-            session?.interrupt()
-            turns.open(); onEvent(.keysHeld)
-```
-
-- [ ] **Step 6: Run to see them pass.**
-
-Run: `swift test --filter "ChainLaneTests|DeviceEarsTests|VoiceConductorTests|VoiceSessionFactoryTests|RealtimeVoiceNameTests"`
-Expected: all pass.
-
-- [ ] **Step 7: Check the `/v1` rule against the two servers that can be asked without a key.**
+- [ ] **Step 7: Check the `/v1` rule against the one server that can be asked without a key.**
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -X POST https://api.anthropic.com/chat/completions      # 404
 curl -s -o /dev/null -w "%{http_code}\n" -X POST https://api.anthropic.com/v1/chat/completions   # 401: it exists
 ```
 
-Ollama's own documentation gives `http://localhost:11434/v1/chat/completions`.
+Ollama's own documentation gives `http://localhost:11434/v1/chat/completions`. It is not installed on the Mac this was built on.
 
 - [ ] **Step 8: Commit** — "The chain lane is handed its ears, answers its tool calls, and can be talked over".
 
@@ -2902,20 +3144,32 @@ final class SarvamEarsTests: XCTestCase {
         XCTAssertTrue(StubHTTP.seen.isEmpty)
     }
 
-    /// A microphone that gave nothing is a different problem from speech that was not understood,
-    /// and saying which is the difference between trying again and looking at Sound settings.
-    /// Saaras is not asked to transcribe silence, and the learner's silence is not sent to it.
+    /// A microphone that gave nothing at all is a different problem from speech that was not
+    /// understood, and saying which is the difference between trying again and looking at Sound
+    /// settings. Saaras is not asked to transcribe it.
     func testAMicrophoneThatGaveNothingSaysSoInsteadOfAskingSaaras() async throws {
-        let silent = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0.004))
-        let ears = makeEars(silent, .json(["transcript": "never asked"]))
+        let dead = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0))
+        let ears = makeEars(dead, .json(["transcript": "never asked"]))
         try await ears.begin(EarsFeedback())
         do {
             _ = try await ears.finish()
-            XCTFail("two seconds of nothing is not a turn")
+            XCTFail("two seconds of nothing at all is not a turn")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("microphone gave no sound"), error.localizedDescription)
             XCTAssertTrue(error.localizedDescription.contains("quit and reopen"), error.localizedDescription)
         }
+        XCTAssertTrue(StubHTTP.seen.isEmpty)
+    }
+
+    /// Someone who held the keys and then said nothing has a working microphone in a quiet room.
+    /// They are told Saathi did not catch that, like on every other lane — not sent to their Sound
+    /// settings — and the sound of their room is not sent to Sarvam.
+    func testAQuietRoomIsNothingSaidNotABrokenMicrophone() async throws {
+        let quiet = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0.004))
+        let ears = makeEars(quiet, .json(["transcript": "never asked"]))
+        try await ears.begin(EarsFeedback())
+        let heard = try await ears.finish()
+        XCTAssertEqual(heard, "")
         XCTAssertTrue(StubHTTP.seen.isEmpty)
     }
 
@@ -2979,16 +3233,19 @@ final class SarvamEarsTests: XCTestCase {
 
     // MARK: the one step between the microphone and Saaras that can be tested without either
 
-    /// A tap buffer as it arrives from a microphone — 48 kHz, float, more than one channel — comes
-    /// out as PCM16 mono at 16 kHz. No audio hardware: the buffer is made by hand.
-    func testATapBufferBecomesPCM16MonoAtSixteenKilohertz() throws {
+    /// Tap buffers as they arrive from a microphone — 48 kHz, float, more than one channel — come
+    /// out as PCM16 mono at 16 kHz, and as one unbroken stretch of sound: the converter is kept
+    /// from one buffer to the next, so what it holds back at the end of each is the start of the
+    /// next rather than a gap. No audio hardware: the buffers are made by hand.
+    func testTapBuffersBecomeOneUnbrokenStretchOfPCM16MonoAtSixteenKilohertz() throws {
         let stereo = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2))
         let mono = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
         let converter = try XCTUnwrap(AVAudioConverter(from: mono, to: MicrophoneTurnRecorder.format))
 
         var samples = 0
         var loudest: Int16 = 0
-        for chunk in 0..<10 {
+        let chunks = 30   // three seconds, a tenth of a second at a time
+        for chunk in 0..<chunks {
             let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: stereo, frameCapacity: 4_800))
             buffer.frameLength = 4_800
             let left = try XCTUnwrap(buffer.floatChannelData?[0])
@@ -3002,7 +3259,13 @@ final class SarvamEarsTests: XCTestCase {
                 for sample in raw.bindMemory(to: Int16.self) { loudest = max(loudest, abs(sample)) }
             }
         }
-        XCTAssertEqual(Double(samples), 16_000, accuracy: 200, "a second in is a second out, at a third of the rate")
+        // Three seconds in is three seconds out at a third of the rate, less the few milliseconds
+        // the converter is still holding when the turn ends: 262 samples after ten buffers, when
+        // it was measured. Were it dropping that at every buffer instead of carrying it into the
+        // next, thirty buffers would be short by thousands.
+        let expected = chunks * 1_600
+        XCTAssertLessThanOrEqual(samples, expected)
+        XCTAssertGreaterThan(samples, expected - 480, "no more than thirty milliseconds held back, however long the turn")
         XCTAssertGreaterThan(loudest, 12_000, "half scale in is about half scale out: the first channel, not silence")
         XCTAssertLessThan(loudest, 20_000)
     }
@@ -3172,8 +3435,11 @@ public final class SarvamEars: Ears, @unchecked Sendable {
     public static let sampleRate: Double = 16_000
     /// Under this a turn was the keys being tapped, not a sentence.
     static let shortestTurn: TimeInterval = 0.3
-    /// Under this the microphone gave nothing: the same line Dictate draws.
+    /// Under this nobody spoke: the same line Dictate draws. A quiet room sits well below it.
     static let silence: Float = 0.02
+    /// Under this the microphone gave nothing at all — not a quiet room, which has a noise floor,
+    /// but an input that is closed, muted or delivering zeros.
+    static let nothingAtAll: Float = 0.0001
     /// Saaras takes thirty seconds a request; a longer turn goes up in pieces this long.
     static let longestPiece: TimeInterval = 28
 
@@ -3200,13 +3466,16 @@ public final class SarvamEars: Ears, @unchecked Sendable {
     public func finish() async throws -> String {
         let turn = recorder.stop()
         guard turn.seconds >= Self.shortestTurn else { return "" }
-        // Not sent: Saaras would be asked to transcribe silence, and the person would be told it
-        // did not catch that, when the truth is that nothing reached it.
-        guard turn.peak >= Self.silence else {
+        // A microphone that gave nothing at all is not a turn in which nothing was said, and
+        // "I did not catch that" would send the person to say it again into a closed input.
+        guard turn.peak >= Self.nothingAtAll else {
             throw VoiceError.audio(
                 "the microphone gave no sound. Check the input in Sound settings — and if Saathi has "
                 + "only just switched to Sarvam, quit and reopen it.")
         }
+        // Nobody spoke. That is for the session to say, as it does on every lane; the sound of a
+        // quiet room is not sent to Sarvam to be told so.
+        guard turn.peak >= Self.silence else { return "" }
 
         var heard: [String] = []
         for piece in Self.pieces(of: turn.pcm16) {
@@ -3357,7 +3626,8 @@ final class SarvamSpeakerTests: XCTestCase {
         XCTAssertEqual(SarvamSpeaker.code(for: "നമസ്കാരം, ഞാൻ സഹായിക്കാം.", in: "ml"), "ml-IN")
         XCTAssertEqual(SarvamSpeaker.code(for: "मैंने वह नहीं सुना। एक बार फिर कहिए।", in: "hi-IN"), "hi-IN")
         XCTAssertEqual(SarvamSpeaker.code(for: "Hello there, how can I help?", in: "en"), "en-IN")
-        XCTAssertEqual(SarvamSpeaker.code(for: "OK", in: "ta"), "ta-IN", "too short to tell: the language of Settings")
+        XCTAssertEqual(SarvamSpeaker.code(for: "OK", in: "ta"), "en-IN", "Latin letters are English to a Tamil speaker's Saathi")
+        XCTAssertEqual(SarvamSpeaker.code(for: "42", in: "ta"), "ta-IN", "nothing to tell a language by: the language of Settings")
     }
 
     /// Calm is a little slower, and a learner who asked for slow gets slower again — the same two
@@ -3453,6 +3723,53 @@ final class SarvamSpeakerTests: XCTestCase {
         XCTAssertEqual(StubHTTP.seen.count, 1, "the second piece was never asked for")
         XCTAssertEqual(output.stops.all.count, 1)
         XCTAssertTrue(fellBack.all.isEmpty)
+    }
+}
+
+/// The real player. It opens the audio output, so — like every test that touches the hardware —
+/// it only runs when asked, and what it plays is silence:
+///
+///     SAATHI_AUDIO_TESTS=1 swift test --filter PlayerAudioOutputTests
+final class PlayerAudioOutputTests: XCTestCase {
+
+    private func skipUnlessAsked() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SAATHI_AUDIO_TESTS"] == "1",
+            "opens the real audio output; set SAATHI_AUDIO_TESTS=1 to run it")
+    }
+
+    private func silence(seconds: Int) -> Data {
+        WaveFile.wrap(pcm16: Data(count: seconds * 48_000), sampleRate: 24_000)
+    }
+
+    func testAClipIsPlayedToItsEndAndThenTheCallReturns() async throws {
+        try skipUnlessAsked()
+        let started = Date()
+        try await PlayerAudioOutput().play(silence(seconds: 1))
+        let took = Date().timeIntervalSince(started)
+        XCTAssertGreaterThan(took, 0.8, "it waited for the clip")
+        XCTAssertLessThan(took, 1.9, "and came back when the clip ended, not at the backstop")
+    }
+
+    func testStoppingCutsAClipShort() async throws {
+        try skipUnlessAsked()
+        let output = PlayerAudioOutput()
+        let playing = Task { try await output.play(self.silence(seconds: 10)) }
+        try await Task.sleep(nanoseconds: 400_000_000)
+        let stopped = Date()
+        output.stop()
+        try await playing.value
+        XCTAssertLessThan(Date().timeIntervalSince(stopped), 1)
+    }
+
+    /// Nothing is opened for this one: the data is refused before there is anything to play.
+    func testSomethingThatIsNotAudioIsAnErrorRatherThanAWait() async {
+        do {
+            try await PlayerAudioOutput().play(Data("this is not a wav file".utf8))
+            XCTFail("that was not audio")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("could not be played"), error.localizedDescription)
+        }
     }
 }
 
@@ -3587,7 +3904,7 @@ final class CompanionVoiceTests: XCTestCase {
         let cannotRead = voice(malayalam, device: other, replies: [.failing()], installedVoices: ["en-US", "hi-IN"])
         cannotRead.reportFailures { reasons.add($0) }
         await cannotRead.speak("നമസ്കാരം.", tone: .neutral)
-        XCTAssertEqual(other.said, ["I could not reach Sarvam to speak."], "an English voice reading Malayalam script is noise")
+        XCTAssertEqual(other.said, ["I could not speak through Sarvam just now."], "an English voice reading Malayalam script is noise")
 
         XCTAssertEqual(reasons.all.count, 2)
         XCTAssertTrue(reasons.all.allSatisfy { $0.hasPrefix("Sarvam could not speak: Could not reach Sarvam") }, "\(reasons.all)")
@@ -3629,22 +3946,46 @@ final class CompanionVoiceTests: XCTestCase {
 
 - [ ] **Step 2: Run to see them fail.** `swift build --build-tests` → `cannot find type 'AudioOutput' in scope`.
 
-- [ ] **Step 3: Implement.** In `Speakers.swift`, `private static let installedVoiceLanguages` becomes
+- [ ] **Step 3: Implement.** In `Speakers.swift`, the list of installed voices becomes public and `SpeechSettings` learns whether this Mac can read a language at all:
 
-```swift
-    /// Asked for once. The list only changes when someone downloads a voice in System Settings,
-    /// and a relaunch picking that up is a fair price for not enumerating voices every sentence.
-    public static let installedVoiceLanguages = AVSpeechSynthesisVoice.speechVoices().map(\.language)
-```
-
-and `SpeechSettings` gains, after `voiceLanguage`:
-
-```swift
-    /// Whether this Mac can read a language aloud at all, rather than falling back to English.
-    public static func hasVoice(for language: String, available: [String]) -> Bool {
-        let code = language.split(separator: "-").first.map { $0.lowercased() } ?? language.lowercased()
-        return available.contains { $0.lowercased() == code || $0.lowercased().hasPrefix(code + "-") }
-    }
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/Speakers.swift b/macos/Saathi/Sources/SaathiKit/Speakers.swift
+index de0691c..c7e3872 100644
+--- a/macos/Saathi/Sources/SaathiKit/Speakers.swift
++++ b/macos/Saathi/Sources/SaathiKit/Speakers.swift
+@@ -30,7 +30,7 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
+     private let settings = OSAllocatedUnfairLock(initialState: SpeechSettings())
+     /// Asked for once. The list only changes when someone downloads a voice in System Settings,
+     /// and a relaunch picking that up is a fair price for not enumerating voices every sentence.
+-    private static let installedVoiceLanguages = AVSpeechSynthesisVoice.speechVoices().map(\.language)
++    public static let installedVoiceLanguages = AVSpeechSynthesisVoice.speechVoices().map(\.language)
+ 
+     public init(settings: SpeechSettings = SpeechSettings()) {
+         self.settings.withLock { $0 = settings }
+@@ -252,14 +252,21 @@ public struct SpeechSettings: Equatable, Sendable {
+         return available.filter(isSameLanguage).sorted().first ?? fallbackLanguage
+     }
+ 
++    /// Whether this Mac can read a language aloud at all, rather than falling back to an English
++    /// voice reading another script.
++    public static func hasVoice(for language: String, available: [String]) -> Bool {
++        let code = language.split(separator: "-").first.map { $0.lowercased() } ?? language.lowercased()
++        return available.contains { $0.lowercased() == code || $0.lowercased().hasPrefix(code + "-") }
++    }
++
+     /// The language a line is actually *in*, between the one Saathi was told to speak and English.
+     ///
+     /// Saathi has sentences of its own that are written in English — "I did not catch that", the
+     /// (i) explanation, the whole of first run — and a Tamil synthesiser reading them is the same
+     /// noise as an English one reading Tamil. Rather than teach every caller to say which language
+     /// its string is in, the speaker looks: only ever a choice between the wanted language and
+-    /// English, so a French sentence is never mistaken for Italian, and a line too short to tell
+-    /// ("OK") stays in the wanted language.
++    /// English, so a French sentence is never mistaken for Italian, and a line with nothing to
++    /// tell a language by ("42") stays in the wanted language.
+     public static func spokenLanguage(of text: String, wanted: String?) -> String? {
+         guard let wanted = wanted?.trimmingCharacters(in: .whitespaces), !wanted.isEmpty else { return wanted }
+         let code = wanted.split(separator: "-").first.map { $0.lowercased() } ?? wanted.lowercased()
 ```
 
 Create `Sources/SaathiKit/SarvamSpeaker.swift`:
@@ -3677,7 +4018,11 @@ public protocol AudioOutput: Sendable {
 }
 
 /// `AVAudioPlayer`, one clip at a time.
-public final class PlayerAudioOutput: NSObject, AudioOutput, AVAudioPlayerDelegate, @unchecked Sendable {
+///
+/// The delegate conformance is in an extension on purpose. `AVAudioPlayerDelegate` belongs to the
+/// main actor, and declared here it would make this whole class the main actor's — when `play`
+/// and `stop` are called from wherever a turn happens to be running.
+public final class PlayerAudioOutput: NSObject, AudioOutput, @unchecked Sendable {
 
     private struct State {
         var player: AVAudioPlayer?
@@ -3709,6 +4054,8 @@ public final class PlayerAudioOutput: NSObject, AudioOutput, AVAudioPlayerDelega
                     return player.play()
                 }
                 guard started else { return finish(player) }
+                // A cancellation that landed before the player was there found nothing to stop.
+                if Task.isCancelled { return stop() }
                 // The delegate is the signal. This is only the backstop: a callback that never
                 // comes must not leave Saathi waiting to speak for ever.
                 let longest = player.duration + 1
@@ -3729,7 +4076,7 @@ public final class PlayerAudioOutput: NSObject, AudioOutput, AVAudioPlayerDelega
 
     /// Ends the wait for `player`, once. A late call about a clip that has already been replaced
     /// does nothing.
-    private func finish(_ player: AVAudioPlayer) {
+    fileprivate func finish(_ player: AVAudioPlayer) {
         let continuation = state.withLock { box -> CheckedContinuation<Void, Never>? in
             guard box.player === player else { return nil }
             defer {
@@ -3741,6 +4088,9 @@ public final class PlayerAudioOutput: NSObject, AudioOutput, AVAudioPlayerDelega
         continuation?.resume()
     }
 
+}
+
+extension PlayerAudioOutput: AVAudioPlayerDelegate {
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         finish(player)
     }
@@ -4005,6 +4355,9 @@ public final class CompanionVoice: Speaker, StoppableSpeaker, @unchecked Sendabl
         return settings
     }
 
+    /// Said by this Mac's voice when Sarvam could not say a line and this Mac cannot read it.
+    static let couldNotSpeak = "I could not speak through Sarvam just now."
+
     /// Whether the next line would be Sarvam's.
     public var speaksThroughSarvam: Bool {
         state.withLock { $0.sarvam != nil }
@@ -4052,11 +4405,12 @@ public final class CompanionVoice: Speaker, StoppableSpeaker, @unchecked Sendabl
                 self?.state.withLock { $0.onFailure }?("Sarvam could not speak: \(reason)")
                 // Going silent is the worse failure for someone who cannot see why. The line
                 // itself, when this Mac has a voice for the language; one English sentence when it
-                // does not, because an English voice reading Malayalam script is noise.
+                // does not, because an English voice reading Malayalam script is noise. The
+                // sentence is true whatever the reason was; the reason is what was reported above.
                 if canRead {
                     await device.speak(text, tone: tone)
                 } else {
-                    await device.speak("I could not reach Sarvam to speak.", tone: .calm)
+                    await device.speak(Self.couldNotSpeak, tone: .calm)
                 }
             })
     }
@@ -4079,129 +4433,217 @@ public final class CompanionVoice: Speaker, StoppableSpeaker, @unchecked Sendabl
 - Consumes: `SarvamSpeech.isOn`, `.settings(for:)` (Task 7); `SarvamEars`, `SarvamClient` (Tasks 4, 6); `ChainVoiceSession.ears` (Task 5).
 - Produces: `VoiceSessionFactory.make` returns a chain session with `SarvamEars` when `speech` is `sarvam`, and throws `VoiceError.notConfigured` when that cannot be honoured. Report wording, verbatim: speech in/out `sarvam, over the network`; your voice `leaves this machine as audio, to Sarvam`.
 
-- [ ] **Step 1: Write the failing tests.** In `VoiceTests.swift`, add to `VoiceLaneTests`:
+- [ ] **Step 1: Write the failing tests.** What the reports say with `speech: sarvam`, and which ears the factory hands over.
 
-```swift
-    /// With Sarvam's speech the voice does leave, and the report says so and says to whom.
-    func testSarvamsSpeechSaysTheVoiceLeavesAndWhereTo() {
-        let heardAndSpoken = SaathiConfiguration(provider: .sarvam, sarvamKey: "x", speech: .sarvam)
-        let report = VoiceLaneReport.describe(heardAndSpoken)
-        XCTAssertTrue(report.contains("lane       chain"))
-        XCTAssertTrue(report.contains("speech in  sarvam, over the network"))
-        XCTAssertTrue(report.contains("speech out sarvam, over the network"))
-        XCTAssertTrue(report.contains("your voice leaves this machine as audio, to Sarvam"))
-        XCTAssertFalse(report.contains("stays on this machine"))
-    }
-
-    /// A local model with Sarvam's ears: the thinking stays, the voice does not, and neither
-    /// report may say otherwise.
-    func testALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine() {
-        let mixed = SaathiConfiguration(sarvamKey: "x", speech: .sarvam)
-        XCTAssertTrue(VoiceLaneReport.describe(mixed).contains("your voice leaves this machine as audio, to Sarvam"))
-        XCTAssertTrue(ProviderReport.describe(mixed).contains("privacy    leaves this machine"))
-        XCTAssertTrue(ProviderReport.describe(SaathiConfiguration()).contains("privacy    stays on this machine"))
-    }
-
-    /// The realtime lane carries its own speech; `speech` is not read there and changes nothing.
-    func testSpeechIsNotReadOnTheRealtimeLane() {
-        let plain = VoiceLaneReport.describe(SaathiConfiguration(provider: .openai, openaiKey: "x"))
-        let withSpeech = VoiceLaneReport.describe(SaathiConfiguration(provider: .openai, openaiKey: "x", speech: .sarvam))
-        XCTAssertEqual(plain, withSpeech)
-    }
+```diff
+diff --git a/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift b/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift
+index e10e4c0..f5381cb 100644
+--- a/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift
++++ b/macos/Saathi/Tests/SaathiKitTests/VoiceTests.swift
+@@ -67,6 +67,38 @@ final class VoiceLaneTests: XCTestCase {
+         XCTAssertFalse(report.contains("only the transcript is sent"), "nothing is sent in local mode")
+     }
+ 
++    /// With Sarvam's speech the voice does leave, and the report says so and says to whom.
++    func testSarvamsSpeechSaysTheVoiceLeavesAndWhereTo() {
++        let heardAndSpoken = SaathiConfiguration(provider: .sarvam, sarvamKey: "x", speech: .sarvam)
++        let report = VoiceLaneReport.describe(heardAndSpoken)
++        XCTAssertTrue(report.contains("lane       chain"))
++        XCTAssertTrue(report.contains("speech in  sarvam, over the network"))
++        XCTAssertTrue(report.contains("speech out sarvam, over the network"))
++        XCTAssertTrue(report.contains("your voice leaves this machine as audio, to Sarvam"))
++        XCTAssertFalse(report.contains("stays on this machine"))
++    }
++
++    /// A local model with Sarvam's ears: the thinking stays, the voice does not, and neither
++    /// report may say otherwise. The provider report says which is which, because two lines above
++    /// its privacy line the local row's own summary has just said nothing leaves the device.
++    func testALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine() {
++        let mixed = SaathiConfiguration(sarvamKey: "x", speech: .sarvam)
++        XCTAssertTrue(VoiceLaneReport.describe(mixed).contains("your voice leaves this machine as audio, to Sarvam"))
++        XCTAssertTrue(ProviderReport.describe(mixed).hasSuffix(
++            "privacy    the thinking stays on this machine; your voice leaves it, to Sarvam"))
++        XCTAssertTrue(ProviderReport.describe(SaathiConfiguration()).hasSuffix("privacy    stays on this machine"))
++        let sarvam = SaathiConfiguration(provider: .sarvam, sarvamKey: "x", speech: .sarvam)
++        XCTAssertTrue(ProviderReport.describe(sarvam).hasSuffix("privacy    leaves this machine"), "all of it does")
++    }
++
++    /// The realtime lane carries its own speech; `speech` is not read there and changes nothing.
++    func testSpeechIsNotReadOnTheRealtimeLane() {
++        let plain = SaathiConfiguration(provider: .openai, openaiKey: "x")
++        let withSpeech = SaathiConfiguration(provider: .openai, openaiKey: "x", speech: .sarvam)
++        XCTAssertEqual(VoiceLaneReport.describe(plain), VoiceLaneReport.describe(withSpeech))
++        XCTAssertEqual(ProviderReport.describe(plain), ProviderReport.describe(withSpeech))
++    }
++
+     /// Same input, same bytes — this is what `scripts/check-parity.sh` diffs against the C# client.
+     func testTheReportIsDeterministic() {
+         let configuration = SaathiConfiguration(provider: .anthropic, apiKey: "x")
+@@ -112,6 +144,36 @@ final class VoiceSessionFactoryTests: XCTestCase {
+             try VoiceSessionFactory.make(
+                 configuration: SaathiConfiguration(provider: .hosted), speaker: PrintingSpeaker()))
+     }
++
++    /// Sarvam's ears are asked for, not assumed: `provider: sarvam` on its own still listens here.
++    func testSarvamsSpeechGetsSarvamsEarsAndNothingElseDoes() throws {
++        let sarvam = try VoiceSessionFactory.make(
++            configuration: SaathiConfiguration(provider: .sarvam, sarvamKey: "k", speech: .sarvam, language: "ml"),
++            speaker: PrintingSpeaker())
++        XCTAssertTrue((sarvam as? ChainVoiceSession)?.ears is SarvamEars)
++
++        let claude = try VoiceSessionFactory.make(
++            configuration: SaathiConfiguration(provider: .anthropic, anthropicKey: "a", sarvamKey: "k", speech: .sarvam),
++            speaker: PrintingSpeaker())
++        XCTAssertTrue((claude as? ChainVoiceSession)?.ears is SarvamEars, "whoever does the thinking")
++
++        let onDevice = try VoiceSessionFactory.make(
++            configuration: SaathiConfiguration(provider: .sarvam, sarvamKey: "k"), speaker: PrintingSpeaker())
++        XCTAssertTrue((onDevice as? ChainVoiceSession)?.ears is DeviceEars)
++    }
++
++    /// No silent fallback, for speech as for everything else: what was asked for cannot be had, so
++    /// the session says why instead of quietly listening on this Mac.
++    func testSarvamsSpeechThatCannotBeHadIsRefusedNotWorkedAround() {
++        let noKey = SaathiConfiguration(speech: .sarvam)
++        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: noKey, speaker: PrintingSpeaker())) { error in
++            XCTAssertTrue(error.localizedDescription.contains("needs a Sarvam key"), error.localizedDescription)
++        }
++        let french = SaathiConfiguration(provider: .sarvam, sarvamKey: "k", speech: .sarvam, language: "fr")
++        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: french, speaker: PrintingSpeaker())) { error in
++            XCTAssertTrue(error.localizedDescription.contains("French is not one of them"), error.localizedDescription)
++        }
++    }
+ }
+ 
+ // MARK: - Tool calls: the closed-set guarantee
 ```
 
-and to `VoiceSessionFactoryTests`:
+- [ ] **Step 2: Run to see them fail.** `swift test --filter "VoiceLaneTests|VoiceSessionFactoryTests"` → ten failures: the reports say nothing of Sarvam, the factory hands over on-device ears, and nothing is refused. `testSpeechIsNotReadOnTheRealtimeLane` passes already, and must go on passing.
 
-```swift
-    func testSarvamsSpeechGetsSarvamsEarsAndNothingElseDoes() throws {
-        let sarvam = try VoiceSessionFactory.make(
-            configuration: SaathiConfiguration(provider: .sarvam, sarvamKey: "k", speech: .sarvam, language: "ml"),
-            speaker: PrintingSpeaker())
-        XCTAssertTrue((sarvam as? ChainVoiceSession)?.ears is SarvamEars)
+- [ ] **Step 3: Implement.** The factory:
 
-        let onDevice = try VoiceSessionFactory.make(
-            configuration: SaathiConfiguration(provider: .sarvam, sarvamKey: "k"), speaker: PrintingSpeaker())
-        XCTAssertTrue((onDevice as? ChainVoiceSession)?.ears is DeviceEars, "asked for, not assumed")
-    }
-
-    /// No silent fallback, for speech as for everything else: what was asked for cannot be had, so
-    /// the session says why instead of quietly listening on this Mac.
-    func testSarvamsSpeechThatCannotBeHadIsRefusedNotWorkedAround() {
-        let noKey = SaathiConfiguration(speech: .sarvam)
-        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: noKey, speaker: PrintingSpeaker())) { error in
-            XCTAssertTrue(error.localizedDescription.contains("needs a Sarvam key"), error.localizedDescription)
-        }
-        let french = SaathiConfiguration(provider: .sarvam, sarvamKey: "k", speech: .sarvam, language: "fr")
-        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: french, speaker: PrintingSpeaker())) { error in
-            XCTAssertTrue(error.localizedDescription.contains("French is not one of them"), error.localizedDescription)
-        }
-    }
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/VoiceSession.swift b/macos/Saathi/Sources/SaathiKit/VoiceSession.swift
+index 927ec7f..23d0114 100644
+--- a/macos/Saathi/Sources/SaathiKit/VoiceSession.swift
++++ b/macos/Saathi/Sources/SaathiKit/VoiceSession.swift
+@@ -129,7 +129,15 @@ public enum VoiceSessionFactory {
+         case .realtime:
+             return RealtimeVoiceSession(configuration: configuration, engine: engine)
+         case .chain:
+-            return ChainVoiceSession(configuration: configuration, speaker: speaker)
++            guard SarvamSpeech.isOn(configuration) else {
++                return ChainVoiceSession(configuration: configuration, speaker: speaker)
++            }
++            // Asked for, and had — or refused, with the reason. Never on-device ears in their
++            // place: that would be the voice going somewhere other than where the report says.
++            let sarvam = try SarvamSpeech.settings(for: configuration)
++            return ChainVoiceSession(
++                configuration: configuration, speaker: speaker,
++                ears: SarvamEars(client: SarvamClient(key: sarvam.key), language: sarvam.language))
+         }
+     }
+ }
 ```
 
-- [ ] **Step 2: Run to see them fail.** `swift test --filter "VoiceLaneTests|VoiceSessionFactoryTests"` → the five new ones fail on wording and on `ears is SarvamEars`.
+The voice report (`speechIn` and `speechOut` were the same function twice; they are one now):
 
-- [ ] **Step 3: Implement.** `VoiceSession.swift`, the `.chain` case of the factory:
-
-```swift
-        case .chain:
-            guard SarvamSpeech.isOn(configuration) else {
-                return ChainVoiceSession(configuration: configuration, speaker: speaker)
-            }
-            // Asked for, and had — or refused with the reason. Never on-device ears in their
-            // place: that would be the voice going somewhere other than where the report says.
-            let sarvam = try SarvamSpeech.settings(for: configuration)
-            return ChainVoiceSession(
-                configuration: configuration, speaker: speaker,
-                ears: SarvamEars(client: SarvamClient(key: sarvam.key), language: sarvam.language))
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/VoiceLaneReport.swift b/macos/Saathi/Sources/SaathiKit/VoiceLaneReport.swift
+index f71a8e6..d3824e3 100644
+--- a/macos/Saathi/Sources/SaathiKit/VoiceLaneReport.swift
++++ b/macos/Saathi/Sources/SaathiKit/VoiceLaneReport.swift
+@@ -11,6 +11,10 @@
+ //  text-to-speech both run on-device and only the transcript is sent. Someone deciding whether to
+ //  narrate what they are struggling with deserves to know that distinction exists.
+ //
++//  The one exception is asked for by name: `speech: sarvam` hands the chain lane's ears and mouth
++//  to Sarvam, and then the audio does leave — whoever is doing the thinking. This is where that
++//  is said.
++//
+ //  Pure, like ProviderReport: the resolved configuration in, the same bytes out on either platform,
+ //  so `scripts/check-parity.sh` can diff the macOS and Windows clients against each other. Anything
+ //  that depends on this particular machine — which microphone, whether a local model is actually
+@@ -33,10 +37,10 @@ public enum VoiceLaneReport {
+         lines.append("  \(laneSummary(row.voice))")
+         lines.append("")
+         lines.append("  lane       \(row.voice.rawValue)")
+-        lines.append("  speech in  \(speechIn(row))")
++        lines.append("  speech in  \(speechEnd(configuration))")
+         lines.append("  thinking   \(model) @ \(configuration.resolvedProviderBaseURL)")
+-        lines.append("  speech out \(speechOut(row))")
+-        lines.append("  your voice \(voicePrivacy(row))")
++        lines.append("  speech out \(speechEnd(configuration))")
++        lines.append("  your voice \(voicePrivacy(configuration))")
+         lines.append("  turn       \(turnShape(row.voice))")
+         return lines.joined(separator: "\n")
+     }
+@@ -50,18 +54,19 @@ public enum VoiceLaneReport {
+         }
+     }
+ 
+-    /// In the chain lane both ends are on-device, whoever the provider is. That is not a fallback —
+-    /// it is the reason the chain lane is worth having at all.
+-    private static func speechIn(_ row: SaathiProvider) -> String {
+-        row.voice == .realtime ? "\(row.kind.rawValue), over the open connection" : "on this machine"
+-    }
+-
+-    private static func speechOut(_ row: SaathiProvider) -> String {
+-        row.voice == .realtime ? "\(row.kind.rawValue), over the open connection" : "on this machine"
++    /// Where speech is heard, and where it is made: the same place, on either lane. In the chain
++    /// lane that is this machine, whoever the provider is — not a fallback, but the reason the
++    /// chain lane is worth having at all — unless Sarvam's ears and mouth were asked for.
++    private static func speechEnd(_ configuration: SaathiConfiguration) -> String {
++        let row = configuration.providerRow
++        if row.voice == .realtime { return "\(row.kind.rawValue), over the open connection" }
++        return SarvamSpeech.isOn(configuration) ? "sarvam, over the network" : "on this machine"
+     }
+ 
+-    private static func voicePrivacy(_ row: SaathiProvider) -> String {
++    private static func voicePrivacy(_ configuration: SaathiConfiguration) -> String {
++        let row = configuration.providerRow
+         if row.voice == .realtime { return "leaves this machine as audio" }
++        if SarvamSpeech.isOn(configuration) { return "leaves this machine as audio, to Sarvam" }
+         if row.sendsDataOffMachine { return "stays on this machine — only the transcript is sent" }
+         return "stays on this machine"
+     }
 ```
 
-`VoiceLaneReport.swift` — `describe` passes the configuration to the three helpers, which become:
+The provider report:
 
-```swift
-        lines.append("  speech in  \(speechEnd(configuration))")
-        lines.append("  thinking   \(model) @ \(configuration.resolvedProviderBaseURL)")
-        lines.append("  speech out \(speechEnd(configuration))")
-        lines.append("  your voice \(voicePrivacy(configuration))")
-```
-
-```swift
-    /// In the chain lane both ends are on-device unless Sarvam's were asked for. That is not a
-    /// fallback — it is the reason the chain lane is worth having at all — and when it is not so,
-    /// this is the line that says it.
-    private static func speechEnd(_ configuration: SaathiConfiguration) -> String {
-        let row = configuration.providerRow
-        if row.voice == .realtime { return "\(row.kind.rawValue), over the open connection" }
-        return SarvamSpeech.isOn(configuration) ? "sarvam, over the network" : "on this machine"
-    }
-
-    private static func voicePrivacy(_ configuration: SaathiConfiguration) -> String {
-        let row = configuration.providerRow
-        if row.voice == .realtime { return "leaves this machine as audio" }
-        if SarvamSpeech.isOn(configuration) { return "leaves this machine as audio, to Sarvam" }
-        if row.sendsDataOffMachine { return "stays on this machine — only the transcript is sent" }
-        return "stays on this machine"
-    }
-```
-
-(`speechIn` and `speechOut` were the same function twice; they are one now.)
-
-`ProviderReport.swift` — the privacy line:
-
-```swift
-        lines.append("  privacy    \(leavesMachine(configuration) ? "leaves this machine" : "stays on this machine")")
-```
-
-```swift
-    /// Whether anything said leaves: the thinking does for every provider but local, and the voice
-    /// itself does whenever Sarvam is its ears — even in front of a model on this machine.
-    private static func leavesMachine(_ configuration: SaathiConfiguration) -> Bool {
-        configuration.providerRow.sendsDataOffMachine || SarvamSpeech.isOn(configuration)
-    }
+```diff
+diff --git a/macos/Saathi/Sources/SaathiKit/ProviderReport.swift b/macos/Saathi/Sources/SaathiKit/ProviderReport.swift
+index 8d869f0..8bb2d84 100644
+--- a/macos/Saathi/Sources/SaathiKit/ProviderReport.swift
++++ b/macos/Saathi/Sources/SaathiKit/ProviderReport.swift
+@@ -31,10 +31,21 @@ public enum ProviderReport {
+         lines.append("  model      \(configuration.resolvedModel.isEmpty ? "chosen by the backend" : configuration.resolvedModel)")
+         lines.append("  your key   \(keyLine(row: row, configuration: configuration))")
+         lines.append("  account    \(tokenLine(row: row, configuration: configuration))")
+-        lines.append("  privacy    \(row.sendsDataOffMachine ? "leaves this machine" : "stays on this machine")")
++        lines.append("  privacy    \(privacy(configuration))")
+         return lines.joined(separator: "\n")
+     }
+ 
++    /// The thinking leaves for every provider but local. With Sarvam's ears the voice leaves too —
++    /// and in front of a model on this machine it is the only thing that does, which is said in so
++    /// many words: two lines up, the local row's own summary has just said nothing leaves the device.
++    private static func privacy(_ configuration: SaathiConfiguration) -> String {
++        if configuration.providerRow.sendsDataOffMachine { return "leaves this machine" }
++        if SarvamSpeech.isOn(configuration) {
++            return "the thinking stays on this machine; your voice leaves it, to Sarvam"
++        }
++        return "stays on this machine"
++    }
++
+     private static func keyLine(row: SaathiProvider, configuration: SaathiConfiguration) -> String {
+         guard row.requiresKey else { return "not needed" }
+         let present = configuration.credential(for: row.kind) != nil
 ```
 
 - [ ] **Step 4: Run to see them pass.** `swift test --filter "VoiceLaneTests|VoiceSessionFactoryTests|ProviderTests"`.
 
-- [ ] **Step 5: Commit** — "Asked for Sarvam's speech, a session gets Sarvam's ears, and both reports say where the voice goes" (with Task 9: the two clients must change together).
+- [ ] **Step 5: Commit** — with Task 9, as one commit: the parity check fails on any commit where only one client has the new wording. "Asked for Sarvam's speech, a session gets Sarvam's ears, and both reports say where the voice goes".
 
 ---
 
@@ -4215,107 +4657,223 @@ and to `VoiceSessionFactoryTests`:
 - Consumes: `SaathiConfiguration.ResolvedSpeech` (Task 1).
 - Produces: byte-identical reports to Task 8's.
 
-- [ ] **Step 1: Write the failing tests.** `VoiceLaneTests.cs`:
+- [ ] **Step 1: Write the failing tests.**
 
-```csharp
-    /// <summary>With Sarvam's speech the voice does leave, and the report says so and to whom.</summary>
-    [Fact]
-    public void SarvamsSpeechSaysTheVoiceLeavesAndWhereTo()
-    {
-        var report = VoiceLaneReport.Describe(new SaathiConfiguration
-        {
-            Provider = ProviderKind.Sarvam, SarvamKey = "x", Speech = SpeechEngine.Sarvam,
-        });
-        Assert.Contains("lane       chain", report);
-        Assert.Contains("speech in  sarvam, over the network", report);
-        Assert.Contains("speech out sarvam, over the network", report);
-        Assert.Contains("your voice leaves this machine as audio, to Sarvam", report);
-        Assert.DoesNotContain("stays on this machine", report);
-    }
-
-    /// <summary>The realtime lane carries its own speech; Speech is not read there.</summary>
-    [Fact]
-    public void SpeechIsNotReadOnTheRealtimeLane()
-    {
-        var plain = VoiceLaneReport.Describe(new SaathiConfiguration { Provider = ProviderKind.Openai, OpenaiKey = "x" });
-        var withSpeech = VoiceLaneReport.Describe(new SaathiConfiguration
-        {
-            Provider = ProviderKind.Openai, OpenaiKey = "x", Speech = SpeechEngine.Sarvam,
-        });
-        Assert.Equal(plain, withSpeech);
-    }
+```diff
+diff --git a/windows/tests/Saathi.Core.Tests/VoiceLaneTests.cs b/windows/tests/Saathi.Core.Tests/VoiceLaneTests.cs
+index e6c0c3a..c740e99 100644
+--- a/windows/tests/Saathi.Core.Tests/VoiceLaneTests.cs
++++ b/windows/tests/Saathi.Core.Tests/VoiceLaneTests.cs
+@@ -72,6 +72,34 @@ public class VoiceLaneTests
+     }
+ 
+     /// <summary>Same input, same bytes — what check-parity.sh diffs against the macOS client.</summary>
++    /// <summary>With Sarvam's speech the voice does leave, and the report says so and to whom.</summary>
++    [Fact]
++    public void SarvamsSpeechSaysTheVoiceLeavesAndWhereTo()
++    {
++        var report = VoiceLaneReport.Describe(new SaathiConfiguration
++        {
++            Provider = ProviderKind.Sarvam, SarvamKey = "x", Speech = SpeechEngine.Sarvam,
++        });
++        Assert.Contains("lane       chain", report, StringComparison.Ordinal);
++        Assert.Contains("speech in  sarvam, over the network", report, StringComparison.Ordinal);
++        Assert.Contains("speech out sarvam, over the network", report, StringComparison.Ordinal);
++        Assert.Contains("your voice leaves this machine as audio, to Sarvam", report, StringComparison.Ordinal);
++        Assert.DoesNotContain("stays on this machine", report, StringComparison.Ordinal);
++    }
++
++    /// <summary>The realtime lane carries its own speech; Speech is not read there.</summary>
++    [Fact]
++    public void SpeechIsNotReadOnTheRealtimeLane()
++    {
++        var plain = new SaathiConfiguration { Provider = ProviderKind.Openai, OpenaiKey = "x" };
++        var withSpeech = new SaathiConfiguration
++        {
++            Provider = ProviderKind.Openai, OpenaiKey = "x", Speech = SpeechEngine.Sarvam,
++        };
++        Assert.Equal(VoiceLaneReport.Describe(plain), VoiceLaneReport.Describe(withSpeech));
++        Assert.Equal(ProviderReport.Describe(plain), ProviderReport.Describe(withSpeech));
++    }
++
+     [Fact]
+     public void TheReportIsDeterministic()
+     {
 ```
 
-`ProviderTests.cs`:
-
-```csharp
-    /// <summary>A local model with Sarvam's ears: the thinking stays, the voice does not.</summary>
-    [Fact]
-    public void ALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine()
-    {
-        var mixed = new SaathiConfiguration { SarvamKey = "x", Speech = SpeechEngine.Sarvam };
-        Assert.Contains("privacy    leaves this machine", ProviderReport.Describe(mixed), StringComparison.Ordinal);
-        Assert.Contains("your voice leaves this machine as audio, to Sarvam", VoiceLaneReport.Describe(mixed), StringComparison.Ordinal);
-    }
+```diff
+diff --git a/windows/tests/Saathi.Core.Tests/ProviderTests.cs b/windows/tests/Saathi.Core.Tests/ProviderTests.cs
+index 0b8d7ee..b679d0d 100644
+--- a/windows/tests/Saathi.Core.Tests/ProviderTests.cs
++++ b/windows/tests/Saathi.Core.Tests/ProviderTests.cs
+@@ -137,6 +137,30 @@ public class ProviderTests
+         });
+         Assert.Contains("your key   set", report, StringComparison.Ordinal);
+     }
++
++    /// <summary>A local model with Sarvam's ears: the thinking stays, the voice does not, and
++    /// neither report may say otherwise. The provider report says which is which, because two
++    /// lines above its privacy line the local row's own summary has just said nothing leaves the
++    /// device.</summary>
++    [Fact]
++    public void ALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine()
++    {
++        var mixed = new SaathiConfiguration { SarvamKey = "x", Speech = SpeechEngine.Sarvam };
++        Assert.EndsWith(
++            "privacy    the thinking stays on this machine; your voice leaves it, to Sarvam",
++            ProviderReport.Describe(mixed), StringComparison.Ordinal);
++        Assert.Contains(
++            "your voice leaves this machine as audio, to Sarvam", VoiceLaneReport.Describe(mixed),
++            StringComparison.Ordinal);
++        Assert.EndsWith(
++            "privacy    stays on this machine", ProviderReport.Describe(new SaathiConfiguration()),
++            StringComparison.Ordinal);
++        var sarvam = new SaathiConfiguration
++        {
++            Provider = ProviderKind.Sarvam, SarvamKey = "x", Speech = SpeechEngine.Sarvam,
++        };
++        Assert.EndsWith("privacy    leaves this machine", ProviderReport.Describe(sarvam), StringComparison.Ordinal);
++    }
+ }
+ 
+ /// <summary>
 ```
 
-- [ ] **Step 2: Run to see them fail.** `dotnet test windows/Saathi.sln` → 3 failed.
+- [ ] **Step 2: Run to see them fail.** `dotnet test windows/Saathi.sln` → 2 failed.
 
-- [ ] **Step 3: Implement.** `VoiceLaneReport.cs` — `Describe` passes `configuration` to the helpers:
+- [ ] **Step 3: Implement.**
 
-```csharp
-            $"  speech in  {SpeechEnd(configuration)}",
-            $"  thinking   {model} @ {configuration.ResolvedProviderBaseUrl}",
-            $"  speech out {SpeechEnd(configuration)}",
-            $"  your voice {VoicePrivacy(configuration)}",
+```diff
+diff --git a/windows/src/Saathi.Core/VoiceLaneReport.cs b/windows/src/Saathi.Core/VoiceLaneReport.cs
+index 3bd2976..b142318 100644
+--- a/windows/src/Saathi.Core/VoiceLaneReport.cs
++++ b/windows/src/Saathi.Core/VoiceLaneReport.cs
+@@ -14,6 +14,10 @@
+ //  the machine — only the transcript does. That is a materially different promise from the realtime
+ //  lane, and it is the reason this report exists separately from ProviderReport.
+ //
++//  The one exception is asked for by name: `speech: sarvam` hands the chain lane's ears and mouth
++//  to Sarvam, and then the audio does leave — whoever is doing the thinking. This is where that
++//  is said.
++//
+ //  Windows has no voice implementation yet: this reports the lane the contract assigns, which is
+ //  real and checkable, and the WPF shell will implement it behind the same contract. Reporting a
+ //  lane the platform cannot yet run is deliberate — it is what makes the gap visible rather than
+@@ -39,10 +43,10 @@ public static class VoiceLaneReport
+             $"  {LaneSummary(row.Voice)}",
+             "",
+             $"  lane       {row.Voice.ToString().ToLowerInvariant()}",
+-            $"  speech in  {SpeechEnd(row)}",
++            $"  speech in  {SpeechEnd(configuration)}",
+             $"  thinking   {model} @ {configuration.ResolvedProviderBaseUrl}",
+-            $"  speech out {SpeechEnd(row)}",
+-            $"  your voice {VoicePrivacy(row)}",
++            $"  speech out {SpeechEnd(configuration)}",
++            $"  your voice {VoicePrivacy(configuration)}",
+             $"  turn       {TurnShape(row.Voice)}",
+         };
+         return string.Join("\n", lines);
+@@ -55,16 +59,27 @@ public static class VoiceLaneReport
+         _ => "Speech in, think, speech out as three separate steps. Slower, and it works with any model.",
+     };
+ 
+-    /// <summary>In the chain lane both ends are on-device, whoever the provider is. That is not a
+-    /// fallback — it is the reason the chain lane is worth having at all.</summary>
+-    private static string SpeechEnd(SaathiProvider row) =>
+-        row.Voice == VoiceLane.Realtime
+-            ? $"{row.Kind.ToString().ToLowerInvariant()}, over the open connection"
+-            : "on this machine";
++    /// <summary>Whether a turn is heard and spoken by Sarvam. Only ever on the chain lane: the
++    /// realtime lane carries its own speech over its own connection and does not read Speech.</summary>
++    internal static bool SarvamSpeechIsOn(SaathiConfiguration configuration) =>
++        configuration.ProviderRow.Voice == VoiceLane.Chain && configuration.ResolvedSpeech == SpeechEngine.Sarvam;
++
++    /// <summary>Where speech is heard, and where it is made: the same place, on either lane. In
++    /// the chain lane that is this machine, whoever the provider is — not a fallback, but the
++    /// reason the chain lane is worth having at all — unless Sarvam's ears and mouth were asked
++    /// for.</summary>
++    private static string SpeechEnd(SaathiConfiguration configuration)
++    {
++        var row = configuration.ProviderRow;
++        if (row.Voice == VoiceLane.Realtime) return $"{row.Kind.ToString().ToLowerInvariant()}, over the open connection";
++        return SarvamSpeechIsOn(configuration) ? "sarvam, over the network" : "on this machine";
++    }
+ 
+-    private static string VoicePrivacy(SaathiProvider row)
++    private static string VoicePrivacy(SaathiConfiguration configuration)
+     {
++        var row = configuration.ProviderRow;
+         if (row.Voice == VoiceLane.Realtime) return "leaves this machine as audio";
++        if (SarvamSpeechIsOn(configuration)) return "leaves this machine as audio, to Sarvam";
+         if (row.SendsDataOffMachine) return "stays on this machine — only the transcript is sent";
+         return "stays on this machine";
+     }
 ```
 
-```csharp
-    /// <summary>Whether a turn is heard and spoken by Sarvam. Only ever on the chain lane: the
-    /// realtime lane carries its own speech and does not read Speech at all.</summary>
-    internal static bool SarvamSpeechIsOn(SaathiConfiguration configuration) =>
-        configuration.ProviderRow.Voice == VoiceLane.Chain && configuration.ResolvedSpeech == SpeechEngine.Sarvam;
-
-    /// <summary>In the chain lane both ends are on-device unless Sarvam's were asked for. That is
-    /// not a fallback — it is the reason the chain lane is worth having at all — and when it is
-    /// not so, this is the line that says it.</summary>
-    private static string SpeechEnd(SaathiConfiguration configuration)
-    {
-        var row = configuration.ProviderRow;
-        if (row.Voice == VoiceLane.Realtime) return $"{row.Kind.ToString().ToLowerInvariant()}, over the open connection";
-        return SarvamSpeechIsOn(configuration) ? "sarvam, over the network" : "on this machine";
-    }
-
-    private static string VoicePrivacy(SaathiConfiguration configuration)
-    {
-        var row = configuration.ProviderRow;
-        if (row.Voice == VoiceLane.Realtime) return "leaves this machine as audio";
-        if (SarvamSpeechIsOn(configuration)) return "leaves this machine as audio, to Sarvam";
-        if (row.SendsDataOffMachine) return "stays on this machine — only the transcript is sent";
-        return "stays on this machine";
-    }
+```diff
+diff --git a/windows/src/Saathi.Core/ProviderReport.cs b/windows/src/Saathi.Core/ProviderReport.cs
+index e91c26f..f708dbb 100644
+--- a/windows/src/Saathi.Core/ProviderReport.cs
++++ b/windows/src/Saathi.Core/ProviderReport.cs
+@@ -32,12 +32,24 @@ public static class ProviderReport
+             $"  model      {(string.IsNullOrEmpty(configuration.ResolvedModel) ? "chosen by the backend" : configuration.ResolvedModel)}",
+             $"  your key   {KeyLine(row, configuration)}",
+             $"  account    {TokenLine(row, configuration)}",
+-            $"  privacy    {(row.SendsDataOffMachine ? "leaves this machine" : "stays on this machine")}",
++            $"  privacy    {Privacy(configuration)}",
+         };
+ 
+         return string.Join("\n", lines);
+     }
+ 
++    /// <summary>The thinking leaves for every provider but local. With Sarvam's ears the voice
++    /// leaves too — and in front of a model on this machine it is the only thing that does, which
++    /// is said in so many words: two lines up, the local row's own summary has just said nothing
++    /// leaves the device.</summary>
++    private static string Privacy(SaathiConfiguration configuration)
++    {
++        if (configuration.ProviderRow.SendsDataOffMachine) return "leaves this machine";
++        if (VoiceLaneReport.SarvamSpeechIsOn(configuration))
++            return "the thinking stays on this machine; your voice leaves it, to Sarvam";
++        return "stays on this machine";
++    }
++
+     /// <summary>The wire spelling, so the two clients agree on how a mode is named.</summary>
+     private static string Wire(ProviderKind kind) => kind.ToString().ToLowerInvariant();
 ```
 
-`ProviderReport.cs` — the privacy line:
+Four more configurations for the two clients to be compared over:
 
-```csharp
-            $"  privacy    {(LeavesMachine(configuration) ? "leaves this machine" : "stays on this machine")}",
-```
-
-```csharp
-    /// <summary>Whether anything said leaves: the thinking does for every provider but local, and
-    /// the voice itself does whenever Sarvam is its ears — even in front of a model on this machine.</summary>
-    private static bool LeavesMachine(SaathiConfiguration configuration) =>
-        configuration.ProviderRow.SendsDataOffMachine || VoiceLaneReport.SarvamSpeechIsOn(configuration);
-```
-
-`scripts/check-parity.sh` — after the `hosted-signed-out` line, four more configurations:
-
-```bash
-printf '%s\n' '{ "provider": "sarvam", "sarvamKey": "not-a-real-key", "speech": "sarvam", "language": "ml" }' > "$CONFIGS/sarvam-heard-and-spoken.json"
-printf '%s\n' '{ "provider": "sarvam", "sarvamKey": "not-a-real-key" }' > "$CONFIGS/sarvam-thinking-only.json"
-printf '%s\n' '{ "speech": "sarvam", "sarvamKey": "not-a-real-key" }' > "$CONFIGS/this-mac-with-sarvams-ears.json"
-printf '%s\n' '{ "provider": "openai", "openaiKey": "not-a-real-key", "speech": "sarvam" }' > "$CONFIGS/realtime-does-not-read-speech.json"
+```diff
+diff --git a/scripts/check-parity.sh b/scripts/check-parity.sh
+index 5141424..33a2bd2 100755
+--- a/scripts/check-parity.sh
++++ b/scripts/check-parity.sh
+@@ -49,6 +49,13 @@ printf '%s\n' '{ "provider": "openai", "openaiKey": "not-a-real-key" }' > "$CONF
+ printf '%s\n' '{ "provider": "anthropic", "anthropicKey": "not-a-real-key" }' > "$CONFIGS/claude.json"
+ printf '%s\n' '{ "provider": "hosted", "token": "not-a-real-token" }' > "$CONFIGS/hosted.json"
+ printf '%s\n' '{ "provider": "hosted" }' > "$CONFIGS/hosted-signed-out.json"
++# `speech` moves a voice from "stays on this machine" to "leaves as audio, to Sarvam". Four ways it
++# can be set: with Sarvam thinking, without it being asked for, in front of a model on this
++# machine, and on a lane that does not read it.
++printf '%s\n' '{ "provider": "sarvam", "sarvamKey": "not-a-real-key", "speech": "sarvam", "language": "ml" }' > "$CONFIGS/sarvam-heard-and-spoken.json"
++printf '%s\n' '{ "provider": "sarvam", "sarvamKey": "not-a-real-key" }' > "$CONFIGS/sarvam-thinking-only.json"
++printf '%s\n' '{ "speech": "sarvam", "sarvamKey": "not-a-real-key" }' > "$CONFIGS/this-machine-with-sarvams-ears.json"
++printf '%s\n' '{ "provider": "openai", "openaiKey": "not-a-real-key", "speech": "sarvam" }' > "$CONFIGS/realtime-does-not-read-speech.json"
+ 
+ # The macOS client speaks by default and prints with --quiet; the Windows one only prints so far.
+ # Compare what they SAY, not how they emit it.
+@@ -76,8 +83,8 @@ compare() {
+ # same thing about that, including on Windows, where the lane is reported before it is implemented.
+ #
+ # Both are compared for every kind of configuration there is, not just the empty one: the shared
+-# fixture (every field set, read by both test suites too), a key in its own vendor field, and the
+-# hosted mode with and without its token.
++# fixture (every field set, read by both test suites too), a key in its own vendor field, the
++# hosted mode with and without its token, and Sarvam's speech asked for and not.
+ for config in "$NOTHING" "$REPO_DIR/contract/fixtures/config.json" "$CONFIGS"/*.json; do
+   name="$(basename "$config" .json)"
+   [[ "$config" == "$NOTHING" ]] && name="nothing configured"
 ```
 
 - [ ] **Step 4: Run to see them pass, and the two clients agree.** `bash <scratchpad>/ci-local.sh win parity` → `✓ win`, `✓ parity — 24 agree, 0 disagree`.
@@ -4758,9 +5316,11 @@ final class SetupPlanTests: XCTestCase {
 - [ ] **Step 2: Write the failing tests (the panel).** `Tests/SaathiShellTests/IslandModelTests.swift`, in place:
 
 ```diff
+diff --git a/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift b/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift
+index d05f6dd..8cae458 100644
 --- a/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift
 +++ b/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift
-@@ -49,10 +49,13 @@
+@@ -49,10 +49,13 @@ final class IslandSetupModelTests: XCTestCase {
  
      func testTheIslandStartsOnHome() {
          XCTAssertEqual(IslandModel().tab, .home)
@@ -4777,7 +5337,7 @@ final class SetupPlanTests: XCTestCase {
      }
  
      func testTheTabSwitches() {
-@@ -76,12 +79,36 @@
+@@ -76,10 +79,34 @@ final class IslandSetupModelTests: XCTestCase {
  
      func testAFieldCanBeCheckingAndThenChecked() {
          let model = IslandModel()
@@ -4789,8 +5349,8 @@ final class SetupPlanTests: XCTestCase {
 +        XCTAssertEqual(model.keyStates.openAI, .checking)
 +        model.keyStates[.openai] = .checked(.rejected("OpenAI did not accept that key."))
 +        XCTAssertEqual(model.keyStates[.openai], .checked(.rejected("OpenAI did not accept that key.")))
-     }
- 
++    }
++
 +    /// Three fields, reached by vendor so that nothing has to be written out three times. A
 +    /// provider that takes no key has no field to be in any state.
 +    func testEachVendorHasItsOwnFieldAndNothingElseHasOne() {
@@ -4813,12 +5373,10 @@ final class SetupPlanTests: XCTestCase {
 +            XCTAssertNotNil(SarvamLanguage.code(for: tag), tag)
 +        }
 +        XCTAssertEqual(IslandLanguage.all.count, tags.count, "a tag offered twice")
-+    }
-+
+     }
+ 
      /// The button must be inert while a check is in flight, or a double-click fires two round trips
-     /// and the second answer overwrites the first.
-     func testAFieldIsBusyOnlyWhileChecking() {
-@@ -105,8 +132,12 @@
+@@ -105,8 +132,12 @@ final class IslandSetupModelTests: XCTestCase {
  
      func testTheActionsDefaultToDoingNothing() {
          let actions = IslandActions()
@@ -4833,7 +5391,7 @@ final class SetupPlanTests: XCTestCase {
      }
  }
  
-@@ -119,18 +150,11 @@
+@@ -119,18 +150,11 @@ final class IslandSetupModelTests: XCTestCase {
  final class SetupDecisionTests: XCTestCase {
  
      private func decide(
@@ -4855,7 +5413,7 @@ final class SetupPlanTests: XCTestCase {
      }
  
      /// The regression, exactly as it happened: a fresh install, an OpenAI key checked, then an
-@@ -139,21 +163,22 @@
+@@ -139,62 +163,161 @@ final class SetupDecisionTests: XCTestCase {
      /// to OpenAI. Both keys are live in the panel, so both must count in the preview.
      func testTwoCheckedKeysOnAFreshInstallStillChooseOpenAI() {
          let decision = decide(
@@ -4886,8 +5444,13 @@ final class SetupPlanTests: XCTestCase {
      func testTheSentenceAlwaysDescribesTheConfigurationSaveWouldWrite() {
          let states: [KeyFieldState] = [
              .empty, .editing, .checking, .checked(.valid), .checked(.rejected("no")),
-@@ -162,62 +187,158 @@
-         let fields = ["", "   ", "sk-typed"]
+             .checked(.unreachable("offline")), .saved(masked: "sk-…abcd"),
+         ]
+-        let fields = ["", "   ", "sk-typed"]
++        // Empty, or a key as it is pasted. A field of nothing but spaces is an empty field, which
++        // `testAFieldOfWhitespaceIsNotATypedKey` pins on its own; leaving it out of the sweep keeps
++        // this at forty thousand cases rather than a hundred and forty.
++        let fields = ["", " sk-typed \n"]
          let configurations = [
              SaathiConfiguration(),
 +            SaathiConfiguration(provider: .local),
@@ -4969,9 +5532,9 @@ final class SetupPlanTests: XCTestCase {
                  }
              }
          }
-+        XCTAssertEqual(checked, configurations.count * 343 * 27)
-     }
- 
++        XCTAssertEqual(checked, configurations.count * 343 * 8)
++    }
++
 +    /// A Sarvam key pasted into a working OpenAI install moves Saathi to Sarvam — otherwise the key
 +    /// just added would do nothing anyone could see — and the sentence says where the voice will go
 +    /// before it is saved.
@@ -5037,10 +5600,10 @@ final class SetupPlanTests: XCTestCase {
 +        let written = decision.plan.applied(to: mixed, keys: decision.keys)
 +        XCTAssertTrue(SarvamSpeech.isOn(written))
 +        XCTAssertEqual(written.anthropicKey, "sk-a-new")
-+    }
-+
+     }
+ 
      /// A legacy config holds one shared `apiKey` and no vendor key. Reading the vendor fields
-     /// directly made both effective keys empty, so Save produced the local plan and demoted a
+@@ -202,22 +325,23 @@ final class SetupDecisionTests: XCTestCase {
      /// working install to "look for Ollama". `credential(for:)` is what everything else asks.
      func testALegacyApiKeyCountsAsTheKeyItIs() {
          let legacy = SaathiConfiguration(provider: .openai, apiKey: "sk-legacy-key")
@@ -5069,13 +5632,13 @@ final class SetupPlanTests: XCTestCase {
          XCTAssertEqual(decision.plan.provider, .anthropic)
      }
  }
-@@ -232,8 +353,20 @@
+@@ -232,6 +356,18 @@ final class SeededKeyStateTests: XCTestCase {
              for: SaathiConfiguration(provider: .openai, openaiKey: "sk-openai-1234"))
          XCTAssertEqual(seeded.openAI, .saved(masked: "sk-…1234"))
          XCTAssertEqual(seeded.anthropic, .empty, "no Anthropic key is stored, so none may be shown")
 +        XCTAssertEqual(seeded.sarvam, .empty)
-     }
- 
++    }
++
 +    func testASarvamKeySeedsTheSarvamField() {
 +        let seeded = AppController.seededKeyStates(
 +            for: SaathiConfiguration(provider: .sarvam, sarvamKey: "sk-sarvam-4321"))
@@ -5085,12 +5648,10 @@ final class SetupPlanTests: XCTestCase {
 +        let legacy = AppController.seededKeyStates(
 +            for: SaathiConfiguration(provider: .sarvam, apiKey: "sk-legacy-1234"))
 +        XCTAssertEqual(legacy, KeyStates(sarvam: .saved(masked: "sk-…1234")))
-+    }
-+
+     }
+ 
      func testBothVendorKeysSeedBothFields() {
-         let seeded = AppController.seededKeyStates(
-             for: SaathiConfiguration(provider: .openai, openaiKey: "sk-openai-1234", anthropicKey: "sk-ant-5678"))
-@@ -247,8 +380,7 @@
+@@ -247,8 +383,7 @@ final class SeededKeyStateTests: XCTestCase {
      func testALegacyKeySeedsOnlyTheProviderTheConfigNames() {
          let seeded = AppController.seededKeyStates(
              for: SaathiConfiguration(provider: .openai, apiKey: "sk-legacy-1234"))
@@ -5100,7 +5661,7 @@ final class SetupPlanTests: XCTestCase {
  
          let anthropic = AppController.seededKeyStates(
              for: SaathiConfiguration(provider: .anthropic, apiKey: "sk-legacy-1234"))
-@@ -260,14 +392,11 @@
+@@ -260,14 +395,11 @@ final class SeededKeyStateTests: XCTestCase {
      /// either vendor would be the panel inventing a fact the file does not hold.
      func testALegacyKeyWithNoProviderNamedSeedsNothing() {
          let seeded = AppController.seededKeyStates(for: SaathiConfiguration(apiKey: "sk-legacy-1234"))
@@ -5117,7 +5678,7 @@ final class SetupPlanTests: XCTestCase {
      }
  
      /// Seeding and deciding must read the same config the same way, or Setup opens showing a key
-@@ -275,18 +404,15 @@
+@@ -275,18 +407,15 @@ final class SeededKeyStateTests: XCTestCase {
      func testWhatIsSeededIsWhatSaveWouldUse() {
          let legacy = SaathiConfiguration(provider: .openai, apiKey: "sk-legacy-1234")
          let seeded = AppController.seededKeyStates(for: legacy)
@@ -5142,7 +5703,7 @@ final class SetupPlanTests: XCTestCase {
      }
  }
  
-@@ -295,19 +421,52 @@
+@@ -295,17 +424,50 @@ final class SeededKeyStateTests: XCTestCase {
  @MainActor
  final class SetupPresentationTests: XCTestCase {
  
@@ -5158,11 +5719,8 @@ final class SetupPlanTests: XCTestCase {
 +        XCTAssertEqual(
 +            AppController.keysNote(for: plan, language: "en"),
 +            "The Anthropic key looks at the screen when you ask about something on it.")
-     }
- 
--    func testThereIsNoNoteWhenEveryStoredKeyIsInUse() {
--        let plan = SetupPlan.make(openAIKeyValid: true, anthropicKeyValid: false)
--        XCTAssertEqual(AppController.unusedKeyNote(for: plan), "")
++    }
++
 +    /// A key that really is doing nothing is named, with the way to put it to use.
 +    func testAKeyNothingUsesIsNamedAndSoIsTheWayToUseIt() {
 +        let plan = SetupPlan.make(valid: [.openai, .sarvam])
@@ -5170,14 +5728,17 @@ final class SetupPlanTests: XCTestCase {
 +        XCTAssertEqual(
 +            AppController.keysNote(for: plan, language: "en"),
 +            "The Sarvam key is saved and not in use. Choose Sarvam under Where it thinks to use it.")
-     }
- 
++    }
++
 +    func testThereIsNoNoteWhenThereIsNothingToAdd() {
 +        XCTAssertEqual(AppController.keysNote(for: SetupPlan.make(valid: [.openai]), language: "en"), "")
 +        XCTAssertEqual(AppController.keysNote(for: SetupPlan.make(valid: []), language: "en"), "")
 +        XCTAssertEqual(AppController.keysNote(for: SetupPlan.make(valid: [.anthropic]), language: "en"), "")
-+    }
-+
+     }
+ 
+-    func testThereIsNoNoteWhenEveryStoredKeyIsInUse() {
+-        let plan = SetupPlan.make(openAIKeyValid: true, anthropicKeyValid: false)
+-        XCTAssertEqual(AppController.unusedKeyNote(for: plan), "")
 +    /// Sarvam does not look at screens. Someone with only its key is told what would.
 +    func testSarvamAloneSaysNothingHereCanLook() {
 +        XCTAssertEqual(
@@ -5199,12 +5760,10 @@ final class SetupPlanTests: XCTestCase {
 +        // Sarvam only thinking listens on this Mac, so Sarvam's languages are not the limit.
 +        let thinkingOnly = SetupPlan.make(valid: [.sarvam], current: .sarvam)
 +        XCTAssertFalse(AppController.keysNote(for: thinkingOnly, language: "fr").contains("does not hear"))
-+    }
-+
-     // MARK: what was said
+     }
  
-     func testTheLastExchangeStartsEmptyAndActionsReadAsOneLine() {
-@@ -408,6 +567,40 @@
+     // MARK: what was said
+@@ -408,6 +570,40 @@ final class SetupPresentationTests: XCTestCase {
              "stays on this machine")
      }
  
@@ -5245,7 +5804,7 @@ final class SetupPlanTests: XCTestCase {
      /// First run opens on Setup, and only first run. "First run" is "no provider has a credential",
      /// which is a fact about the config rather than a flag that can get out of step with it.
      func testTheIslandOpensOnSetupOnlyWhileNothingIsConfigured() {
-@@ -436,42 +629,46 @@
+@@ -436,42 +632,46 @@ final class SetupPresentationTests: XCTestCase {
      /// rejected key on disk, and the voice failing with "not connected". Save now checks it itself.
      func testATypedKeyWithoutAnAcceptedVerdictNeedsACheckBeforeSave() {
          XCTAssertEqual(AppController.keysNeedingCheck(
@@ -5309,7 +5868,7 @@ final class SetupPlanTests: XCTestCase {
      }
  
      func testANonEmptyFieldWinsOverAnyStoredKey() {
-@@ -486,6 +683,84 @@
+@@ -486,6 +686,84 @@ final class SetupPresentationTests: XCTestCase {
      }
  }
  
@@ -5628,9 +6187,11 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 - [ ] **Step 5: The model.** `Sources/SaathiShell/IslandModel.swift`:
 
 ```diff
+diff --git a/macos/Saathi/Sources/SaathiShell/IslandModel.swift b/macos/Saathi/Sources/SaathiShell/IslandModel.swift
+index 093c86d..dd0f8f9 100644
 --- a/macos/Saathi/Sources/SaathiShell/IslandModel.swift
 +++ b/macos/Saathi/Sources/SaathiShell/IslandModel.swift
-@@ -34,6 +34,8 @@
+@@ -34,6 +34,8 @@ public struct IslandLanguage: Identifiable, Equatable, Sendable {
          IslandLanguage(tag: "mr", title: "मराठी"),
          IslandLanguage(tag: "kn", title: "ಕನ್ನಡ"),
          IslandLanguage(tag: "ml", title: "മലയാളം"),
@@ -5639,7 +6200,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
          IslandLanguage(tag: "es", title: "Español"),
          IslandLanguage(tag: "fr", title: "Français"),
          IslandLanguage(tag: "de", title: "Deutsch"),
-@@ -98,6 +100,54 @@
+@@ -98,6 +100,54 @@ public enum KeyFieldState: Equatable, Sendable {
      }
  }
  
@@ -5694,7 +6255,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
  /// Everything the Home panel says about Saathi right now.
  @MainActor
  public final class IslandModel: ObservableObject {
-@@ -113,14 +163,23 @@
+@@ -113,14 +163,23 @@ public final class IslandModel: ObservableObject {
      @Published public var companionVisible = true
      /// Which face of the island is showing.
      @Published public var tab: IslandTab = .home
@@ -5722,7 +6283,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
      /// The realtime voice's name, and whether a turn is one connection or three steps. Shown on
      /// Home because they are otherwise invisible until you have already started talking.
      @Published public var voiceTitle: String = ""
-@@ -186,17 +245,17 @@
+@@ -186,17 +245,17 @@ public struct IslandActions {
      public var onFixPermission: (Permission) -> Void = { _ in }
      public var onToggleCompanion: () -> Void = {}
      public var onQuit: () -> Void = {}
@@ -5756,6 +6317,8 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 - [ ] **Step 6: The wording.** `Sources/SaathiShell/AppController+Wording.swift`:
 
 ```diff
+diff --git a/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift b/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift
+index 45abb84..e1981b4 100644
 --- a/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift
 +++ b/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift
 @@ -2,7 +2,7 @@
@@ -5767,7 +6330,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
  //
  //  Static and pure so the wording can be tested without a window, a session or a key. These are
  //  the sentences that tell someone where their voice goes, which makes them worth pinning down —
-@@ -42,6 +42,37 @@
+@@ -42,6 +42,37 @@ extension AppController {
          "\(configuration.resolvedProvider.rawValue) · \(configuration.resolvedModel)"
      }
  
@@ -5805,7 +6368,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
      /// What the status pill in the band says, and whether it reads as connected.
      struct ConnectionPill: Equatable {
          let title: String
-@@ -88,18 +119,57 @@
+@@ -88,16 +119,55 @@ extension AppController {
      static func privacyLine(for configuration: SaathiConfiguration) -> String {
          let row = configuration.providerRow
          if row.voice == .realtime { return "your voice leaves as audio" }
@@ -5829,8 +6392,8 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 +        }
 +        if SarvamSpeech.isOn(configuration) { return "Sarvam · \(SarvamSpeech.speaker(named: configuration.voice))" }
 +        return "this Mac's"
-     }
- 
++    }
++
 +    /// A provider as a person would name it.
 +    static func vendorName(_ kind: ProviderKind) -> String {
 +        switch kind {
@@ -5865,12 +6428,10 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 +            sentences.append("The \(name) key is saved and not in use. Choose \(name) under Where it thinks to use it.")
 +        }
 +        return sentences.joined(separator: " ")
-+    }
-+
+     }
+ 
      /// Which face the island opens on. Derived from the configuration rather than from a
-     /// "has onboarded" flag, so it cannot get out of step with what is actually configured.
-     static func openingTab(for configuration: SaathiConfiguration) -> IslandTab {
-@@ -123,45 +193,44 @@
+@@ -123,45 +193,44 @@ extension AppController {
      /// is about nothing, and the key that stands in is the one on disk, with the verdict the disk
      /// earns. Without this a new key checked, then lost to a collapse, left "works" beside an empty
      /// field, and Save wrote the old, dead key back under it.
@@ -5936,7 +6497,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
      }
  
      /// The one place the Setup tab decides anything.
-@@ -175,45 +244,59 @@
+@@ -175,31 +244,46 @@ extension AppController {
      /// not just changed to `""` and fall back to `configuration.openaiKey`/`anthropicKey`, so on a
      /// fresh install checking a second key judged the first one against an empty string, flipped the
      /// plan to Anthropic and promised "your voice stays here" — and then Save, which saw both real
@@ -5993,8 +6554,8 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 -            anthropicKey: anthropic)
 +            plan: setupPlan(typed: typed(in: fields), states: states, configuration: configuration),
 +            keys: keys)
-     }
- 
++    }
++
 +    /// The provider the file names, for `SetupPlan` to stay on — nil when it names none, or names
 +    /// the hosted service with no token to use it with.
 +    static func providerInUse(_ configuration: SaathiConfiguration) -> ProviderKind? {
@@ -6002,10 +6563,10 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 +        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 +        if provider == .hosted, token.isEmpty { return nil }
 +        return provider
-+    }
-+
+     }
+ 
      /// The verdicts Setup opens with, read from what is on disk so a stored key counts before
-     /// anything has been checked this launch.
+@@ -207,13 +291,12 @@ extension AppController {
      ///
      /// A vendor field seeds its own vendor and nothing else. The legacy shared `apiKey` seeds only
      /// the vendor the config actually names as its provider: it is one key that could belong to
@@ -6025,7 +6586,7 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
          func seed(_ kind: ProviderKind, vendorKey: String?) -> KeyFieldState {
              let vendor = vendorKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
              if !vendor.isEmpty { return .saved(masked: IslandModel.masked(vendor)) }
-@@ -221,8 +304,34 @@
+@@ -221,8 +304,34 @@ extension AppController {
                    let legacy = configuration.credential(for: kind) else { return .empty }
              return .saved(masked: IslandModel.masked(legacy))
          }
@@ -6078,7 +6639,8 @@ Run: `swift test --filter SetupPlanTests` → passes (the Shell target does not 
 //  `SetupPlan.vendors`, and `wireNotch` points the island at them.
 //
 //  Nothing here decides anything. `setupPlan` — in the wording file, pure and tested — says what a
-//  Save would do, and the sentence under the fields is drawn from the same call.
+//  Save does, and `setupPreview`, beside it, is the sentence under the fields: the same plan, said
+//  before the keys it depends on have been accepted.
 //
 
 import AppKit
@@ -6222,17 +6784,18 @@ extension AppController {
         return false
     }
 
-    /// The plan changes as each check lands, so the sentence under the fields follows it rather
-    /// than appearing only after a save. Someone should be able to see what they are about to get.
+    /// The sentence under the fields follows every keystroke, every verdict and every change to
+    /// the file, rather than appearing only after a save. Someone should be able to see what they
+    /// are about to get.
     ///
     /// Drawn from `typedKeyFields` — which fields have text right now — the verdicts, and the
-    /// file: the three things Save decides from.
+    /// file: the three things Save decides from. See `setupPreview`.
     func refreshPlanExplanation() {
         guard let notch else { return }
-        let plan = Self.setupPlan(
+        let preview = Self.setupPreview(
             typed: typedKeyFields, states: notch.model.keyStates, configuration: configuration)
-        notch.model.planExplanation = plan.explanation
-        notch.model.keysNote = Self.keysNote(for: plan, language: configuration.resolvedLanguage)
+        notch.model.planExplanation = preview.sentence
+        notch.model.keysNote = Self.keysNote(for: preview.plan, language: configuration.resolvedLanguage)
     }
 
     private func write(_ updated: SaathiConfiguration, orSay failure: String) -> Bool {
@@ -6250,9 +6813,11 @@ extension AppController {
 and take the closures it replaces out of `Sources/SaathiShell/AppController.swift`:
 
 ```diff
+diff --git a/macos/Saathi/Sources/SaathiShell/AppController.swift b/macos/Saathi/Sources/SaathiShell/AppController.swift
+index 83226b1..472a0f8 100644
 --- a/macos/Saathi/Sources/SaathiShell/AppController.swift
 +++ b/macos/Saathi/Sources/SaathiShell/AppController.swift
-@@ -19,7 +19,10 @@
+@@ -19,7 +19,10 @@ public final class AppController {
      var configuration: SaathiConfiguration
      let data: MascotData
      private let color: MascotColor
@@ -6264,7 +6829,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
      private var machine: CompanionStateMachine
      private var shown: CompanionState = .idle
  
-@@ -240,23 +243,7 @@
+@@ -240,23 +243,7 @@ public final class AppController {
      /// every reconfigure, so the Home tab can never describe a provider that is no longer in use.
      func applyConfigurationToIsland() {
          guard let notch else { return }
@@ -6289,7 +6854,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
  
          // Neither integration exists in Saathi yet, so both draw in their real "not configured"
          // state. They are a list rather than two hand-written tiles so that wiring one up later is
-@@ -269,6 +256,10 @@
+@@ -269,6 +256,10 @@ public final class AppController {
              let launched = configuration
              notch.model.skills = SkillLibraryStore(configuration: { [weak self] in self?.configuration ?? launched })
          }
@@ -6300,7 +6865,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
      }
  
      // MARK: hold to talk
-@@ -468,19 +459,14 @@
+@@ -468,19 +459,14 @@ public final class AppController {
      /// one place that opens the provider alert.
      private func wireNotch() {
          guard let notch else { return }
@@ -6326,11 +6891,10 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
  
          var actions = IslandActions()
          actions.onTalk = menu.onTalk
-@@ -540,156 +526,10 @@
-             // so this literal is nonisolated and `Task {}` is a cross-actor hop — safe only because
+@@ -541,155 +527,9 @@ public final class AppController {
              // `AppRelauncher.relaunch` is itself `@MainActor`.
              Task { await AppRelauncher.relaunch(bundleURL: Bundle.main.bundleURL) }
--        }
+         }
 -        // Both fields arrive, not just the one being checked: the verdict that lands changes the
 -        // plan, and the plan is decided by both keys at once. See `setupDecision`.
 -        actions.onCheckKey = { [weak self] kind, openAIField, anthropicField in
@@ -6383,10 +6947,8 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
 -            // The language is baked into the session's instructions, so it only takes effect on a
 -            // fresh session — the same reconfigure a saved key goes through.
 -            Task { await self.reconfigure(updated) }
-         }
-+        // Keys, the picker, the switch and the language: `AppController+Setup.swift`.
-+        wireSetup(into: &actions)
- 
+-        }
+-
 -        actions.onSaveKeys = { [weak self] openAIKey, anthropicKey in
 -            guard let self, let notch = self.notch else { return }
 -            // Refused coherently rather than half-applied: without this a second Save during an
@@ -6462,7 +7024,9 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
 -
 -            Task { await self.reconfigure(updated) }
 -        }
--
++        // Keys, the picker, the switch and the language: `AppController+Setup.swift`.
++        wireSetup(into: &actions)
+ 
          notch.actions = actions
      }
 -
@@ -6490,6 +7054,8 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
 - [ ] **Step 8: The view.** `Sources/SaathiShell/IslandSetupView.swift`:
 
 ```diff
+diff --git a/macos/Saathi/Sources/SaathiShell/IslandSetupView.swift b/macos/Saathi/Sources/SaathiShell/IslandSetupView.swift
+index a16e734..930d06c 100644
 --- a/macos/Saathi/Sources/SaathiShell/IslandSetupView.swift
 +++ b/macos/Saathi/Sources/SaathiShell/IslandSetupView.swift
 @@ -6,7 +6,7 @@
@@ -6501,7 +7067,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
  //  fields and a Save button, which is a different kind of surface from everything else Saathi shows
  //  about itself — and it meant the one place that says where your voice goes was somewhere you had
  //  to leave the settings to find.
-@@ -28,13 +28,11 @@
+@@ -28,13 +28,11 @@ struct IslandSetupView: View {
  
      /// Held here rather than in the model: a key being typed is not application state, and keeping
      /// it out of the observable object means it is never published to anything else.
@@ -6517,7 +7083,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
      }
  
      private var home: String { NSHomeDirectory() }
-@@ -56,7 +54,7 @@
+@@ -56,7 +54,7 @@ struct IslandSetupView: View {
          // The fields are view-local and start empty every time this is built — the island
          // collapsing tears it down — so a "works" left over from before is about a key no longer
          // in any field.
@@ -6526,7 +7092,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
      }
  
      // MARK: - Keys
-@@ -69,15 +67,19 @@
+@@ -69,15 +67,19 @@ struct IslandSetupView: View {
                  systemImage: "key.fill",
                  title: "OpenAI",
                  detail: "voice and thinking",
@@ -6534,13 +7100,13 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
 -                state: model.openAIKeyState,
 +                text: $keys.openAI,
                  kind: .openai)
-             keyRow(
++            keyRow(
 +                systemImage: "globe.asia.australia",
 +                title: "Sarvam",
 +                detail: "Indian languages, heard and spoken",
 +                text: $keys.sarvam,
 +                kind: .sarvam)
-+            keyRow(
+             keyRow(
                  systemImage: "key",
                  title: "Anthropic",
                  detail: "looking at the screen",
@@ -6550,7 +7116,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
                  kind: .anthropic)
  
              // The sentence under the fields is the save it promises: what Saathi will become if
-@@ -85,8 +87,8 @@
+@@ -85,8 +87,8 @@ struct IslandSetupView: View {
              if !model.planExplanation.isEmpty {
                  noteRow(model.planExplanation, emphasised: true)
              }
@@ -6561,7 +7127,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
              }
  
          }
-@@ -131,10 +133,34 @@
+@@ -131,10 +133,34 @@ struct IslandSetupView: View {
          section("VOICE") {
              // The language row is a setting in the same sense the rest are: something Saathi would
              // otherwise guess, and guessed wrong loudly enough to be reported.
@@ -6598,7 +7164,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
              settingRow(systemImage: "lock.shield", title: "Your voice", value: model.privacyLine)
              settingRow(systemImage: "keyboard", title: "Talk shortcut", value: "hold ⌃ control + ⌥ option")
          }
-@@ -279,8 +305,14 @@
+@@ -279,8 +305,14 @@ struct IslandSetupView: View {
          .pointerCursor()
      }
  
@@ -6615,7 +7181,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
          HStack {
              Image(systemName: systemImage).font(.system(size: 12)).foregroundColor(Color.white.opacity(0.6)).frame(width: 18)
              VStack(alignment: .leading, spacing: 1) {
-@@ -288,9 +320,9 @@
+@@ -288,9 +320,9 @@ struct IslandSetupView: View {
                  Text(detail).font(.system(size: 10)).foregroundColor(Color.white.opacity(0.5))
              }
              Spacer()
@@ -6628,7 +7194,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
                  }
              }
              .labelsHidden()
-@@ -312,12 +344,12 @@
+@@ -312,12 +344,12 @@ struct IslandSetupView: View {
          title: String,
          detail: String,
          text: Binding<String>,
@@ -6643,7 +7209,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
          }
          return VStack(alignment: .leading, spacing: 4) {
              HStack {
-@@ -334,15 +366,11 @@
+@@ -334,15 +366,11 @@ struct IslandSetupView: View {
                      .padding(.vertical, 5)
                      .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.10)))
                      .onSubmit(save)
@@ -6664,7 +7230,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
                      }
  
                  Button(action: save) {
-@@ -379,14 +407,6 @@
+@@ -379,14 +407,6 @@ struct IslandSetupView: View {
          }
      }
  
@@ -6679,7 +7245,7 @@ and take the closures it replaces out of `Sources/SaathiShell/AppController.swif
      private func noteRow(_ text: String, emphasised: Bool) -> some View {
          HStack(alignment: .top) {
              Image(systemName: emphasised ? "arrow.turn.down.right" : "info.circle")
-@@ -407,14 +427,6 @@
+@@ -407,14 +427,6 @@ struct IslandSetupView: View {
          .padding(.vertical, 10)
      }
  
@@ -6728,6 +7294,9 @@ final class IslandSetupSnapshotTests: XCTestCase {
     private struct Shot {
         let name: String
         let configuration: SaathiConfiguration
+        /// The vendors whose key is "being typed": the sentence is drawn as it would be then. The
+        /// fields themselves are drawn empty — their text is the view's own, and is never a test's.
+        var typing: Set<ProviderKind> = []
     }
 
     func testDrawTheSetupTab() async throws {
@@ -6753,6 +7322,8 @@ final class IslandSetupSnapshotTests: XCTestCase {
                 provider: .sarvam, apiKey: sarvam, language: "hi")),
             Shot(name: "setup-6-sarvam-in-french", configuration: SaathiConfiguration(
                 provider: .sarvam, sarvamKey: sarvam, speech: .sarvam, language: "fr")),
+            Shot(name: "setup-7-a-sarvam-key-being-typed", configuration: SaathiConfiguration(
+                provider: .openai, openaiKey: openAI), typing: [.sarvam]),
         ]
 
         let size = CGSize(width: NotchPanel.openWidth, height: 1240)
@@ -6761,9 +7332,13 @@ final class IslandSetupSnapshotTests: XCTestCase {
             model.tab = .setup
             model.keyStates = AppController.seededKeyStates(for: shot.configuration)
             AppController.describe(shot.configuration, on: model)
-            let plan = AppController.setupPlan(typed: [], states: model.keyStates, configuration: shot.configuration)
-            model.planExplanation = plan.explanation
-            model.keysNote = AppController.keysNote(for: plan, language: shot.configuration.resolvedLanguage)
+            var states = model.keyStates
+            for kind in shot.typing { states[kind] = .editing }
+            model.keyStates = states
+            let preview = AppController.setupPreview(
+                typed: shot.typing, states: model.keyStates, configuration: shot.configuration)
+            model.planExplanation = preview.sentence
+            model.keysNote = AppController.keysNote(for: preview.plan, language: shot.configuration.resolvedLanguage)
             model.permissions = Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, PermissionStatus.granted) })
             model.lastYouSaid = "ഇത് എന്താണ്?"
             model.lastSaathiSaid = "ഇത് ഒരു സ്പ്രെഡ്ഷീറ്റ് ആണ്."
@@ -6806,11 +7381,24 @@ Run: `SAATHI_SNAPSHOTS=<scratchpad>/setup swift test --filter IslandSetupSnapsho
 - Consumes: `CompanionVoice(configuration:)`, `.apply(_:scripted:)`, `.reportFailures(to:)`, `CompanionVoice.deviceSettings(for:scripted:)` (Task 7).
 - Produces: `AppController.speaker` wraps a `CompanionVoice`; `applySpeechSettings(scripted:)` and `reconfigure` apply the configuration to it; a line Sarvam could not speak becomes `.failure(message)` on the island and in the log. `AppController.speechSettings(for:scripted:)` is gone: it is `CompanionVoice.deviceSettings(for:scripted:)`.
 
-- [ ] **Step 1: Point the one test that named the old function at the new one.** In `OnboardingCoordinatorTests.swift`, the two assertions on `AppController.speechSettings(for: chosen, scripted:)` become:
+- [ ] **Step 1: Point the one test that named the old function at the new one.**
 
-```swift
-        XCTAssertEqual(CompanionVoice.deviceSettings(for: chosen, scripted: true), SpeechSettings(language: "en-US", pace: .slow))
-        XCTAssertEqual(CompanionVoice.deviceSettings(for: chosen, scripted: false), SpeechSettings(language: "ta-IN", pace: .slow))
+```diff
+diff --git a/macos/Saathi/Tests/SaathiShellTests/OnboardingCoordinatorTests.swift b/macos/Saathi/Tests/SaathiShellTests/OnboardingCoordinatorTests.swift
+index a6d536e..31aa1c2 100644
+--- a/macos/Saathi/Tests/SaathiShellTests/OnboardingCoordinatorTests.swift
++++ b/macos/Saathi/Tests/SaathiShellTests/OnboardingCoordinatorTests.swift
+@@ -526,8 +526,8 @@ final class OnboardingEntryTests: XCTestCase {
+     /// must not be read out by a Tamil synthesiser; the pace they asked for still applies at once.
+     func testFirstRunIsReadByAnEnglishVoiceWhateverLanguageWasChosen() {
+         let chosen = SaathiConfiguration(language: "ta-IN", pace: .slow)
+-        XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: true), SpeechSettings(language: "en-US", pace: .slow))
+-        XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: false), SpeechSettings(language: "ta-IN", pace: .slow))
++        XCTAssertEqual(CompanionVoice.deviceSettings(for: chosen, scripted: true), SpeechSettings(language: "en-US", pace: .slow))
++        XCTAssertEqual(CompanionVoice.deviceSettings(for: chosen, scripted: false), SpeechSettings(language: "ta-IN", pace: .slow))
+     }
+ 
+     /// Quit halfway through: a colour and a name are on disk, `onboarded` is not. It comes back.
 ```
 
 (The behaviour itself — which voice says a line, and that a scripted line is never Sarvam's — is pinned in Task 7's `CompanionVoiceTests`, against fakes.)
@@ -6818,9 +7406,11 @@ Run: `SAATHI_SNAPSHOTS=<scratchpad>/setup swift test --filter IslandSetupSnapsho
 - [ ] **Step 2: Implement.** `Sources/SaathiShell/AppController.swift`:
 
 ```diff
+diff --git a/macos/Saathi/Sources/SaathiShell/AppController.swift b/macos/Saathi/Sources/SaathiShell/AppController.swift
+index 472a0f8..c778695 100644
 --- a/macos/Saathi/Sources/SaathiShell/AppController.swift
 +++ b/macos/Saathi/Sources/SaathiShell/AppController.swift
-@@ -30,8 +30,9 @@
+@@ -30,8 +30,9 @@ public final class AppController {
      let notch: NotchPanel?
      let menu: MenuBarController
  
@@ -6832,7 +7422,7 @@ Run: `SAATHI_SNAPSHOTS=<scratchpad>/setup swift test --filter IslandSetupSnapsho
      var speaker: ObservedSpeaker!
      private var performer: ActionPerformer!
      /// The voice session's whole life — start, turns, reconfigure, quit. See `VoiceConductor`.
-@@ -73,10 +74,15 @@
+@@ -73,10 +74,15 @@ public final class AppController {
          }
          menu = MenuBarController(icon: MenuBarIcon.image(data: data), installStatusItem: true)
  
@@ -6842,15 +7432,15 @@ Run: `SAATHI_SNAPSHOTS=<scratchpad>/setup swift test --filter IslandSetupSnapsho
 +        speaker = ObservedSpeaker(companionVoice) { [weak self] speaking in
              Task { @MainActor in self?.handle(.speakingChanged(speaking)) }
          }
-+        // When Sarvam cannot speak a line this Mac's voice has already taken it; this is the
-+        // island and the log being told why the voice changed.
++        // When Sarvam cannot speak a line this Mac's voice takes it; this is the island and the
++        // log being told why the voice changed.
 +        companionVoice.reportFailures { [weak self] message in
 +            Task { @MainActor in self?.handle(.failure(message)) }
 +        }
          performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
          let speaker = self.speaker!
          let performer = self.performer!
-@@ -212,17 +218,11 @@
+@@ -212,17 +218,11 @@ public final class AppController {
          ticker = timer
      }
  
@@ -6872,7 +7462,7 @@ Run: `SAATHI_SNAPSHOTS=<scratchpad>/setup swift test --filter IslandSetupSnapsho
      }
  
      // MARK: voice
-@@ -235,7 +235,7 @@
+@@ -235,7 +235,7 @@ public final class AppController {
          handsFree = false
          notch?.model.isAlwaysListening = false
          configuration = updated
@@ -7213,6 +7803,8 @@ public struct SarvamSelfTest: Sendable {
 `Sources/saathi/main.swift`:
 
 ```diff
+diff --git a/macos/Saathi/Sources/saathi/main.swift b/macos/Saathi/Sources/saathi/main.swift
+index 58ba954..7a19598 100644
 --- a/macos/Saathi/Sources/saathi/main.swift
 +++ b/macos/Saathi/Sources/saathi/main.swift
 @@ -7,6 +7,7 @@
@@ -7223,27 +7815,48 @@ public struct SarvamSelfTest: Sendable {
  //    saathi actions            what this build can be asked to do
  //    saathi health             is the backend up
  //    saathi say "..."          say one line out loud
-@@ -24,7 +25,18 @@
+@@ -24,8 +25,21 @@ let quiet = arguments.contains("--quiet")
  let positional = arguments.filter { !$0.hasPrefix("--") }
  let command = positional.first ?? "help"
  
 -let speaker: any Speaker = quiet ? PrintingSpeaker() : SystemSpeaker()
+-let performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
 +/// The voice the app would use: this Mac's, or Sarvam's when `shell.json` asks for it — so
 +/// `saathi say` is also the quickest way to hear what a reply will sound like. A configuration
 +/// that cannot be read is each command's to complain about; the voice is then this Mac's.
-+func makeSpeaker() -> any Speaker {
-+    if quiet { return PrintingSpeaker() }
-+    let configuration = (try? ConfigurationStore.load(from: ConfigurationStore.defaultPath())) ?? SaathiConfiguration()
-+    let voice = CompanionVoice(configuration: configuration)
-+    voice.reportFailures { FileHandle.standardError.write(Data("  [\($0)]\n".utf8)) }
-+    return voice
++///
++/// Made on first use. Most commands say nothing, and should not wait for a voice to say it with.
++enum Voice {
++    static let speaker: any Speaker = {
++        if quiet { return PrintingSpeaker() }
++        let configuration = (try? ConfigurationStore.load(from: ConfigurationStore.defaultPath())) ?? SaathiConfiguration()
++        let voice = CompanionVoice(configuration: configuration)
++        voice.reportFailures { FileHandle.standardError.write(Data("  [\($0)]\n".utf8)) }
++        return voice
++    }()
++    static let performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
 +}
-+
-+let speaker = makeSpeaker()
- let performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
  
  func toneOption() -> Tone {
-@@ -81,6 +93,18 @@
+     guard let raw = arguments.first(where: { $0.hasPrefix("--tone=") })?.dropFirst("--tone=".count),
+@@ -56,14 +70,14 @@ case "voice":
+     print(VoiceLaneReport.describe(voiceConfiguration))
+ 
+     if arguments.contains("--listen") {
+-        let session = try VoiceSessionFactory.make(configuration: voiceConfiguration, speaker: speaker)
++        let session = try VoiceSessionFactory.make(configuration: voiceConfiguration, speaker: Voice.speaker)
+         let callbacks = VoiceSessionCallbacks(
+             onUserTranscript: { print("\nyou:    \($0)") },
+             onSaathiTranscript: { print("saathi: \($0)") },
+             onAction: { action in
+                 // The join that makes a voice turn and a typed command the same product: both end
+                 // at the same performer, with the same contract validation in front of them.
+-                Task { try? await performer.perform(action) }
++                Task { try? await Voice.performer.perform(action) }
+             },
+             onStatus: { FileHandle.standardError.write(Data("  [\($0)]\n".utf8)) }
+         )
+@@ -81,6 +95,18 @@ case "voice":
          }
      }
  
@@ -7262,7 +7875,28 @@ public struct SarvamSelfTest: Sendable {
  case "actions":
      print("contract \(SaathiBackend.contractVersion) — \(SaathiAction.allWireNames.count) actions")
      for wireName in SaathiAction.allWireNames { print("  \(wireName)") }
-@@ -125,6 +149,7 @@
+@@ -101,7 +127,7 @@ case "health":
+ case "say":
+     guard positional.count > 1 else { fail("say what? — saathi say \"hello\"") }
+     let text = positional.dropFirst().joined(separator: " ")
+-    try await performer.perform(.say(SayAction(text: text, tone: toneOption())))
++    try await Voice.performer.perform(.say(SayAction(text: text, tone: toneOption())))
+ 
+ case "demo":
+     // Deliberately hard-coded: this is the smoke test that the contract, the action performer and
+@@ -115,9 +141,9 @@ case "demo":
+         ShowStepAction(title: "Tell Saathi how that went", index: 3, total: 3),
+     ]
+     for step in steps {
+-        try await performer.perform(.showStep(step))
++        try await Voice.performer.perform(.showStep(step))
+     }
+-    try await performer.perform(.say(SayAction(text: "That is the whole loop.", tone: .calm)))
++    try await Voice.performer.perform(.say(SayAction(text: "That is the whole loop.", tone: .calm)))
+ 
+ case "help", "--help", "-h":
+     print("""
+@@ -125,6 +151,7 @@ case "help", "--help", "-h":
  
        saathi provider             which mode this is in  (--probe to check it is reachable)
        saathi voice                which voice lane, and where your voice goes  (--listen to talk)
@@ -7285,11 +7919,253 @@ public struct SarvamSelfTest: Sendable {
 
 - [ ] **Step 1:** README — the provider table, the voice table, the Sarvam paragraph, the `shell.json` example, "Where it stands", "Still to do", the test counts.
 
-*(Written once what it describes is built; this plan carries the diff of `README.md` from then on.)*
+````diff
+diff --git a/README.md b/README.md
+index b23f3f9..456ed59 100644
+--- a/README.md
++++ b/README.md
+@@ -54,9 +54,12 @@ nothing from anybody:
+ | `hosted` | none — we hold them | yes | yes, to Saathi's backend |
+ 
+ `sarvam` is [Sarvam AI](https://sarvam.ai) — Indian-built models with real
+-Indic-language coverage, which matters given where Saathi starts. It is
+-OpenAI-shaped (`https://api.sarvam.ai/v1`, `Authorization: Bearer`), so it shares
+-the same client path as the others.
++Indic-language coverage, which matters given where Saathi starts. Its chat
++endpoint is OpenAI-shaped (`https://api.sarvam.ai/v1`, `Authorization: Bearer`),
++so the thinking shares a client path with everyone else's. Its speech is the part
++nobody else has: it hears and speaks ten Indian languages, nine of which this Mac
++cannot hear at all. Saathi can use it for both — see
++[Sarvam, heard and spoken](#sarvam-heard-and-spoken).
+ 
+ `local` talks to an OpenAI-compatible server on your own machine — Ollama, LM
+ Studio, llama.cpp. With nothing configured at all, that is what you get:
+@@ -83,9 +86,13 @@ your machine and goes straight to that provider; Saathi's servers are not in the
+ path:
+ 
+ ```json
+-{ "provider": "sarvam", "apiKey": "…" }
++{ "provider": "sarvam", "sarvamKey": "…" }
+ ```
+ 
++Each vendor has a field of its own — `openaiKey`, `sarvamKey`, `anthropicKey` — so
++one file can hold all three. Pasting a key into Setup, in the app, writes the same
++thing. (The older shared `apiKey` is still read.)
++
+ How a key is presented is data, not code: each provider row carries the header
+ name and prefix it needs (`Authorization: Bearer …` for most, `x-api-key` for
+ Anthropic). Adding a provider is a row in `contract/schema/saathi.json`, not a
+@@ -105,6 +112,7 @@ spoken turn over one connection, so the lane is a **column in the provider table
+ |---|---|---|---|
+ | `local` *(default)* | `chain` | on-device | never leaves |
+ | `anthropic`, `sarvam` | `chain` | on-device | never leaves — only the transcript is sent |
++| any of those three, with `"speech": "sarvam"` | `chain` | Sarvam | leaves as audio, to Sarvam |
+ | `openai`, `hosted` | `realtime` | over the connection | leaves as audio |
+ 
+ ```bash
+@@ -125,6 +133,55 @@ also makes a promise the realtime lane cannot: both ends run on-device, so with
+ `saathi voice` states which of those you are getting, and both clients are tested to say the same
+ thing about it.
+ 
++On this lane a turn can be talked over — hold the keys and whatever Saathi was saying stops, and
++the answer it was waiting for is dropped — and "what is this?" is answered by looking: the model
++asks to see the screen, is told what is there, and then says so.
++
++### Sarvam, heard and spoken
++
++The on-device promise has a cost, and it falls on exactly the people Saathi starts with. Measured on
++the Mac this was written on (macOS 26): Apple's recogniser works on-device for English; it exists
++for Hindi but only by sending audio to Apple, which Saathi will not do; and for Tamil, Telugu,
++Bengali, Marathi, Kannada, Malayalam, Gujarati, Punjabi and Odia there is no recogniser at all. Five
++of those have no system voice either. A chain lane that can only be spoken to in English is not
++much of a lane for someone in Kochi.
++
++So the chain lane's ears and mouth can be Sarvam's instead:
++
++```json
++{ "provider": "sarvam", "sarvamKey": "…", "speech": "sarvam", "language": "ml" }
++```
++
++Saaras hears the turn, Sarvam-105B thinks, Bulbul speaks the answer. `speech` is separate from
++`provider` on purpose, because it changes where your voice goes: with it your audio is sent to
++Sarvam, and without it — which is what `"provider": "sarvam"` alone has always meant, and still
++means — only the words are. Nothing turns it on for you except asking. Pasting a Sarvam key into
++Setup is asking: the sentence under the key says your voice will leave as audio while the key is
++still in the field, before anything is saved, and there is a switch beside the language to turn it
++off again. It works in front of any chain-lane model, so `"provider": "anthropic"` or a local model
++with `"speech": "sarvam"` is Claude, or Ollama, with Sarvam's ears.
++
++```bash
++saathi sarvam          # is the key accepted, can Bulbul speak, can Saaras hear it, does the model answer
++saathi sarvam --play   # ...and play what Bulbul said
++```
++
++Four lines, one for each thing Saathi asks of Sarvam, each saying what came back or exactly what
++refused. It needs no microphone: what Saaras is asked to hear is what Bulbul has just said.
++
++**This has not been run against a real Sarvam key.** Every request is written, field for field,
++from Sarvam's reference as it stood on 2026-09-30 and tested against the documented responses; what
++is measured against the live service is what can be measured without a key (the paths, the header,
++and the shape of a refusal). `saathi sarvam` is the first thing to run with one.
++
++The languages are the eleven Bulbul speaks: Bengali, English, Gujarati, Hindi, Kannada, Malayalam,
++Marathi, Odia, Punjabi, Tamil and Telugu. Any other language with `speech: sarvam` is refused out
++loud rather than quietly listened to on the Mac. The voice is `shubh`; `"voice": "ishita"` changes
++it. The model is `sarvam-105b`, asked to answer without reasoning first, since a reply is a sentence
++or two; `"model": "sarvam-105b-conversations"` tries the conversational variant. It is one request per
++step, not Sarvam's streaming sockets, so nothing appears while you talk and a reply starts once all
++of it has been synthesised. Looking at the screen still needs an OpenAI or Anthropic key.
++
+ The audio engine and the realtime protocol handling were carried over from OpenClicky rather than
+ rewritten, because they were the parts that had already been paid for: echo cancellation configured
+ so the microphone can stay open while Saathi talks (without silencing the user's music), and a
+@@ -184,7 +241,7 @@ npm install
+ npm run generate        # rewrite the generated contract for all three targets
+ npm run check:contract  # fail if what is checked in is stale (CI runs this on every PR)
+ npm test                # backend             (64 tests)
+-npm run test:mac        # swift test          (about 390, silent: see below)
++npm run test:mac        # swift test          (about 400, silent: see below)
+ npm run test:win        # dotnet test
+ bash scripts/check-parity.sh   # run both clients and diff them
+ ```
+@@ -200,10 +257,11 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
+ 
+ Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
+ 
+-`swift test` is silent and touches no audio hardware by default. The three tests that speak through
+-the real synthesiser or build real `AVAudioEngine`s are opt-in — `SAATHI_AUDIO_TESTS=1 swift test` —
+-because a test run in the background should not take the sound out of whatever else the machine is
+-doing, and with a Bluetooth headset connecting mid-run they crashed inside AVFAudio.
++`swift test` is silent and touches no audio hardware by default. The five tests that speak through
++the real synthesiser, build real `AVAudioEngine`s or play through the real audio output are opt-in —
++`SAATHI_AUDIO_TESTS=1 swift test` — because a test run in the background should not take the sound
++out of whatever else the machine is doing, and with a Bluetooth headset connecting mid-run they
++crashed inside AVFAudio.
+ 
+ Building the macOS client needs Xcode 26 or later: Dictate uses Apple's `SpeechAnalyzer`, which is in
+ the macOS 26 SDK and no earlier one. The app that comes out still runs on macOS 13. CI builds and
+@@ -429,9 +487,13 @@ The skeleton this README was first written around has been built on. What exists
+ - **A macOS app, not only a CLI.** A menu-bar item, an island that hangs from the notch and opens
+   under the pointer (Home, Setup and Agents tabs), an orange pointer buddy, and hold
+   control + option to talk, in any app. `scripts/release.sh` builds, signs and notarizes it.
+-- **Keys in the app.** Paste an OpenAI or Anthropic key in Setup; it is validated, stored in
++- **Keys in the app.** Paste an OpenAI, Sarvam or Anthropic key in Setup; it is validated, stored in
+   `~/.saathi/shell.json` at 0600, and Saathi reconfigures itself without a relaunch. The sentence
+-  under the fields says where your voice will go, and is the same code that decides it.
++  under the fields says where your voice will go, and is the same code that decides it. Where it
++  thinks is a picker once there is more than one place it could.
++- **Sarvam, end to end — on paper.** Saaras for the ears, Sarvam-105B for the thinking, Bulbul for
++  the mouth, in ten Indian languages and English, with `saathi sarvam` to check all three. Written
++  from Sarvam's reference and tested against it; not yet run against a real key, and not yet heard.
+ - **Four actions**, not three: `say`, `show_step`, `open_url`, and `look_at_screen` — one frame of
+   the pointer's display plus a close-up around the pointer, sent to a vision model only when a turn
+   asks about something visible, with what macOS Accessibility says is under the pointer alongside.
+@@ -470,6 +532,14 @@ question:
+   no-op'd. It must land with whatever first writes a real token.
+ - **A doing lane.** Saathi talks, shows steps, opens links and looks. It does not yet do work in
+   other apps; the Agents tab says so rather than showing an empty grid.
++- **Sarvam against a real key**, and then its streaming sockets: words as you say them, a reply
++  that starts before all of it is synthesised, and hands-free on the chain lane. Odia is heard and
++  spoken (`"language": "or"`) but is not in the language picker, because the realtime lane's
++  transcriber does not list it.
++- **Claude as the thinker, tried.** `provider: anthropic` now reaches Anthropic's OpenAI-compatible
++  endpoint — it used to post to a path that is a 404 — but no Anthropic key has been put through it.
++  The same fix is what lets the default `local` mode reach Ollama, which has not been tried on this
++  branch either.
+ - **Billing.** Accounts have a plan label and an allowance, not a price. India is the first market
+   and the payment rail is an open decision.
+ - **The website** (`saathi-site`, a separate repository) needs to say what now exists.
+````
 
 - [ ] **Step 2:** HAND-TEST — a section for Sarvam: `saathi sarvam` first, then the key row, the picker, the switch, a turn in an Indian language, talking over a reply, a look, and the switch from OpenAI without a relaunch.
 
-*(Written once what it describes is built; this plan carries the diff of `docs/HAND-TEST.md` from then on.)*
+````diff
+diff --git a/docs/HAND-TEST.md b/docs/HAND-TEST.md
+index f80ffe2..88817a5 100644
+--- a/docs/HAND-TEST.md
++++ b/docs/HAND-TEST.md
+@@ -80,6 +80,80 @@ like; the blur behind the real window replaces the flat gradient.
+ - [ ] Setup → language Tamil (or Hindi). On the **local** lane, a Tamil reply is read by a Tamil
+       voice — and "I did not catch that", which is written in English, is read by an English one.
+ 
++## 5. Sarvam (branch `sarvam/heard-and-spoken`, 0.9.0)
++
++Written 2026-09-30, again with nobody at the machine, and with one thing more missing than usual:
++**there is no Sarvam key on this Mac**, so nothing in this section has run against the real service
++— not the key check, not a transcript, not a syllable. Get a key at
++[dashboard.sarvam.ai](https://dashboard.sarvam.ai) (it comes with free credits) and start at the top;
++each step only makes sense once the one before it works.
++
++**Before the app, the command.** It needs no microphone and no permission.
++
++```bash
++cd macos/Saathi
++# With the key on the clipboard, so it is never typed into the shell's history:
++printf '{ "sarvamKey": "%s", "language": "ml" }\n' "$(pbpaste)" > /tmp/sarvam-try.json
++SAATHI_CONFIG=/tmp/sarvam-try.json swift run saathi sarvam --play
++rm /tmp/sarvam-try.json
++```
++
++- [ ] `key         accepted`. *If it says "Sarvam answered NNN. That is not about your key", tell
++      Claude the number: the check treats 400 and 422 as "let in", from the documentation, and a real
++      key may answer something else.*
++- [ ] `speech out  … s of audio for "നമസ്കാരം, ഞാൻ Saathi."` and, with `--play`, you hear it, in a
++      voice that sounds like a person. Change `"language"` to `hi`, `ta`, `en`: it follows.
++- [ ] `speech in   heard "…"` with the same sentence, or near it.
++- [ ] `thinking    sarvam-105b said "…"`. *If this one is FAILED with a 400 or 422, the likeliest
++      causes are `reasoning_effort: null` or the tool list; the message will say which field.*
++- [ ] Any FAILED line reads as a sentence, not as JSON.
++
++**Then the app** (`open macos/Saathi/dist/Saathi.app`; quit any running Saathi first).
++
++- [ ] Setup shows three key rows: OpenAI, **Sarvam — Indian languages, heard and spoken**, Anthropic.
++- [ ] Type nonsense into the Sarvam row and press Save: "Sarvam did not accept that key." *(This
++      half is measured: a wrong key gets a 403.)*
++- [ ] Paste the real key. **Before you press Save** the sentence under the keys already reads "If
++      Sarvam accepts this key: I will listen, think and speak through Sarvam, in the language chosen
++      below. Your voice leaves this machine as audio, straight to Sarvam…". *(The same is now true of
++      an OpenAI key: it used to describe the old plan until the instant it was saved.)*
++- [ ] Press Save. The island goes to Home. Back in Setup the sentence has lost its "If", and the
++      Voice rows say `Sarvam · shubh` and `your voice leaves as audio, to Sarvam`.
++- [ ] Under Voice: **Where it thinks** is now a picker (OpenAI, Sarvam, Anthropic, This Mac — whichever
++      have keys), and **Hear and speak through Sarvam** is a switch that is on.
++- [ ] Language → മലയാളം (or whichever you speak). Hold control + option, say something in it, let
++      go. It answers in it, in Bulbul's voice. **There is a pause** of a few seconds: three requests.
++      *The microphone here is a second engine opened after the realtime one was torn down. If the
++      island says "the microphone gave no sound… quit and reopen it", do that once and try again, and
++      tell Claude it happened.*
++- [ ] While it is answering, hold the keys again: it **stops talking at once** and listens.
++- [ ] Hold the keys and say nothing for two seconds: "I did not catch that", in the same voice, in
++      English — and **not** "the microphone gave no sound", which is for an input that is closed.
++- [ ] Pointer on something, "what is this?" (in Malayalam or English): it says "looking" on the
++      island and then names the thing. *Needs an OpenAI or Anthropic key as well; with only a Sarvam
++      key it should say that seeing the screen needs one.*
++- [ ] Language → Français. The note under the keys says Sarvam does not hear or speak French, and
++      holding the keys says why rather than listening.
++- [ ] Turn the switch **off**: the sentence becomes "I will listen on this Mac and think with
++      Sarvam. Your voice stays here…" and the voice is the Mac's again. Turn it back on.
++- [ ] Where it thinks → OpenAI: back to the realtime voice, no relaunch. → Sarvam: back again, and
++      the switch is on again. → This Mac: the switch is **off** — picking This Mac is picking
++      somewhere your voice stays.
++- [ ] Paste an Anthropic key while on Sarvam: it stays on Sarvam, and the note says the Anthropic key
++      looks at the screen.
++- [ ] `~/.saathi/shell.json` has `"sarvamKey"`, `"speech": "sarvam"` when the switch is on, and no
++      `"speech"` when it is off.
++
++**Two checks that make no sound but open the audio output** — run them when nothing else is playing:
++
++```bash
++SAATHI_AUDIO_TESTS=1 swift test --filter PlayerAudioOutputTests
++```
++
++**And one that needs Ollama**, because the default mode changed underneath it: with Ollama running
++and no provider configured, hold the keys and ask something. It should answer. *The chain lane now
++posts to `/v1/chat/completions`; it used to post to a path Ollama does not serve.*
++
+ ## What to tell Claude
+ 
+ Which boxes failed, and for the look: what is wrong with it in your own words — "too big", "the
+````
 
 - [ ] **Step 3: Commit** — "The README and the hand test say what Sarvam now does, and what nobody has yet heard".
 
@@ -7297,7 +8173,422 @@ public struct SarvamSelfTest: Sendable {
 
 ### Task 14: Verify, build, review
 
-- [ ] **Step 1:** `bash <scratchpad>/ci-local.sh` — every job ✓.
+- [ ] **Step 1:** `bash <scratchpad>/ci-local.sh` — every job ✓, the Command Line Tools build the CI runner does included.
 - [ ] **Step 2:** Regenerate this plan's code blocks from the tree and commit it.
 - [ ] **Step 3:** `cd macos/Saathi && scripts/release.sh --no-notarize` (sandbox off) — `dist/Saathi.app` is 0.9.0, Developer ID signed.
 - [ ] **Step 4:** A fresh reviewer reads the branch against the spec.
+
+---
+
+## What building it changed
+
+The plan was written with every file drafted and nothing compiled. It compiled nearly as drafted; these are the places where building it, or writing down how to test it by hand, showed the plan to be wrong. Each was decided at the time, with nobody to ask.
+
+- **Setup.** No separate worktree; work on branch sarvam/heard-and-spoken in the main checkout. The user keeps exactly one Saathi app (macos/Saathi/dist) and the final build must land there; they are away and not using the checkout. *If that was wrong: they return to a checkout on my branch instead of theirs (one `git checkout` to undo).*
+- **Task 5.** DeviceEars does not refuse a language it cannot hear on-device; it settles for the Mac's own recogniser and says so in the status line (the plan's draft refused to start). The spec's decision 9 as amended: refusing would break listen-only first run and anyone answered in a language they do not speak to it; nothing leaves the machine either way. *If that was wrong: a Hindi speaker on a chain lane with on-device speech is still misheard, now with a line saying why.*
+- **Task 5.** The two conductor tests live in their own class (VoiceConductorInterruptionTests) rather than inside VoiceConductorTests. They need a session that notes interruptions and nothing else from that fixture.
+- **Task 5.** Added ScreenSightTests.testAFailedLookIsASentenceForTheModelToRepeat, not in the plan. `ScreenSight.answer` is new production code and had no test of its own.
+- **Task 6.** The conversion test's expectation was wrong, not the converter. The plan asserted 16000±200 samples for a second of audio and got 15738. Measured per call with a throwaway script: AVAudioConverter holds ~260 samples back whenever its input runs dry and releases them on the next call, so nothing is lost between buffers; the shortfall is the end of the turn only (≤18 ms). Test rewritten to pin that (30 buffers, no more than 480 samples short). *If that was wrong: the last few milliseconds of a turn are not sent to Saaras, which is after the speaker has stopped.*
+- **Task 7.** PlayerAudioOutput's AVAudioPlayerDelegate conformance moved to an extension. Declared on the class it made the whole class main-actor-isolated (two compiler warnings: init() and stop() called from nonisolated code); the plan's draft had it on the class.
+- **Task 7.** The plan's test said "OK" with Tamil configured is spoken as Tamil ("too short to tell"); the shared rule (SpeechSettings.spokenLanguage, unchanged) says English, and English is right for Latin letters. Test corrected to pin "OK"→en-IN and "42"→ta-IN; the comment in Speakers.swift that claimed otherwise corrected too.
+- **Task 7.** The sentence this Mac says when Sarvam cannot speak and this Mac cannot read the language is "I could not speak through Sarvam just now." (plan: "I could not reach Sarvam to speak."). The old one was untrue for a refused key or an empty account. *If that was wrong: wording.*
+- **Task 7.** Added PlayerAudioOutputTests (two opt-in behind SAATHI_AUDIO_TESTS=1, not run; one that needs no hardware) and closed a race where a cancellation landing before the player existed left a clip playing. The real player is 60 lines that no test reached.
+- **Task 8/9.** Tasks 8 and 9 are one commit. The parity check fails on any commit where only one client has the new wording.
+- **Task 8/9.** For local + speech:sarvam the provider report's privacy line is "the thinking stays on this machine; your voice leaves it, to Sarvam", not the plan's bare "leaves this machine". Printed under the local row's summary ("nothing leaves the device") the bare line read as a contradiction. *If that was wrong: one more distinct sentence for both clients to keep identical. Spec to be corrected in Task 13.*
+- **Task 10.** The invariant sweep uses two field values (empty, a pasted key with whitespace round it) not three. A whitespace-only field is pinned by testAFieldOfWhitespaceIsNotATypedKey; 41k cases in 0.9 s instead of 139k in 2.9 s. *If that was wrong: a bug that only appears for a whitespace-only field in combination is not swept.*
+- **Task 11.** No new failing test preceded this change. It is four edits inside AppController, which cannot be constructed in a test without putting a status item in the real menu bar and building the panels. The behaviour is pinned one level down (CompanionVoiceTests); the wiring is for the hand test. *If that was wrong: a wiring mistake (the wrong configuration applied to the voice) would only be found by ear.*
+- **Task 12.** The CLI's speaker is made on first use (an enum with static lets) rather than at the top of main.swift as the plan had it. Every command, including `provider` and `actions`, would otherwise load the configuration and enumerate the system's voices before doing anything.
+- **Task 13.** Writing the hand test found two behaviours the plan had wrong, and both were fixed in code (own commits, RED→GREEN) rather than documented as they were: (1) SarvamEars treated a quiet room as a dead microphone. A silent turn sent the person to Sound settings; now nothing-at-all (<0.0001) is the microphone, anything under a whisper is "I did not catch that" (testAQuietRoomIsNothingSaidNotABrokenMicrophone). (2) the sentence under the keys changed only in the instant a key was saved, so the docs' claim that it says where the voice goes "before anything is saved" was false; it now describes what Save is about to do as an "if" (setupPreview, SetupPreviewTests, and the sweep). (2) also changes what an OpenAI key being typed shows. *If that was wrong: the 0.0001 line is a guess at where a closed input sits (exact zeros expected), never measured; and "If OpenAI accepts this key:" is new wording on a flow the user hand-tested on 09-27.*
+
+Two of them were found late enough to be commits of their own, after the task whose code they change.
+
+**A quiet room is nothing said, not a broken microphone** — found writing the hand test, at the line that says what holding the keys in silence should do:
+
+```diff
+commit 1d81a11
+
+A quiet room is nothing said, not a broken microphone
+
+Sarvam's ears refused any turn quieter than a whisper with "the microphone gave
+no sound. Check the input in Sound settings — and if Saathi has only just
+switched to Sarvam, quit and reopen it." That is the right thing to say to a
+closed input. It is the wrong thing to say to someone who held the keys and
+then said nothing, which is what a quiet turn usually is: their microphone is
+fine, and every other lane tells them "I did not catch that".
+
+Two lines are drawn now. Below a ten-thousandth of full scale the input gave
+nothing at all — a room has a noise floor, a closed or muted input does not —
+and that is the sentence about the microphone. Between that and a whisper
+nobody spoke: nothing is sent to Saaras, and the session says it did not catch
+that, as it does everywhere else.
+
+Found while writing the hand test, at the line that said what holding the keys
+in silence should do.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+---
+ macos/Saathi/Sources/SaathiKit/SarvamEars.swift    | 14 +++++++++----
+ .../Tests/SaathiKitTests/SarvamEarsTests.swift     | 24 ++++++++++++++++------
+ 2 files changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/macos/Saathi/Sources/SaathiKit/SarvamEars.swift b/macos/Saathi/Sources/SaathiKit/SarvamEars.swift
+index b8660bd..3febf6f 100644
+--- a/macos/Saathi/Sources/SaathiKit/SarvamEars.swift
++++ b/macos/Saathi/Sources/SaathiKit/SarvamEars.swift
+@@ -149,8 +149,11 @@ public final class SarvamEars: Ears, @unchecked Sendable {
+     public static let sampleRate: Double = 16_000
+     /// Under this a turn was the keys being tapped, not a sentence.
+     static let shortestTurn: TimeInterval = 0.3
+-    /// Under this the microphone gave nothing: the same line Dictate draws.
++    /// Under this nobody spoke: the same line Dictate draws. A quiet room sits well below it.
+     static let silence: Float = 0.02
++    /// Under this the microphone gave nothing at all — not a quiet room, which has a noise floor,
++    /// but an input that is closed, muted or delivering zeros.
++    static let nothingAtAll: Float = 0.0001
+     /// Saaras takes thirty seconds a request; a longer turn goes up in pieces this long.
+     static let longestPiece: TimeInterval = 28
+ 
+@@ -177,13 +180,16 @@ public final class SarvamEars: Ears, @unchecked Sendable {
+     public func finish() async throws -> String {
+         let turn = recorder.stop()
+         guard turn.seconds >= Self.shortestTurn else { return "" }
+-        // Not sent: Saaras would be asked to transcribe silence, and the person would be told it
+-        // did not catch that, when the truth is that nothing reached it.
+-        guard turn.peak >= Self.silence else {
++        // A microphone that gave nothing at all is not a turn in which nothing was said, and
++        // "I did not catch that" would send the person to say it again into a closed input.
++        guard turn.peak >= Self.nothingAtAll else {
+             throw VoiceError.audio(
+                 "the microphone gave no sound. Check the input in Sound settings — and if Saathi has "
+                 + "only just switched to Sarvam, quit and reopen it.")
+         }
++        // Nobody spoke. That is for the session to say, as it does on every lane; the sound of a
++        // quiet room is not sent to Sarvam to be told so.
++        guard turn.peak >= Self.silence else { return "" }
+ 
+         var heard: [String] = []
+         for piece in Self.pieces(of: turn.pcm16) {
+diff --git a/macos/Saathi/Tests/SaathiKitTests/SarvamEarsTests.swift b/macos/Saathi/Tests/SaathiKitTests/SarvamEarsTests.swift
+index 4e80633..e21e8c5 100644
+--- a/macos/Saathi/Tests/SaathiKitTests/SarvamEarsTests.swift
++++ b/macos/Saathi/Tests/SaathiKitTests/SarvamEarsTests.swift
+@@ -84,16 +84,16 @@ final class SarvamEarsTests: XCTestCase {
+         XCTAssertTrue(StubHTTP.seen.isEmpty)
+     }
+ 
+-    /// A microphone that gave nothing is a different problem from speech that was not understood,
+-    /// and saying which is the difference between trying again and looking at Sound settings.
+-    /// Saaras is not asked to transcribe silence, and the learner's silence is not sent to it.
++    /// A microphone that gave nothing at all is a different problem from speech that was not
++    /// understood, and saying which is the difference between trying again and looking at Sound
++    /// settings. Saaras is not asked to transcribe it.
+     func testAMicrophoneThatGaveNothingSaysSoInsteadOfAskingSaaras() async throws {
+-        let silent = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0.004))
+-        let ears = makeEars(silent, .json(["transcript": "never asked"]))
++        let dead = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0))
++        let ears = makeEars(dead, .json(["transcript": "never asked"]))
+         try await ears.begin(EarsFeedback())
+         do {
+             _ = try await ears.finish()
+-            XCTFail("two seconds of nothing is not a turn")
++            XCTFail("two seconds of nothing at all is not a turn")
+         } catch {
+             XCTAssertTrue(error.localizedDescription.contains("microphone gave no sound"), error.localizedDescription)
+             XCTAssertTrue(error.localizedDescription.contains("quit and reopen"), error.localizedDescription)
+@@ -101,6 +101,18 @@ final class SarvamEarsTests: XCTestCase {
+         XCTAssertTrue(StubHTTP.seen.isEmpty)
+     }
+ 
++    /// Someone who held the keys and then said nothing has a working microphone in a quiet room.
++    /// They are told Saathi did not catch that, like on every other lane — not sent to their Sound
++    /// settings — and the sound of their room is not sent to Sarvam.
++    func testAQuietRoomIsNothingSaidNotABrokenMicrophone() async throws {
++        let quiet = FakeRecorder(recording: FakeRecorder.turn(seconds: 2, peak: 0.004))
++        let ears = makeEars(quiet, .json(["transcript": "never asked"]))
++        try await ears.begin(EarsFeedback())
++        let heard = try await ears.finish()
++        XCTAssertEqual(heard, "")
++        XCTAssertTrue(StubHTTP.seen.isEmpty)
++    }
++
+     /// Saaras takes thirty seconds a request. A longer turn goes up in pieces rather than being
+     /// refused whole.
+     func testALongTurnGoesUpInPiecesAndComesBackAsOneSentence() async throws {
+```
+
+**The sentence under the keys says what Save is about to do, before it does it** — found writing the README, at the sentence that claimed it already did:
+
+```diff
+commit 8c317f9
+
+The sentence under the keys says what Save is about to do, before it does it
+
+Save checks whatever was typed and, if the vendor accepts it, saves it in the
+same breath. The sentence under the fields only counted keys that already had
+a verdict — so while a key was being typed it went on describing the old plan,
+changed in the instant the check landed, and the island had moved to Home
+before anyone could have read it. A pasted OpenAI key has always worked this
+way. It is the wrong way round for the one sentence that says where a voice is
+about to go, and a Sarvam key now sends a voice somewhere new.
+
+The sentence describes the plan with every typed key taken as accepted, which
+is exactly what Save produces once its checks land, and says that it is
+assuming so:
+
+    If Sarvam accepts this key: I will listen, think and speak through
+    Sarvam, in the language chosen below. Your voice leaves this machine as
+    audio, straight to Sarvam — Saathi's servers are not in the conversation.
+
+A key Save would check again — one still being typed, one being checked, one
+refused a moment ago — keeps the "if". One that has been accepted does not.
+With nothing typed the sentence is the plan as it stands, as before.
+
+The sweep that holds the sentence to the save now also holds this: for every
+combination of fields, verdicts and starting configuration, what is shown
+while keys are being typed is the plan Save produces once they are accepted.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+---
+ .../Sources/SaathiShell/AppController+Setup.swift  | 16 ++--
+ .../SaathiShell/AppController+Wording.swift        | 32 ++++++++
+ .../Tests/SaathiShellTests/IslandModelTests.swift  | 94 ++++++++++++++++++++++
+ .../IslandSetupSnapshotTests.swift                 | 15 +++-
+ 4 files changed, 147 insertions(+), 10 deletions(-)
+
+diff --git a/macos/Saathi/Sources/SaathiShell/AppController+Setup.swift b/macos/Saathi/Sources/SaathiShell/AppController+Setup.swift
+index abf96b1..04df524 100644
+--- a/macos/Saathi/Sources/SaathiShell/AppController+Setup.swift
++++ b/macos/Saathi/Sources/SaathiShell/AppController+Setup.swift
+@@ -10,7 +10,8 @@
+ //  `SetupPlan.vendors`, and `wireNotch` points the island at them.
+ //
+ //  Nothing here decides anything. `setupPlan` — in the wording file, pure and tested — says what a
+-//  Save would do, and the sentence under the fields is drawn from the same call.
++//  Save does, and `setupPreview`, beside it, is the sentence under the fields: the same plan, said
++//  before the keys it depends on have been accepted.
+ //
+ 
+ import AppKit
+@@ -154,17 +155,18 @@ extension AppController {
+         return false
+     }
+ 
+-    /// The plan changes as each check lands, so the sentence under the fields follows it rather
+-    /// than appearing only after a save. Someone should be able to see what they are about to get.
++    /// The sentence under the fields follows every keystroke, every verdict and every change to
++    /// the file, rather than appearing only after a save. Someone should be able to see what they
++    /// are about to get.
+     ///
+     /// Drawn from `typedKeyFields` — which fields have text right now — the verdicts, and the
+-    /// file: the three things Save decides from.
++    /// file: the three things Save decides from. See `setupPreview`.
+     func refreshPlanExplanation() {
+         guard let notch else { return }
+-        let plan = Self.setupPlan(
++        let preview = Self.setupPreview(
+             typed: typedKeyFields, states: notch.model.keyStates, configuration: configuration)
+-        notch.model.planExplanation = plan.explanation
+-        notch.model.keysNote = Self.keysNote(for: plan, language: configuration.resolvedLanguage)
++        notch.model.planExplanation = preview.sentence
++        notch.model.keysNote = Self.keysNote(for: preview.plan, language: configuration.resolvedLanguage)
+     }
+ 
+     private func write(_ updated: SaathiConfiguration, orSay failure: String) -> Bool {
+diff --git a/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift b/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift
+index e1981b4..617068b 100644
+--- a/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift
++++ b/macos/Saathi/Sources/SaathiShell/AppController+Wording.swift
+@@ -263,6 +263,38 @@ extension AppController {
+             current: providerInUse(configuration), speech: configuration.resolvedSpeech)
+     }
+ 
++    /// The sentence under the key fields, and the plan it describes.
++    struct SetupPreview: Equatable {
++        let plan: SetupPlan
++        let sentence: String
++    }
++
++    /// What Save would do, for the sentence under the fields.
++    ///
++    /// Save checks every typed key and saves in the same breath if they were all accepted, so a
++    /// key has been saved by the time it has a verdict. What is described here is therefore the
++    /// plan with every typed key taken as accepted — which is `setupPlan` once the checks have
++    /// landed — and while any of them has not been accepted yet the sentence is an "if". Someone
++    /// pasting a key reads where their voice would go before they press Save, not in the instant
++    /// after it has gone there.
++    static func setupPreview(
++        typed: Set<ProviderKind>, states: KeyStates, configuration: SaathiConfiguration
++    ) -> SetupPreview {
++        var accepted = states
++        var awaited: [String] = []
++        for kind in SetupPlan.vendors where typed.contains(kind) && states[kind] != .checked(.valid) {
++            accepted[kind] = .checked(.valid)
++            awaited.append(vendorName(kind))
++        }
++        let plan = setupPlan(typed: typed, states: accepted, configuration: configuration)
++        guard let last = awaited.last else { return SetupPreview(plan: plan, sentence: plan.explanation) }
++
++        let condition = awaited.count == 1
++            ? "If \(last) accepts this key: "
++            : "If \(awaited.dropLast().joined(separator: ", ")) and \(last) accept these keys: "
++        return SetupPreview(plan: plan, sentence: condition + plan.explanation)
++    }
++
+     /// `setupPlan`, and the keys a Save would write with it: the field's text where there is any,
+     /// the key on disk otherwise.
+     static func setupDecision(
+diff --git a/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift b/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift
+index 8cae458..b389726 100644
+--- a/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift
++++ b/macos/Saathi/Tests/SaathiShellTests/IslandModelTests.swift
+@@ -232,6 +232,20 @@ final class SetupDecisionTests: XCTestCase {
+                                         && sentence.contains("straight to OpenAI") == (written.provider == .openai)
+                                         && (!toSarvam || written.credential(for: .sarvam) != nil)
+                                         && (written.provider != .openai || written.credential(for: .openai) != nil)
++                                    // And the sentence on show while keys are still being
++                                    // typed is about the plan Save produces once they are accepted.
++                                    let typed = AppController.typed(
++                                        in: VendorKeys(openAI: openAIField, sarvam: sarvamField, anthropic: anthropicField))
++                                    var accepted = KeyStates(openAI: openAI, sarvam: sarvam, anthropic: anthropic)
++                                    for kind in typed { accepted[kind] = .checked(.valid) }
++                                    let preview = AppController.setupPreview(
++                                        typed: typed, states: KeyStates(openAI: openAI, sarvam: sarvam, anthropic: anthropic),
++                                        configuration: configuration)
++                                    let onceAccepted = AppController.setupPlan(
++                                        typed: typed, states: accepted, configuration: configuration)
++                                    guard preview.plan == onceAccepted, preview.sentence.hasSuffix(onceAccepted.explanation) else {
++                                        return XCTFail("the preview is not what Save would do: \(preview.sentence) vs \(onceAccepted.explanation)")
++                                    }
+                                     guard holds else {
+                                         return XCTFail("""
+                                             the sentence and the save disagree.
+@@ -346,6 +360,86 @@ final class SetupDecisionTests: XCTestCase {
+     }
+ }
+ 
++// MARK: - What is shown while a key is being typed
++
++/// Save checks whatever was typed and saves it in the same breath, so by the time a key has a
++/// verdict it has been saved. The sentence under the fields therefore describes what Save is about
++/// to do, as an "if" — someone pasting a key reads where their voice would go before they press
++/// Save, not in the instant after.
++@MainActor
++final class SetupPreviewTests: XCTestCase {
++
++    private let onOpenAI = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
++    private var seeded: KeyStates { AppController.seededKeyStates(for: onOpenAI) }
++
++    func testAKeyBeingTypedIsShownAsWhatSaveWouldDoIfItIsAccepted() {
++        var states = seeded
++        states.sarvam = .editing
++        let preview = AppController.setupPreview(typed: [.sarvam], states: states, configuration: onOpenAI)
++        XCTAssertEqual(preview.plan.provider, .sarvam)
++        XCTAssertEqual(preview.plan.speech, .sarvam)
++        XCTAssertEqual(
++            preview.sentence,
++            "If Sarvam accepts this key: I will listen, think and speak through Sarvam, in the language "
++                + "chosen below. Your voice leaves this machine as audio, straight to Sarvam — Saathi's "
++                + "servers are not in the conversation.")
++    }
++
++    /// A key Save would check again is still an "if", whatever was said about it last time.
++    func testAKeyThatWasRefusedOrIsBeingCheckedIsStillAnIf() {
++        for state in [KeyFieldState.checking, .checked(.rejected("no")), .checked(.unreachable("offline")), .empty] {
++            var states = seeded
++            states.sarvam = state
++            let preview = AppController.setupPreview(typed: [.sarvam], states: states, configuration: onOpenAI)
++            XCTAssertTrue(preview.sentence.hasPrefix("If Sarvam accepts this key: "), "\(state): \(preview.sentence)")
++        }
++    }
++
++    func testWithNothingBeingTypedTheSentenceIsThePlanAsItStands() {
++        let preview = AppController.setupPreview(typed: [], states: seeded, configuration: onOpenAI)
++        XCTAssertEqual(preview.plan.provider, .openai)
++        XCTAssertEqual(preview.sentence, preview.plan.explanation)
++        XCTAssertFalse(preview.sentence.hasPrefix("If"))
++    }
++
++    /// Once the vendor has accepted it there is no "if" left — this is the sentence on show in the
++    /// moment between the check landing and the save.
++    func testAKeyAlreadyAcceptedIsNotAnIf() {
++        var states = seeded
++        states.sarvam = .checked(.valid)
++        let preview = AppController.setupPreview(typed: [.sarvam], states: states, configuration: onOpenAI)
++        XCTAssertEqual(preview.plan.provider, .sarvam)
++        XCTAssertEqual(preview.sentence, preview.plan.explanation)
++    }
++
++    func testSeveralKeysBeingTypedAreNamedTogether() {
++        let fresh = SaathiConfiguration()
++        let two = AppController.setupPreview(
++            typed: [.openai, .anthropic], states: KeyStates(openAI: .editing, anthropic: .editing), configuration: fresh)
++        XCTAssertTrue(two.sentence.hasPrefix("If OpenAI and Anthropic accept these keys: I will talk with you through OpenAI"), two.sentence)
++
++        let three = AppController.setupPreview(
++            typed: [.openai, .sarvam, .anthropic],
++            states: KeyStates(openAI: .editing, sarvam: .checked(.valid), anthropic: .editing), configuration: fresh)
++        XCTAssertTrue(three.sentence.hasPrefix("If OpenAI and Anthropic accept these keys: "), "only the ones still to be accepted: \(three.sentence)")
++
++        let all = AppController.setupPreview(
++            typed: [.openai, .sarvam, .anthropic], states: KeyStates(), configuration: fresh)
++        XCTAssertTrue(all.sentence.hasPrefix("If OpenAI, Sarvam and Anthropic accept these keys: "), all.sentence)
++    }
++
++    /// An Anthropic key on its own changes nothing about where the conversation goes, and the
++    /// sentence says so by not changing — apart from the "if".
++    func testAnAnthropicKeyBeingTypedLeavesTheConversationWhereItIs() {
++        var states = seeded
++        states.anthropic = .editing
++        let preview = AppController.setupPreview(typed: [.anthropic], states: states, configuration: onOpenAI)
++        XCTAssertEqual(preview.plan.provider, .openai)
++        XCTAssertEqual(preview.plan.eye, .anthropic)
++        XCTAssertTrue(preview.sentence.hasPrefix("If Anthropic accepts this key: I will talk with you through OpenAI"), preview.sentence)
++    }
++}
++
+ // MARK: - What Setup opens showing
+ 
+ @MainActor
+diff --git a/macos/Saathi/Tests/SaathiShellTests/IslandSetupSnapshotTests.swift b/macos/Saathi/Tests/SaathiShellTests/IslandSetupSnapshotTests.swift
+index 25de282..71772be 100644
+--- a/macos/Saathi/Tests/SaathiShellTests/IslandSetupSnapshotTests.swift
++++ b/macos/Saathi/Tests/SaathiShellTests/IslandSetupSnapshotTests.swift
+@@ -25,6 +25,9 @@ final class IslandSetupSnapshotTests: XCTestCase {
+     private struct Shot {
+         let name: String
+         let configuration: SaathiConfiguration
++        /// The vendors whose key is "being typed": the sentence is drawn as it would be then. The
++        /// fields themselves are drawn empty — their text is the view's own, and is never a test's.
++        var typing: Set<ProviderKind> = []
+     }
+ 
+     func testDrawTheSetupTab() async throws {
+@@ -50,6 +53,8 @@ final class IslandSetupSnapshotTests: XCTestCase {
+                 provider: .sarvam, apiKey: sarvam, language: "hi")),
+             Shot(name: "setup-6-sarvam-in-french", configuration: SaathiConfiguration(
+                 provider: .sarvam, sarvamKey: sarvam, speech: .sarvam, language: "fr")),
++            Shot(name: "setup-7-a-sarvam-key-being-typed", configuration: SaathiConfiguration(
++                provider: .openai, openaiKey: openAI), typing: [.sarvam]),
+         ]
+ 
+         let size = CGSize(width: NotchPanel.openWidth, height: 1240)
+@@ -58,9 +63,13 @@ final class IslandSetupSnapshotTests: XCTestCase {
+             model.tab = .setup
+             model.keyStates = AppController.seededKeyStates(for: shot.configuration)
+             AppController.describe(shot.configuration, on: model)
+-            let plan = AppController.setupPlan(typed: [], states: model.keyStates, configuration: shot.configuration)
+-            model.planExplanation = plan.explanation
+-            model.keysNote = AppController.keysNote(for: plan, language: shot.configuration.resolvedLanguage)
++            var states = model.keyStates
++            for kind in shot.typing { states[kind] = .editing }
++            model.keyStates = states
++            let preview = AppController.setupPreview(
++                typed: shot.typing, states: model.keyStates, configuration: shot.configuration)
++            model.planExplanation = preview.sentence
++            model.keysNote = AppController.keysNote(for: preview.plan, language: shot.configuration.resolvedLanguage)
+             model.permissions = Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, PermissionStatus.granted) })
+             model.lastYouSaid = "ഇത് എന്താണ്?"
+             model.lastSaathiSaid = "ഇത് ഒരു സ്പ്രെഡ്ഷീറ്റ് ആണ്."
+```
