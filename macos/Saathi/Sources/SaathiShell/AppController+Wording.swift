@@ -2,7 +2,7 @@
 //  AppController+Wording.swift
 //  SaathiShell
 //
-//  What the island and the log say about a configuration, an action or a pair of key fields.
+//  What the island and the log say about a configuration, an action or the three key fields.
 //
 //  Static and pure so the wording can be tested without a window, a session or a key. These are
 //  the sentences that tell someone where their voice goes, which makes them worth pinning down —
@@ -40,6 +40,37 @@ extension AppController {
 
     static func providerTitle(for configuration: SaathiConfiguration) -> String {
         "\(configuration.resolvedProvider.rawValue) · \(configuration.resolvedModel)"
+    }
+
+    /// Everything the island says about a configuration, written onto its model: where it thinks,
+    /// whose voice answers, what leaves the machine, and what the picker and the switch can offer.
+    /// Static, so the Setup tab can be drawn for a configuration with no app behind it.
+    static func describe(_ configuration: SaathiConfiguration, on model: IslandModel) {
+        model.providerTitle = providerTitle(for: configuration)
+        model.privacyLine = privacyLine(for: configuration)
+        model.voiceTitle = voiceTitle(for: configuration)
+        model.laneTitle = configuration.providerRow.voice == .realtime
+            ? "one connection"
+            : "three steps"
+        model.language = configuration.resolvedLanguage
+
+        // The picker and the switch under Voice: where it thinks and where it could, and whether
+        // Sarvam is — or could be — its ears and mouth.
+        model.provider = configuration.resolvedProvider
+        model.providerChoices = providerChoices(for: configuration)
+        model.sarvamSpeechOn = SarvamSpeech.isOn(configuration)
+        model.sarvamSpeechAvailable = sarvamSpeechAvailable(for: configuration)
+
+        // The status pill in the menu-bar band, and the Backend rows on Setup. Two different
+        // questions: the pill says where Saathi is connected on the lane in use, the rows say
+        // whether the hosted backend is set up — which off the hosted lane it need not be.
+        let pill = connectionPill(for: configuration)
+        model.connectionTitle = pill.title
+        model.isConnectionConfigured = pill.isConfigured
+        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        model.usesBackend = configuration.providerRow.requiresToken
+        model.isBackendConfigured = !token.isEmpty
+        model.backendTitle = backendTitle(for: configuration)
     }
 
     /// What the status pill in the band says, and whether it reads as connected.
@@ -88,16 +119,55 @@ extension AppController {
     static func privacyLine(for configuration: SaathiConfiguration) -> String {
         let row = configuration.providerRow
         if row.voice == .realtime { return "your voice leaves as audio" }
+        // Before the provider's own line: with Sarvam's ears the audio goes whoever does the
+        // thinking, a model on this Mac included.
+        if SarvamSpeech.isOn(configuration) { return "your voice leaves as audio, to Sarvam" }
         return row.sendsDataOffMachine ? "only the transcript is sent" : "stays on this machine"
     }
 
-    /// Says out loud that a key was saved and is not being used. Empty when there is nothing to
-    /// confess — a panel that quietly banks an Anthropic key lets someone believe Claude is
-    /// answering them.
-    static func unusedKeyNote(for plan: SetupPlan) -> String {
-        guard !plan.storedButUnused.isEmpty else { return "" }
-        let names = plan.storedButUnused.map { $0.rawValue.capitalized }.joined(separator: " and ")
-        return "\(names) key saved. Nothing uses it yet."
+    /// Whose voice answers: the realtime voice by name, Sarvam's speaker by name, or this Mac's.
+    static func voiceTitle(for configuration: SaathiConfiguration) -> String {
+        if configuration.providerRow.voice == .realtime {
+            return configuration.resolvedVoice.isEmpty ? "—" : configuration.resolvedVoice
+        }
+        if SarvamSpeech.isOn(configuration) { return "Sarvam · \(SarvamSpeech.speaker(named: configuration.voice))" }
+        return "this Mac's"
+    }
+
+    /// A provider as a person would name it.
+    static func vendorName(_ kind: ProviderKind) -> String {
+        switch kind {
+        case .openai: return "OpenAI"
+        case .sarvam: return "Sarvam"
+        case .anthropic: return "Anthropic"
+        case .local: return "This Mac"
+        case .hosted: return "Saathi's service"
+        }
+    }
+
+    /// What the stored keys are for, and what is in the way of the plan — under the sentence, in a
+    /// smaller voice. Empty when there is nothing to add.
+    ///
+    /// It used to say "Anthropic key saved. Nothing uses it yet." about a key `ScreenSight` has
+    /// preferred since the day it was written.
+    static func keysNote(for plan: SetupPlan, language: String) -> String {
+        var sentences: [String] = []
+        if plan.speech == .sarvam, SarvamLanguage.code(for: language) == nil {
+            // Said before it is saved: the session would refuse to start, and this is why.
+            sentences.append(
+                "Sarvam does not hear or speak \(SarvamLanguage.name(of: language)). "
+                + "Choose another language under Voice first.")
+        }
+        if let eye = plan.eye, eye != plan.provider {
+            sentences.append("The \(vendorName(eye)) key looks at the screen when you ask about something on it.")
+        } else if plan.eye == nil, !plan.stored.isEmpty {
+            sentences.append("Nothing here can look at the screen: that takes an OpenAI or an Anthropic key.")
+        }
+        for unused in plan.storedButUnused {
+            let name = vendorName(unused)
+            sentences.append("The \(name) key is saved and not in use. Choose \(name) under Where it thinks to use it.")
+        }
+        return sentences.joined(separator: " ")
     }
 
     /// Which face the island opens on. Derived from the configuration rather than from a
@@ -123,45 +193,44 @@ extension AppController {
     /// is about nothing, and the key that stands in is the one on disk, with the verdict the disk
     /// earns. Without this a new key checked, then lost to a collapse, left "works" beside an empty
     /// field, and Save wrote the old, dead key back under it.
-    static func verdict(_ state: KeyFieldState, forField field: String, seeded: KeyFieldState) -> KeyFieldState {
-        guard field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return state }
+    static func verdict(_ state: KeyFieldState, isTyped: Bool, seeded: KeyFieldState) -> KeyFieldState {
+        guard !isTyped else { return state }
         switch state {
         case .saved, .empty: return state
         case .editing, .checking, .checked: return seeded
         }
     }
 
+    /// The vendors whose field has something in it. Which, not what: a key being typed stays in
+    /// the view, and the plan only ever needs to know that one is there.
+    static func typed(in fields: VendorKeys) -> Set<ProviderKind> {
+        Set(SetupPlan.vendors.filter { !fields[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+
     /// The typed keys Save has to check before it can save them: text in the field and no verdict
     /// of "accepted" behind it. A check already in flight is left to land on its own.
-    static func keysNeedingCheck(
-        openAIField: String, anthropicField: String,
-        openAIState: KeyFieldState, anthropicState: KeyFieldState
-    ) -> [ProviderKind] {
-        func needs(_ field: String, _ state: KeyFieldState) -> Bool {
-            guard !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-            switch state {
+    static func keysNeedingCheck(fields: VendorKeys, states: KeyStates) -> [ProviderKind] {
+        let withText = typed(in: fields)
+        return SetupPlan.vendors.filter { kind in
+            guard withText.contains(kind) else { return false }
+            switch states[kind] {
             case .checked(.valid), .checking: return false
             default: return true
             }
         }
-        var kinds: [ProviderKind] = []
-        if needs(openAIField, openAIState) { kinds.append(.openai) }
-        if needs(anthropicField, anthropicState) { kinds.append(.anthropic) }
-        return kinds
     }
 
-    /// Whether a key counts as usable for `SetupPlan`: a verdict that says so, *and* an effective
-    /// key actually behind it. A `.saved` or `.checked(.valid)` verdict with no effective key
-    /// (nothing on disk, an empty field) must not count.
-    static func isUsable(_ state: KeyFieldState, effectiveKey: String) -> Bool {
-        state.isValid && !effectiveKey.isEmpty
+    /// Whether a key counts as usable for `SetupPlan`: a verdict that says so, *and* a key actually
+    /// behind it. A `.saved` or `.checked(.valid)` verdict with no key (nothing on disk, an empty
+    /// field) must not count.
+    static func isUsable(_ state: KeyFieldState, hasKey: Bool) -> Bool {
+        state.isValid && hasKey
     }
 
-    /// What a Save would do: the plan, and the two keys it would be applied with.
+    /// What a Save would do: the plan, and the keys it would be applied with.
     struct SetupDecision: Equatable {
         let plan: SetupPlan
-        let openAIKey: String
-        let anthropicKey: String
+        let keys: VendorKeys
     }
 
     /// The one place the Setup tab decides anything.
@@ -175,31 +244,46 @@ extension AppController {
     /// not just changed to `""` and fall back to `configuration.openaiKey`/`anthropicKey`, so on a
     /// fresh install checking a second key judged the first one against an empty string, flipped the
     /// plan to Anthropic and promised "your voice stays here" — and then Save, which saw both real
-    /// fields, streamed audio to OpenAI. So both callers pass *both* live field values through here
-    /// and read the same answer. The stored fallback is `credential(for:)`, not the vendor field, so
-    /// a legacy shared `apiKey` counts here exactly as it counts everywhere else that asks for a
-    /// key; reading the vendor fields directly made Save see no key at all on a legacy config and
-    /// demote a working install to `.local`.
-    static func setupDecision(
-        openAIField: String,
-        anthropicField: String,
-        openAIState: KeyFieldState,
-        anthropicState: KeyFieldState,
-        configuration: SaathiConfiguration
-    ) -> SetupDecision {
-        let openAI = effectiveKey(field: openAIField, stored: configuration.credential(for: .openai))
-        let anthropic = effectiveKey(
-            field: anthropicField, stored: configuration.credential(for: .anthropic))
+    /// fields, streamed audio to OpenAI. So the sentence and Save both come through here, with the
+    /// same three inputs: which fields have text, every verdict, and the file. The stored fallback
+    /// is `credential(for:)`, not the vendor field, so a legacy shared `apiKey` counts here exactly
+    /// as it counts everywhere else that asks for a key; reading the vendor fields directly made
+    /// Save see no key at all on a legacy config and demote a working install to `.local`.
+    static func setupPlan(
+        typed: Set<ProviderKind>, states: KeyStates, configuration: SaathiConfiguration
+    ) -> SetupPlan {
         let seeded = seededKeyStates(for: configuration)
+        let valid = SetupPlan.vendors.filter { kind in
+            isUsable(
+                verdict(states[kind], isTyped: typed.contains(kind), seeded: seeded[kind]),
+                hasKey: typed.contains(kind) || configuration.credential(for: kind) != nil)
+        }
+        return SetupPlan.make(
+            valid: Set(valid), typed: typed,
+            current: providerInUse(configuration), speech: configuration.resolvedSpeech)
+    }
+
+    /// `setupPlan`, and the keys a Save would write with it: the field's text where there is any,
+    /// the key on disk otherwise.
+    static func setupDecision(
+        fields: VendorKeys, states: KeyStates, configuration: SaathiConfiguration
+    ) -> SetupDecision {
+        var keys = VendorKeys()
+        for kind in SetupPlan.vendors {
+            keys[kind] = effectiveKey(field: fields[kind], stored: configuration.credential(for: kind))
+        }
         return SetupDecision(
-            plan: SetupPlan.make(
-                openAIKeyValid: isUsable(
-                    verdict(openAIState, forField: openAIField, seeded: seeded.openAI), effectiveKey: openAI),
-                anthropicKeyValid: isUsable(
-                    verdict(anthropicState, forField: anthropicField, seeded: seeded.anthropic),
-                    effectiveKey: anthropic)),
-            openAIKey: openAI,
-            anthropicKey: anthropic)
+            plan: setupPlan(typed: typed(in: fields), states: states, configuration: configuration),
+            keys: keys)
+    }
+
+    /// The provider the file names, for `SetupPlan` to stay on — nil when it names none, or names
+    /// the hosted service with no token to use it with.
+    static func providerInUse(_ configuration: SaathiConfiguration) -> ProviderKind? {
+        guard let provider = configuration.provider else { return nil }
+        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if provider == .hosted, token.isEmpty { return nil }
+        return provider
     }
 
     /// The verdicts Setup opens with, read from what is on disk so a stored key counts before
@@ -207,13 +291,12 @@ extension AppController {
     ///
     /// A vendor field seeds its own vendor and nothing else. The legacy shared `apiKey` seeds only
     /// the vendor the config actually names as its provider: it is one key that could belong to
-    /// either vendor, and `credential(for:)` hands it to both, so seeding both would have the panel
-    /// assert an Anthropic key exists on a config that never mentioned Anthropic — showing that key
-    /// masked under Anthropic, and lighting up Save with two empty fields. A config with a legacy
-    /// key and no provider named says nothing about whose key it is, so it seeds neither.
-    static func seededKeyStates(
-        for configuration: SaathiConfiguration
-    ) -> (openAI: KeyFieldState, anthropic: KeyFieldState) {
+    /// any vendor, and `credential(for:)` hands it to all of them, so seeding them all would have
+    /// the panel assert an Anthropic key exists on a config that never mentioned Anthropic —
+    /// showing that key masked under Anthropic, and lighting up Save with every field empty. A
+    /// config with a legacy key and no provider named says nothing about whose key it is, so it
+    /// seeds nothing.
+    static func seededKeyStates(for configuration: SaathiConfiguration) -> KeyStates {
         func seed(_ kind: ProviderKind, vendorKey: String?) -> KeyFieldState {
             let vendor = vendorKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !vendor.isEmpty { return .saved(masked: IslandModel.masked(vendor)) }
@@ -221,8 +304,34 @@ extension AppController {
                   let legacy = configuration.credential(for: kind) else { return .empty }
             return .saved(masked: IslandModel.masked(legacy))
         }
-        return (
+        return KeyStates(
             openAI: seed(.openai, vendorKey: configuration.openaiKey),
+            sarvam: seed(.sarvam, vendorKey: configuration.sarvamKey),
             anthropic: seed(.anthropic, vendorKey: configuration.anthropicKey))
+    }
+
+    // MARK: where it could think
+
+    /// The vendors with a key on disk, as Setup counts them: what `seededKeyStates` shows as saved.
+    static func storedVendors(in configuration: SaathiConfiguration) -> Set<ProviderKind> {
+        let seeded = seededKeyStates(for: configuration)
+        return Set(SetupPlan.vendors.filter { seeded[$0].isValid })
+    }
+
+    /// What the picker under Voice offers: each vendor with a key, this Mac, the hosted service
+    /// when there is a token for it — and whatever is in use now, so the picker can always show it.
+    static func providerChoices(for configuration: SaathiConfiguration) -> [IslandProviderChoice] {
+        let stored = storedVendors(in: configuration)
+        var kinds = SetupPlan.vendors.filter(stored.contains) + [.local]
+        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty { kinds.append(.hosted) }
+        if !kinds.contains(configuration.resolvedProvider) { kinds.append(configuration.resolvedProvider) }
+        return kinds.map { IslandProviderChoice(kind: $0, title: vendorName($0)) }
+    }
+
+    /// Whether the switch for Sarvam's ears and mouth has anything to switch: a Sarvam key on
+    /// disk, and a lane that reads `speech` at all.
+    static func sarvamSpeechAvailable(for configuration: SaathiConfiguration) -> Bool {
+        configuration.providerRow.voice == .chain && storedVendors(in: configuration).contains(.sarvam)
     }
 }

@@ -34,6 +34,8 @@ public struct IslandLanguage: Identifiable, Equatable, Sendable {
         IslandLanguage(tag: "mr", title: "मराठी"),
         IslandLanguage(tag: "kn", title: "ಕನ್ನಡ"),
         IslandLanguage(tag: "ml", title: "മലയാളം"),
+        IslandLanguage(tag: "gu", title: "ગુજરાતી"),
+        IslandLanguage(tag: "pa", title: "ਪੰਜਾਬੀ"),
         IslandLanguage(tag: "es", title: "Español"),
         IslandLanguage(tag: "fr", title: "Français"),
         IslandLanguage(tag: "de", title: "Deutsch"),
@@ -98,6 +100,54 @@ public enum KeyFieldState: Equatable, Sendable {
     }
 }
 
+/// Where each of Setup's three key fields has got to.
+public struct KeyStates: Equatable, Sendable {
+    public var openAI: KeyFieldState
+    public var sarvam: KeyFieldState
+    public var anthropic: KeyFieldState
+
+    public init(
+        openAI: KeyFieldState = .empty, sarvam: KeyFieldState = .empty, anthropic: KeyFieldState = .empty
+    ) {
+        self.openAI = openAI
+        self.sarvam = sarvam
+        self.anthropic = anthropic
+    }
+
+    /// By vendor. A provider that takes no key of its own has no field: it reads as empty, and
+    /// writing to it does nothing.
+    public subscript(kind: ProviderKind) -> KeyFieldState {
+        get {
+            switch kind {
+            case .openai: return openAI
+            case .sarvam: return sarvam
+            case .anthropic: return anthropic
+            case .local, .hosted: return .empty
+            }
+        }
+        set {
+            switch kind {
+            case .openai: openAI = newValue
+            case .sarvam: sarvam = newValue
+            case .anthropic: anthropic = newValue
+            case .local, .hosted: break
+            }
+        }
+    }
+}
+
+/// One place Saathi could think, as the picker on the Setup tab offers it.
+public struct IslandProviderChoice: Identifiable, Equatable, Sendable {
+    public let kind: ProviderKind
+    public let title: String
+    public var id: String { kind.rawValue }
+
+    public init(kind: ProviderKind, title: String) {
+        self.kind = kind
+        self.title = title
+    }
+}
+
 /// Everything the Home panel says about Saathi right now.
 @MainActor
 public final class IslandModel: ObservableObject {
@@ -113,14 +163,23 @@ public final class IslandModel: ObservableObject {
     @Published public var companionVisible = true
     /// Which face of the island is showing.
     @Published public var tab: IslandTab = .home
-    @Published public var openAIKeyState: KeyFieldState = .empty
-    @Published public var anthropicKeyState: KeyFieldState = .empty
+    /// Where the three key fields have got to: OpenAI's, Sarvam's and Anthropic's.
+    @Published public var keyStates = KeyStates()
     /// The plan's one-line explanation of what it chose and what that means.
     @Published public var planExplanation: String = ""
-    /// Says out loud that a stored key is not being used. Empty when every stored key is in play.
-    @Published public var unusedKeyNote: String = ""
+    /// What the stored keys are for, and anything in the way of the plan. Empty when there is
+    /// nothing to add to the sentence above it.
+    @Published public var keysNote: String = ""
     /// The language Saathi speaks, as a BCP-47 tag. Empty means follow this Mac.
     @Published public var language: String = ""
+    /// Where Saathi thinks, and the places it could: each vendor with a key, and this Mac. With
+    /// fewer than two there is nothing to pick, and the row is a line of text.
+    @Published public var provider: ProviderKind = .local
+    @Published public var providerChoices: [IslandProviderChoice] = []
+    /// Whether Sarvam is the ears and the mouth, and whether it could be: a Sarvam key is stored
+    /// and a turn is three steps. The switch is only on show when it could.
+    @Published public var sarvamSpeechOn = false
+    @Published public var sarvamSpeechAvailable = false
     /// The realtime voice's name, and whether a turn is one connection or three steps. Shown on
     /// Home because they are otherwise invisible until you have already started talking.
     @Published public var voiceTitle: String = ""
@@ -186,17 +245,17 @@ public struct IslandActions {
     public var onFixPermission: (Permission) -> Void = { _ in }
     public var onToggleCompanion: () -> Void = {}
     public var onQuit: () -> Void = {}
-    /// Ask the vendor whether one key works: which vendor to check, then the live text of *both*
-    /// fields. The other field comes along because a verdict changes the plan, and the plan is
-    /// decided by both keys at once — judging the field that did not change against an empty string
-    /// is how the panel came to promise one thing and Save do another. The panel never validates
-    /// anything itself.
-    public var onCheckKey: (ProviderKind, String, String) -> Void = { _, _, _ in }
-    /// Check any typed key, then save both and reconfigure if every typed key was accepted.
-    public var onSaveKeys: (String, String) -> Void = { _, _ in }
-    /// The Setup tab was built afresh, or a key field was emptied. Any verdict about text that has
-    /// since gone must go with it, and the key on disk earns its own back.
-    public var onKeyFieldsEmpty: (_ openAIField: String, _ anthropicField: String) -> Void = { _, _ in }
+    /// The text in a key field changed — the one named — or the Setup tab was built afresh, which
+    /// names none. Always the live text of *every* field: the plan is decided by all the keys at
+    /// once, and judging the fields that did not change against an empty string is how the panel
+    /// came to promise one thing and Save do another. The panel never validates anything itself.
+    public var onKeyFields: (VendorKeys, _ edited: ProviderKind?) -> Void = { _, _ in }
+    /// Check any typed key, then save them all and reconfigure if every typed key was accepted.
+    public var onSaveKeys: (VendorKeys) -> Void = { _ in }
+    /// Think somewhere else, with the keys that are already saved.
+    public var onChooseProvider: (ProviderKind) -> Void = { _ in }
+    /// Hear and speak through Sarvam, or on this Mac.
+    public var onSarvamSpeech: (Bool) -> Void = { _ in }
     /// Change the language Saathi answers in. Empty means follow this Mac.
     public var onLanguage: (String) -> Void = { _ in }
     /// Relaunch Saathi so a permission grant this process could not pick up takes effect.
