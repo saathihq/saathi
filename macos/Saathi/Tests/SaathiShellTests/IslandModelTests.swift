@@ -232,6 +232,20 @@ final class SetupDecisionTests: XCTestCase {
                                         && sentence.contains("straight to OpenAI") == (written.provider == .openai)
                                         && (!toSarvam || written.credential(for: .sarvam) != nil)
                                         && (written.provider != .openai || written.credential(for: .openai) != nil)
+                                    // And the sentence on show while keys are still being
+                                    // typed is about the plan Save produces once they are accepted.
+                                    let typed = AppController.typed(
+                                        in: VendorKeys(openAI: openAIField, sarvam: sarvamField, anthropic: anthropicField))
+                                    var accepted = KeyStates(openAI: openAI, sarvam: sarvam, anthropic: anthropic)
+                                    for kind in typed { accepted[kind] = .checked(.valid) }
+                                    let preview = AppController.setupPreview(
+                                        typed: typed, states: KeyStates(openAI: openAI, sarvam: sarvam, anthropic: anthropic),
+                                        configuration: configuration)
+                                    let onceAccepted = AppController.setupPlan(
+                                        typed: typed, states: accepted, configuration: configuration)
+                                    guard preview.plan == onceAccepted, preview.sentence.hasSuffix(onceAccepted.explanation) else {
+                                        return XCTFail("the preview is not what Save would do: \(preview.sentence) vs \(onceAccepted.explanation)")
+                                    }
                                     guard holds else {
                                         return XCTFail("""
                                             the sentence and the save disagree.
@@ -343,6 +357,86 @@ final class SetupDecisionTests: XCTestCase {
             fields: VendorKeys(openAI: "sk-o-half-typed", anthropic: "sk-a"),
             states: KeyStates(openAI: .editing, anthropic: .checked(.valid)))
         XCTAssertEqual(decision.plan.provider, .anthropic)
+    }
+}
+
+// MARK: - What is shown while a key is being typed
+
+/// Save checks whatever was typed and saves it in the same breath, so by the time a key has a
+/// verdict it has been saved. The sentence under the fields therefore describes what Save is about
+/// to do, as an "if" — someone pasting a key reads where their voice would go before they press
+/// Save, not in the instant after.
+@MainActor
+final class SetupPreviewTests: XCTestCase {
+
+    private let onOpenAI = SaathiConfiguration(provider: .openai, openaiKey: "sk-o")
+    private var seeded: KeyStates { AppController.seededKeyStates(for: onOpenAI) }
+
+    func testAKeyBeingTypedIsShownAsWhatSaveWouldDoIfItIsAccepted() {
+        var states = seeded
+        states.sarvam = .editing
+        let preview = AppController.setupPreview(typed: [.sarvam], states: states, configuration: onOpenAI)
+        XCTAssertEqual(preview.plan.provider, .sarvam)
+        XCTAssertEqual(preview.plan.speech, .sarvam)
+        XCTAssertEqual(
+            preview.sentence,
+            "If Sarvam accepts this key: I will listen, think and speak through Sarvam, in the language "
+                + "chosen below. Your voice leaves this machine as audio, straight to Sarvam — Saathi's "
+                + "servers are not in the conversation.")
+    }
+
+    /// A key Save would check again is still an "if", whatever was said about it last time.
+    func testAKeyThatWasRefusedOrIsBeingCheckedIsStillAnIf() {
+        for state in [KeyFieldState.checking, .checked(.rejected("no")), .checked(.unreachable("offline")), .empty] {
+            var states = seeded
+            states.sarvam = state
+            let preview = AppController.setupPreview(typed: [.sarvam], states: states, configuration: onOpenAI)
+            XCTAssertTrue(preview.sentence.hasPrefix("If Sarvam accepts this key: "), "\(state): \(preview.sentence)")
+        }
+    }
+
+    func testWithNothingBeingTypedTheSentenceIsThePlanAsItStands() {
+        let preview = AppController.setupPreview(typed: [], states: seeded, configuration: onOpenAI)
+        XCTAssertEqual(preview.plan.provider, .openai)
+        XCTAssertEqual(preview.sentence, preview.plan.explanation)
+        XCTAssertFalse(preview.sentence.hasPrefix("If"))
+    }
+
+    /// Once the vendor has accepted it there is no "if" left — this is the sentence on show in the
+    /// moment between the check landing and the save.
+    func testAKeyAlreadyAcceptedIsNotAnIf() {
+        var states = seeded
+        states.sarvam = .checked(.valid)
+        let preview = AppController.setupPreview(typed: [.sarvam], states: states, configuration: onOpenAI)
+        XCTAssertEqual(preview.plan.provider, .sarvam)
+        XCTAssertEqual(preview.sentence, preview.plan.explanation)
+    }
+
+    func testSeveralKeysBeingTypedAreNamedTogether() {
+        let fresh = SaathiConfiguration()
+        let two = AppController.setupPreview(
+            typed: [.openai, .anthropic], states: KeyStates(openAI: .editing, anthropic: .editing), configuration: fresh)
+        XCTAssertTrue(two.sentence.hasPrefix("If OpenAI and Anthropic accept these keys: I will talk with you through OpenAI"), two.sentence)
+
+        let three = AppController.setupPreview(
+            typed: [.openai, .sarvam, .anthropic],
+            states: KeyStates(openAI: .editing, sarvam: .checked(.valid), anthropic: .editing), configuration: fresh)
+        XCTAssertTrue(three.sentence.hasPrefix("If OpenAI and Anthropic accept these keys: "), "only the ones still to be accepted: \(three.sentence)")
+
+        let all = AppController.setupPreview(
+            typed: [.openai, .sarvam, .anthropic], states: KeyStates(), configuration: fresh)
+        XCTAssertTrue(all.sentence.hasPrefix("If OpenAI, Sarvam and Anthropic accept these keys: "), all.sentence)
+    }
+
+    /// An Anthropic key on its own changes nothing about where the conversation goes, and the
+    /// sentence says so by not changing — apart from the "if".
+    func testAnAnthropicKeyBeingTypedLeavesTheConversationWhereItIs() {
+        var states = seeded
+        states.anthropic = .editing
+        let preview = AppController.setupPreview(typed: [.anthropic], states: states, configuration: onOpenAI)
+        XCTAssertEqual(preview.plan.provider, .openai)
+        XCTAssertEqual(preview.plan.eye, .anthropic)
+        XCTAssertTrue(preview.sentence.hasPrefix("If Anthropic accepts this key: I will talk with you through OpenAI"), preview.sentence)
     }
 }
 

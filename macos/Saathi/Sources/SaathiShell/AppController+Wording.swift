@@ -263,6 +263,38 @@ extension AppController {
             current: providerInUse(configuration), speech: configuration.resolvedSpeech)
     }
 
+    /// The sentence under the key fields, and the plan it describes.
+    struct SetupPreview: Equatable {
+        let plan: SetupPlan
+        let sentence: String
+    }
+
+    /// What Save would do, for the sentence under the fields.
+    ///
+    /// Save checks every typed key and saves in the same breath if they were all accepted, so a
+    /// key has been saved by the time it has a verdict. What is described here is therefore the
+    /// plan with every typed key taken as accepted — which is `setupPlan` once the checks have
+    /// landed — and while any of them has not been accepted yet the sentence is an "if". Someone
+    /// pasting a key reads where their voice would go before they press Save, not in the instant
+    /// after it has gone there.
+    static func setupPreview(
+        typed: Set<ProviderKind>, states: KeyStates, configuration: SaathiConfiguration
+    ) -> SetupPreview {
+        var accepted = states
+        var awaited: [String] = []
+        for kind in SetupPlan.vendors where typed.contains(kind) && states[kind] != .checked(.valid) {
+            accepted[kind] = .checked(.valid)
+            awaited.append(vendorName(kind))
+        }
+        let plan = setupPlan(typed: typed, states: accepted, configuration: configuration)
+        guard let last = awaited.last else { return SetupPreview(plan: plan, sentence: plan.explanation) }
+
+        let condition = awaited.count == 1
+            ? "If \(last) accepts this key: "
+            : "If \(awaited.dropLast().joined(separator: ", ")) and \(last) accept these keys: "
+        return SetupPreview(plan: plan, sentence: condition + plan.explanation)
+    }
+
     /// `setupPlan`, and the keys a Save would write with it: the field's text where there is any,
     /// the key on disk otherwise.
     static func setupDecision(

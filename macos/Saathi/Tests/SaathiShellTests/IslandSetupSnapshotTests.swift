@@ -25,6 +25,9 @@ final class IslandSetupSnapshotTests: XCTestCase {
     private struct Shot {
         let name: String
         let configuration: SaathiConfiguration
+        /// The vendors whose key is "being typed": the sentence is drawn as it would be then. The
+        /// fields themselves are drawn empty — their text is the view's own, and is never a test's.
+        var typing: Set<ProviderKind> = []
     }
 
     func testDrawTheSetupTab() async throws {
@@ -50,6 +53,8 @@ final class IslandSetupSnapshotTests: XCTestCase {
                 provider: .sarvam, apiKey: sarvam, language: "hi")),
             Shot(name: "setup-6-sarvam-in-french", configuration: SaathiConfiguration(
                 provider: .sarvam, sarvamKey: sarvam, speech: .sarvam, language: "fr")),
+            Shot(name: "setup-7-a-sarvam-key-being-typed", configuration: SaathiConfiguration(
+                provider: .openai, openaiKey: openAI), typing: [.sarvam]),
         ]
 
         let size = CGSize(width: NotchPanel.openWidth, height: 1240)
@@ -58,9 +63,13 @@ final class IslandSetupSnapshotTests: XCTestCase {
             model.tab = .setup
             model.keyStates = AppController.seededKeyStates(for: shot.configuration)
             AppController.describe(shot.configuration, on: model)
-            let plan = AppController.setupPlan(typed: [], states: model.keyStates, configuration: shot.configuration)
-            model.planExplanation = plan.explanation
-            model.keysNote = AppController.keysNote(for: plan, language: shot.configuration.resolvedLanguage)
+            var states = model.keyStates
+            for kind in shot.typing { states[kind] = .editing }
+            model.keyStates = states
+            let preview = AppController.setupPreview(
+                typed: shot.typing, states: model.keyStates, configuration: shot.configuration)
+            model.planExplanation = preview.sentence
+            model.keysNote = AppController.keysNote(for: preview.plan, language: shot.configuration.resolvedLanguage)
             model.permissions = Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, PermissionStatus.granted) })
             model.lastYouSaid = "ഇത് എന്താണ്?"
             model.lastSaathiSaid = "ഇത് ഒരു സ്പ്രെഡ്ഷീറ്റ് ആണ്."

@@ -10,7 +10,8 @@
 //  `SetupPlan.vendors`, and `wireNotch` points the island at them.
 //
 //  Nothing here decides anything. `setupPlan` — in the wording file, pure and tested — says what a
-//  Save would do, and the sentence under the fields is drawn from the same call.
+//  Save does, and `setupPreview`, beside it, is the sentence under the fields: the same plan, said
+//  before the keys it depends on have been accepted.
 //
 
 import AppKit
@@ -154,17 +155,18 @@ extension AppController {
         return false
     }
 
-    /// The plan changes as each check lands, so the sentence under the fields follows it rather
-    /// than appearing only after a save. Someone should be able to see what they are about to get.
+    /// The sentence under the fields follows every keystroke, every verdict and every change to
+    /// the file, rather than appearing only after a save. Someone should be able to see what they
+    /// are about to get.
     ///
     /// Drawn from `typedKeyFields` — which fields have text right now — the verdicts, and the
-    /// file: the three things Save decides from.
+    /// file: the three things Save decides from. See `setupPreview`.
     func refreshPlanExplanation() {
         guard let notch else { return }
-        let plan = Self.setupPlan(
+        let preview = Self.setupPreview(
             typed: typedKeyFields, states: notch.model.keyStates, configuration: configuration)
-        notch.model.planExplanation = plan.explanation
-        notch.model.keysNote = Self.keysNote(for: plan, language: configuration.resolvedLanguage)
+        notch.model.planExplanation = preview.sentence
+        notch.model.keysNote = Self.keysNote(for: preview.plan, language: configuration.resolvedLanguage)
     }
 
     private func write(_ updated: SaathiConfiguration, orSay failure: String) -> Bool {
