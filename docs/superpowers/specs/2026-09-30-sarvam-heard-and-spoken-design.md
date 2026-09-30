@@ -242,6 +242,55 @@ that need a person: the microphone after switching from OpenAI without a relaunc
 picker and switch on a real island, and a local model actually answering through `/v1` (Ollama is
 not installed on this Mac; the path is from its documentation).
 
+## What the review found
+
+One independent review read the whole branch once the plan was built. It confirmed the requests
+against Sarvam's reference field by field, and found these. The fixes are the commits after
+"The plan, as built"; each says what was wrong.
+
+**Fixed**
+
+- The shared `apiKey` was handed to every vendor. With the chain lane now able to look at the
+  screen, `provider: sarvam` with a shared key posted the screenshot and the Sarvam key to
+  Anthropic. The shared key is now the named provider's only, in both clients.
+- First run's "A model on this Mac — everything stays on this Mac" left `speech: sarvam` on.
+- `providerBaseUrl` followed a change of provider: a Sarvam key posted to an Ollama host.
+- Talking over a turn cancelled only the question to the model; Saaras, a look and Bulbul kept the
+  turn busy and the next turn's first words were lost. A turn is now dropped whole.
+- A dropped or failed turn left its question in the conversation; the conversation was unbounded
+  and could be written from two tasks at once.
+- Bulbul's 2500-character limit was counted in letters, not code points, so a long Malayalam or
+  Tamil reply was refused.
+- A microphone that hands over no buffers read as a tap of the keys ("I did not catch that").
+- `saathi provider` and the Setup sentence did not say that replies go to Sarvam to be spoken when
+  someone else is doing the thinking.
+- The hand test pointed at a build that did not exist yet, and put a real key in `/tmp`.
+
+**Decided against, or left**
+
+- `apiKey` is not deleted once Setup has filed it under its vendor: a Sarvam user going back to
+  0.8.0, which has no `sarvamKey`, would be left with no key.
+- Two test-quality findings are not fixed: one Shell test re-implements the picker's body instead
+  of calling it, and one test orders two tasks with a 30 ms sleep.
+- The plan document is as built up to "The plan, as built"; its code blocks do not include the
+  fixes above.
+
+**Minor, not done**
+
+- The key check calls any 403 a wrong key, and trusts any 400/422 rather than Sarvam's own error.
+- A 5xx gateway page is shown raw.
+- `PlayerAudioOutput`: `play()` returning false is swallowed; an overlapping `play` would strand
+  the first; the backstop does not check `isPlaying`.
+- A revoked microphone permission reads as a hardware fault; repeated quiet turns never escalate;
+  the 0.0001 "nothing at all" line is a guess.
+- `CompanionVoice.apply` can orphan a Sarvam line that is mid-sentence.
+- The Language row still says "what it answers in" when Sarvam's speech is off, though on-device
+  ears now listen in it too.
+- `saathi sarvam` with a language Sarvam does not speak passes in English without saying the app
+  would refuse.
+- On main too: a verdict that lands after its field was edited sticks to the new text; local mode
+  with a remote `providerBaseUrl` is described as staying on this machine.
+
 ## Testing
 
 Every request is built by a pure function and tested against the documented shape. Every response
