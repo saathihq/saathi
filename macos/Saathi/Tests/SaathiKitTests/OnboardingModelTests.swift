@@ -312,6 +312,38 @@ final class OnboardingModelTests: XCTestCase {
         XCTAssertEqual(own.step, .finished)
     }
 
+    /// "Everything stays on this Mac" is what the card says. A configuration that had asked for
+    /// Sarvam's ears must not go on sending a voice to Sarvam after someone has chosen that.
+    func testChoosingThisMacPutsSpeechBackOnThisMacToo() {
+        var local = model()
+        _ = walk(&local, throughQuestions + [.skipTrial, .choseProvider(.local)])
+        var configuration = SaathiConfiguration(provider: .sarvam, sarvamKey: "sk-s", speech: .sarvam)
+        local.apply(to: &configuration)
+
+        XCTAssertEqual(configuration.provider, .local)
+        XCTAssertNil(configuration.speech)
+        XCTAssertFalse(SarvamSpeech.isOn(configuration))
+        XCTAssertEqual(configuration.sarvamKey, "sk-s", "the key is kept; where the voice goes is what changed")
+    }
+
+    /// The same for the hosted service, whose card says the voice goes to Saathi's servers. A
+    /// choice that names no provider leaves `speech` for Setup, which decides it with the keys.
+    func testOnlyAChoiceThatNamesAProviderTouchesSpeech() {
+        var hosted = model()
+        _ = walk(&hosted, throughQuestions + [.trialRequested, .trialIssued, .next, .choseProvider(.hosted)])
+        var a = SaathiConfiguration(provider: .anthropic, anthropicKey: "sk-a", sarvamKey: "sk-s", speech: .sarvam)
+        hosted.apply(to: &a)
+        XCTAssertEqual(a.provider, .hosted)
+        XCTAssertNil(a.speech)
+
+        var own = model()
+        _ = walk(&own, throughQuestions + [.skipTrial, .choseProvider(.ownKey)])
+        var b = SaathiConfiguration(provider: .sarvam, sarvamKey: "sk-s", speech: .sarvam)
+        own.apply(to: &b)
+        XCTAssertEqual(b.provider, .sarvam)
+        XCTAssertEqual(b.speech, .sarvam)
+    }
+
     /// Quitting halfway must not mark first run done, or it never comes back.
     func testApplyBeforeTheEndDoesNotClaimToBeOnboarded() {
         var m = model()
