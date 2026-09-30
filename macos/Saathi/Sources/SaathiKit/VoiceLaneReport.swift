@@ -11,6 +11,10 @@
 //  text-to-speech both run on-device and only the transcript is sent. Someone deciding whether to
 //  narrate what they are struggling with deserves to know that distinction exists.
 //
+//  The one exception is asked for by name: `speech: sarvam` hands the chain lane's ears and mouth
+//  to Sarvam, and then the audio does leave — whoever is doing the thinking. This is where that
+//  is said.
+//
 //  Pure, like ProviderReport: the resolved configuration in, the same bytes out on either platform,
 //  so `scripts/check-parity.sh` can diff the macOS and Windows clients against each other. Anything
 //  that depends on this particular machine — which microphone, whether a local model is actually
@@ -33,10 +37,10 @@ public enum VoiceLaneReport {
         lines.append("  \(laneSummary(row.voice))")
         lines.append("")
         lines.append("  lane       \(row.voice.rawValue)")
-        lines.append("  speech in  \(speechIn(row))")
+        lines.append("  speech in  \(speechEnd(configuration))")
         lines.append("  thinking   \(model) @ \(configuration.resolvedProviderBaseURL)")
-        lines.append("  speech out \(speechOut(row))")
-        lines.append("  your voice \(voicePrivacy(row))")
+        lines.append("  speech out \(speechEnd(configuration))")
+        lines.append("  your voice \(voicePrivacy(configuration))")
         lines.append("  turn       \(turnShape(row.voice))")
         return lines.joined(separator: "\n")
     }
@@ -50,18 +54,19 @@ public enum VoiceLaneReport {
         }
     }
 
-    /// In the chain lane both ends are on-device, whoever the provider is. That is not a fallback —
-    /// it is the reason the chain lane is worth having at all.
-    private static func speechIn(_ row: SaathiProvider) -> String {
-        row.voice == .realtime ? "\(row.kind.rawValue), over the open connection" : "on this machine"
+    /// Where speech is heard, and where it is made: the same place, on either lane. In the chain
+    /// lane that is this machine, whoever the provider is — not a fallback, but the reason the
+    /// chain lane is worth having at all — unless Sarvam's ears and mouth were asked for.
+    private static func speechEnd(_ configuration: SaathiConfiguration) -> String {
+        let row = configuration.providerRow
+        if row.voice == .realtime { return "\(row.kind.rawValue), over the open connection" }
+        return SarvamSpeech.isOn(configuration) ? "sarvam, over the network" : "on this machine"
     }
 
-    private static func speechOut(_ row: SaathiProvider) -> String {
-        row.voice == .realtime ? "\(row.kind.rawValue), over the open connection" : "on this machine"
-    }
-
-    private static func voicePrivacy(_ row: SaathiProvider) -> String {
+    private static func voicePrivacy(_ configuration: SaathiConfiguration) -> String {
+        let row = configuration.providerRow
         if row.voice == .realtime { return "leaves this machine as audio" }
+        if SarvamSpeech.isOn(configuration) { return "leaves this machine as audio, to Sarvam" }
         if row.sendsDataOffMachine { return "stays on this machine — only the transcript is sent" }
         return "stays on this machine"
     }

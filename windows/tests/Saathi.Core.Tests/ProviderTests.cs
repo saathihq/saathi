@@ -137,6 +137,30 @@ public class ProviderTests
         });
         Assert.Contains("your key   set", report, StringComparison.Ordinal);
     }
+
+    /// <summary>A local model with Sarvam's ears: the thinking stays, the voice does not, and
+    /// neither report may say otherwise. The provider report says which is which, because two
+    /// lines above its privacy line the local row's own summary has just said nothing leaves the
+    /// device.</summary>
+    [Fact]
+    public void ALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine()
+    {
+        var mixed = new SaathiConfiguration { SarvamKey = "x", Speech = SpeechEngine.Sarvam };
+        Assert.EndsWith(
+            "privacy    the thinking stays on this machine; your voice leaves it, to Sarvam",
+            ProviderReport.Describe(mixed), StringComparison.Ordinal);
+        Assert.Contains(
+            "your voice leaves this machine as audio, to Sarvam", VoiceLaneReport.Describe(mixed),
+            StringComparison.Ordinal);
+        Assert.EndsWith(
+            "privacy    stays on this machine", ProviderReport.Describe(new SaathiConfiguration()),
+            StringComparison.Ordinal);
+        var sarvam = new SaathiConfiguration
+        {
+            Provider = ProviderKind.Sarvam, SarvamKey = "x", Speech = SpeechEngine.Sarvam,
+        };
+        Assert.EndsWith("privacy    leaves this machine", ProviderReport.Describe(sarvam), StringComparison.Ordinal);
+    }
 }
 
 /// <summary>

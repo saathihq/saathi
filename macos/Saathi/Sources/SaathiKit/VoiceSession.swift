@@ -129,7 +129,15 @@ public enum VoiceSessionFactory {
         case .realtime:
             return RealtimeVoiceSession(configuration: configuration, engine: engine)
         case .chain:
-            return ChainVoiceSession(configuration: configuration, speaker: speaker)
+            guard SarvamSpeech.isOn(configuration) else {
+                return ChainVoiceSession(configuration: configuration, speaker: speaker)
+            }
+            // Asked for, and had — or refused, with the reason. Never on-device ears in their
+            // place: that would be the voice going somewhere other than where the report says.
+            let sarvam = try SarvamSpeech.settings(for: configuration)
+            return ChainVoiceSession(
+                configuration: configuration, speaker: speaker,
+                ears: SarvamEars(client: SarvamClient(key: sarvam.key), language: sarvam.language))
         }
     }
 }

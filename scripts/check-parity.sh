@@ -49,6 +49,13 @@ printf '%s\n' '{ "provider": "openai", "openaiKey": "not-a-real-key" }' > "$CONF
 printf '%s\n' '{ "provider": "anthropic", "anthropicKey": "not-a-real-key" }' > "$CONFIGS/claude.json"
 printf '%s\n' '{ "provider": "hosted", "token": "not-a-real-token" }' > "$CONFIGS/hosted.json"
 printf '%s\n' '{ "provider": "hosted" }' > "$CONFIGS/hosted-signed-out.json"
+# `speech` moves a voice from "stays on this machine" to "leaves as audio, to Sarvam". Four ways it
+# can be set: with Sarvam thinking, without it being asked for, in front of a model on this
+# machine, and on a lane that does not read it.
+printf '%s\n' '{ "provider": "sarvam", "sarvamKey": "not-a-real-key", "speech": "sarvam", "language": "ml" }' > "$CONFIGS/sarvam-heard-and-spoken.json"
+printf '%s\n' '{ "provider": "sarvam", "sarvamKey": "not-a-real-key" }' > "$CONFIGS/sarvam-thinking-only.json"
+printf '%s\n' '{ "speech": "sarvam", "sarvamKey": "not-a-real-key" }' > "$CONFIGS/this-machine-with-sarvams-ears.json"
+printf '%s\n' '{ "provider": "openai", "openaiKey": "not-a-real-key", "speech": "sarvam" }' > "$CONFIGS/realtime-does-not-read-speech.json"
 
 # The macOS client speaks by default and prints with --quiet; the Windows one only prints so far.
 # Compare what they SAY, not how they emit it.
@@ -76,8 +83,8 @@ compare() {
 # same thing about that, including on Windows, where the lane is reported before it is implemented.
 #
 # Both are compared for every kind of configuration there is, not just the empty one: the shared
-# fixture (every field set, read by both test suites too), a key in its own vendor field, and the
-# hosted mode with and without its token.
+# fixture (every field set, read by both test suites too), a key in its own vendor field, the
+# hosted mode with and without its token, and Sarvam's speech asked for and not.
 for config in "$NOTHING" "$REPO_DIR/contract/fixtures/config.json" "$CONFIGS"/*.json; do
   name="$(basename "$config" .json)"
   [[ "$config" == "$NOTHING" ]] && name="nothing configured"

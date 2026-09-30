@@ -32,10 +32,22 @@ public static class ProviderReport
             $"  model      {(string.IsNullOrEmpty(configuration.ResolvedModel) ? "chosen by the backend" : configuration.ResolvedModel)}",
             $"  your key   {KeyLine(row, configuration)}",
             $"  account    {TokenLine(row, configuration)}",
-            $"  privacy    {(row.SendsDataOffMachine ? "leaves this machine" : "stays on this machine")}",
+            $"  privacy    {Privacy(configuration)}",
         };
 
         return string.Join("\n", lines);
+    }
+
+    /// <summary>The thinking leaves for every provider but local. With Sarvam's ears the voice
+    /// leaves too — and in front of a model on this machine it is the only thing that does, which
+    /// is said in so many words: two lines up, the local row's own summary has just said nothing
+    /// leaves the device.</summary>
+    private static string Privacy(SaathiConfiguration configuration)
+    {
+        if (configuration.ProviderRow.SendsDataOffMachine) return "leaves this machine";
+        if (VoiceLaneReport.SarvamSpeechIsOn(configuration))
+            return "the thinking stays on this machine; your voice leaves it, to Sarvam";
+        return "stays on this machine";
     }
 
     /// <summary>The wire spelling, so the two clients agree on how a mode is named.</summary>

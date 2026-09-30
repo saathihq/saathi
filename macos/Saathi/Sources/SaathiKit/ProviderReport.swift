@@ -31,8 +31,19 @@ public enum ProviderReport {
         lines.append("  model      \(configuration.resolvedModel.isEmpty ? "chosen by the backend" : configuration.resolvedModel)")
         lines.append("  your key   \(keyLine(row: row, configuration: configuration))")
         lines.append("  account    \(tokenLine(row: row, configuration: configuration))")
-        lines.append("  privacy    \(row.sendsDataOffMachine ? "leaves this machine" : "stays on this machine")")
+        lines.append("  privacy    \(privacy(configuration))")
         return lines.joined(separator: "\n")
+    }
+
+    /// The thinking leaves for every provider but local. With Sarvam's ears the voice leaves too —
+    /// and in front of a model on this machine it is the only thing that does, which is said in so
+    /// many words: two lines up, the local row's own summary has just said nothing leaves the device.
+    private static func privacy(_ configuration: SaathiConfiguration) -> String {
+        if configuration.providerRow.sendsDataOffMachine { return "leaves this machine" }
+        if SarvamSpeech.isOn(configuration) {
+            return "the thinking stays on this machine; your voice leaves it, to Sarvam"
+        }
+        return "stays on this machine"
     }
 
     private static func keyLine(row: SaathiProvider, configuration: SaathiConfiguration) -> String {
