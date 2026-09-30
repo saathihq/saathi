@@ -54,15 +54,20 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
         /// spoken: they have moved on, and talking over them is the one thing a companion that
         /// listens must not do.
         var epoch = 0
-        /// The request to the model that is in flight, so an interruption can drop it at once
-        /// instead of waiting seconds for an answer nobody wants.
-        var request: Task<(Data, URLResponse), any Error>?
+        /// The turn being answered — heard, thought about, looked for, spoken — so an interruption
+        /// can drop all of it at once. Saaras, a look and Bulbul are requests too, and a turn left
+        /// waiting on any of them keeps the next one from opening the microphone.
+        var turn: Task<Void, any Error>?
+        /// The conversation so far. The chain lane has no server-side session, so continuity is
+        /// this. Behind the lock, and written only by the turn that is current: a typed question
+        /// can arrive while a spoken one is still being answered.
+        var history: [[String: Any]] = []
     }
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let state = OSAllocatedUnfairLock(uncheckedState: State())
 
-    /// The conversation so far. The chain lane has no server-side session, so continuity is this.
-    /// Only ever touched from a turn, and turns are serial.
-    private var history: [[String: Any]] = []
+    /// The most messages kept. A conversation is not resent whole for ever: each turn would cost
+    /// more than the last, and in the end more than the model takes.
+    static let longestHistory = 40
 
     /// `ears`: on-device ones in the language of Settings unless a pair is handed in.
     /// `look`: what answers a `look_at_screen`; `ScreenSight` unless a test says otherwise.
@@ -85,59 +90,110 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
     }
 
     public func start(callbacks: VoiceSessionCallbacks) async throws {
-        state.withLock { $0.callbacks = callbacks }
+        state.withLockUnchecked { $0.callbacks = callbacks }
         // The ears ask for what they need, once, up front, and say what is being asked for. Being
         // surprised by a permission dialog mid-sentence is exactly what this project should not do.
         callbacks.onStatus?(try await ears.prepare())
     }
 
     public func beginTurn() async throws {
-        let callbacks = state.withLock { $0.callbacks }
+        let callbacks = state.withLockUnchecked { $0.callbacks }
         try await ears.begin(EarsFeedback(
             onLevel: callbacks.onInputLevel, onPartial: callbacks.onPartialTranscript))
         callbacks.onStatus?("listening…")
     }
 
     public func endTurn() async throws {
-        let (callbacks, epoch) = state.withLock { ($0.callbacks, $0.epoch) }
-
-        let heard = try await ears.finish().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isCurrent(epoch) else { return }
-        guard !heard.isEmpty else {
-            callbacks.onStatus?("did not catch that")
-            // A listen-only session leaves the asking-again to whoever is listening through it.
-            if thinks { await speaker.speak("I did not catch that. Say it once more?", tone: .calm) }
-            return
+        let (callbacks, epoch) = state.withLockUnchecked { ($0.callbacks, $0.epoch) }
+        try await run(epoch: epoch) { [self] in
+            let heard = try await ears.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard isCurrent(epoch) else { return }
+            guard !heard.isEmpty else {
+                callbacks.onStatus?("did not catch that")
+                // A listen-only session leaves the asking-again to whoever is listening through it.
+                if thinks { await speaker.speak("I did not catch that. Say it once more?", tone: .calm) }
+                return
+            }
+            callbacks.onUserTranscript?(heard)
+            guard thinks else {
+                callbacks.onStatus?("heard")
+                return
+            }
+            callbacks.onStatus?("thinking…")
+            try await think(about: heard, epoch: epoch, callbacks: callbacks)
         }
-        callbacks.onUserTranscript?(heard)
-        guard thinks else {
-            callbacks.onStatus?("heard")
-            return
-        }
-        callbacks.onStatus?("thinking…")
-        try await answer(heard, epoch: epoch, callbacks: callbacks)
     }
 
     public func sendText(_ text: String) async throws {
         // A typed question supersedes whatever was being said or thought about, as a held turn does.
         interrupt()
-        let (callbacks, epoch) = state.withLock { ($0.callbacks, $0.epoch) }
+        let (callbacks, epoch) = state.withLockUnchecked { ($0.callbacks, $0.epoch) }
         callbacks.onUserTranscript?(text)
         guard thinks else { return }
         callbacks.onStatus?("thinking…")
-        try await answer(text, epoch: epoch, callbacks: callbacks)
+        try await run(epoch: epoch) { [self] in
+            try await think(about: text, epoch: epoch, callbacks: callbacks)
+        }
     }
 
-    /// The learner has started talking. Whatever Saathi was saying stops, and whatever it was
-    /// about to say is dropped — the request for it included, so the microphone is not kept
-    /// waiting on an answer nobody wants any more.
+    /// The learner has started talking. Whatever Saathi was saying stops, and the turn it was in
+    /// the middle of is dropped whole — what it was hearing, asking, looking at or about to say —
+    /// so the microphone is not kept waiting on any of it.
     public func interrupt() {
-        let request = state.withLock { state -> Task<(Data, URLResponse), any Error>? in
+        let turn = state.withLockUnchecked { state -> Task<Void, any Error>? in
             state.epoch += 1
-            return state.request
+            // What the dropped turn asked goes with it. Left in the conversation, the question
+            // nobody wanted answered would be answered along with the next one.
+            if state.history.last?["role"] as? String == "user" { state.history.removeLast() }
+            defer { state.turn = nil }
+            return state.turn
         }
-        request?.cancel()
+        turn?.cancel()
         (speaker as? StoppableSpeaker)?.stop()
+    }
+
+    /// One turn's work, as a task an interruption can cancel.
+    ///
+    /// A turn the learner talked over ends quietly whatever it was doing: its requests were
+    /// cancelled on purpose, and reporting that as a failure would put an alert on the island for
+    /// doing the right thing. A turn that fails for real leaves no unanswered question behind it.
+    private func run(epoch: Int, _ work: @escaping @Sendable () async throws -> Void) async throws {
+        let turn = Task { try await work() }
+        state.withLockUnchecked { $0.turn = turn }
+        defer { state.withLockUnchecked { if $0.turn == turn { $0.turn = nil } } }
+        do {
+            try await withTaskCancellationHandler {
+                try await turn.value
+            } onCancel: {
+                turn.cancel()
+            }
+        } catch {
+            let current = state.withLockUnchecked { state -> Bool in
+                guard state.epoch == epoch else { return false }
+                if state.history.last?["role"] as? String == "user" { state.history.removeLast() }
+                return true
+            }
+            if current { throw error }
+        }
+    }
+
+    /// Adds to the conversation, if this turn is still the one being answered. One that has been
+    /// talked over can no longer write to it.
+    private func record(_ messages: [[String: Any]], epoch: Int) -> Bool {
+        state.withLockUnchecked { state in
+            guard state.epoch == epoch else { return false }
+            state.history = Self.trimmed(state.history + messages)
+            return true
+        }
+    }
+
+    /// The end of a conversation, cut at the start of a turn — never at a tool's answer to a call
+    /// that has been cut away, which a server would refuse.
+    static func trimmed(_ history: [[String: Any]], keeping limit: Int = longestHistory) -> [[String: Any]] {
+        guard history.count > limit else { return history }
+        var start = history.count - limit
+        while start < history.count, history[start]["role"] as? String != "user" { start += 1 }
+        return start < history.count ? Array(history[start...]) : history
     }
 
     public func stop() async {
@@ -146,24 +202,13 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
     }
 
     private func isCurrent(_ epoch: Int) -> Bool {
-        state.withLock { $0.epoch == epoch }
+        state.withLockUnchecked { $0.epoch == epoch }
     }
 
     // MARK: The thinking step
 
-    /// A turn the learner talked over ends quietly: its request was cancelled on purpose, and
-    /// reporting that as a failure would put an alert on the island for doing the right thing.
-    private func answer(_ said: String, epoch: Int, callbacks: VoiceSessionCallbacks) async throws {
-        do {
-            try await think(about: said, epoch: epoch, callbacks: callbacks)
-        } catch {
-            guard isCurrent(epoch) else { return }
-            throw error
-        }
-    }
-
     private func think(about said: String, epoch: Int, callbacks: VoiceSessionCallbacks) async throws {
-        history.append(["role": "user", "content": said])
+        guard record([["role": "user", "content": said]], epoch: epoch) else { return }
 
         var spoke = false
         var acted = false
@@ -218,7 +263,7 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
                     owesAnAnswer = true
                 }
             }
-            history.append(contentsOf: round)
+            guard record(round, epoch: epoch) else { return }
 
             if !looks, !content.isEmpty {
                 callbacks.onSaathiTranscript?(content)
@@ -240,20 +285,14 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
 
     /// One request to the model with the conversation so far, and the message it answered with.
     private func complete() async throws -> [String: Any] {
+        let history = state.withLockUnchecked { $0.history }
         let request = try Self.completionRequest(configuration: configuration, history: history)
-        let urlSession = self.urlSession
-        let inFlight = Task { try await urlSession.data(for: request) }
-        state.withLock { $0.request = inFlight }
-        defer { state.withLock { $0.request = nil } }
 
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await withTaskCancellationHandler {
-                try await inFlight.value
-            } onCancel: {
-                inFlight.cancel()
-            }
+            // Cancelled with the turn it belongs to, when the learner talks over it.
+            (data, response) = try await urlSession.data(for: request)
         } catch {
             throw Self.unreachable(error, configuration: configuration)
         }

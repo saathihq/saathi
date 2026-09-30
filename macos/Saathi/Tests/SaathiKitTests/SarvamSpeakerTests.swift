@@ -191,6 +191,25 @@ final class SarvamSpeakerTests: XCTestCase {
         XCTAssertEqual(reasons.all, [SarvamError.outOfCredits.localizedDescription])
     }
 
+    /// Bulbul takes a second or more to answer. A line stopped in that second must not be waited
+    /// for: whoever is waiting on it — the turn, and behind the turn the microphone — waits too.
+    func testStoppingWhileBulbulIsStillAnsweringEndsTheLineAtOnce() async throws {
+        let output = FakeOutput()
+        let fellBack = Collected<String>()
+        let sarvam = speaker([audio], output: output, fallback: { text, _, _ in fellBack.add(text) })
+        StubHTTP.hold()
+
+        let speaking = Task<Void, any Error> { await sarvam.speak("നമസ്കാരം.", tone: .neutral) }
+        for _ in 0..<400 where StubHTTP.seen.isEmpty { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(StubHTTP.seen.count, 1, "the line went to Bulbul")
+        sarvam.stop()
+
+        let result = await outcome(of: speaking)
+        XCTAssertNotNil(result, "still waiting for Bulbul two seconds after being stopped")
+        XCTAssertTrue(output.played.all.isEmpty)
+        XCTAssertTrue(fellBack.all.isEmpty, "cut off on purpose is not a failure to speak")
+    }
+
     /// Cut off on purpose is not a failure to speak: nothing goes to the fallback, and the rest of
     /// a long line is not asked for.
     func testStoppingCutsTheLineAndSaysNoMore() async throws {

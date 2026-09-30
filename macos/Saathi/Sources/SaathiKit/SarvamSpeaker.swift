@@ -134,8 +134,14 @@ public final class SarvamSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
     private let voice: Voice
     private let output: any AudioOutput
     private let fallback: Fallback
-    /// Bumped by `stop()`. A line that finds it changed has been cut off and says no more.
-    private let generation = OSAllocatedUnfairLock(initialState: 0)
+    private struct State {
+        /// Bumped by `stop()`. A line that finds it changed has been cut off and says no more.
+        var generation = 0
+        /// The request to Bulbul that is out, so `stop()` can drop it: a line that has been cut
+        /// off is not waited for, and nor is whoever is waiting on the line.
+        var request: Task<[Data], any Error>?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init(
         client: SarvamClient,
@@ -150,16 +156,12 @@ public final class SarvamSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
     }
 
     public func speak(_ text: String, tone: Tone) async {
-        let mine = generation.withLock { $0 }
+        let mine = state.withLock { $0.generation }
         let pieces = Self.pieces(of: text)
         for (index, piece) in pieces.enumerated() {
             guard isCurrent(mine) else { return }
             do {
-                let clips = try await client.synthesize(
-                    piece,
-                    language: Self.code(for: piece, in: voice.language),
-                    speaker: voice.speaker,
-                    pace: Double(SpeechSettings.rateMultiplier(tone: tone, pace: voice.pace)))
+                let clips = try await synthesize(piece, tone: tone, generation: mine)
                 for clip in clips {
                     guard isCurrent(mine) else { return }
                     try await output.play(clip)
@@ -174,12 +176,45 @@ public final class SarvamSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
     }
 
     public func stop() {
-        generation.withLock { $0 += 1 }
+        let request = state.withLock { state -> Task<[Data], any Error>? in
+            state.generation += 1
+            defer { state.request = nil }
+            return state.request
+        }
+        request?.cancel()
         output.stop()
     }
 
     private func isCurrent(_ generation: Int) -> Bool {
-        self.generation.withLock { $0 == generation }
+        state.withLock { $0.generation == generation }
+    }
+
+    /// One request to Bulbul, kept where `stop()` can reach it.
+    private func synthesize(_ piece: String, tone: Tone, generation mine: Int) async throws -> [Data] {
+        let client = self.client
+        let voice = self.voice
+        let request = Task {
+            try await client.synthesize(
+                piece,
+                language: Self.code(for: piece, in: voice.language),
+                speaker: voice.speaker,
+                pace: Double(SpeechSettings.rateMultiplier(tone: tone, pace: voice.pace)))
+        }
+        let wanted = state.withLock { state -> Bool in
+            guard state.generation == mine else { return false }
+            state.request = request
+            return true
+        }
+        guard wanted else {
+            request.cancel()
+            throw CancellationError()
+        }
+        defer { state.withLock { if $0.request == request { $0.request = nil } } }
+        return try await withTaskCancellationHandler {
+            try await request.value
+        } onCancel: {
+            request.cancel()
+        }
     }
 
     /// Sarvam's code for the language a line is written in: the one in Settings, or English for

@@ -43,6 +43,23 @@ final class FakeEars: Ears, @unchecked Sendable {
     func cancel() { calls.add("cancel") }
 }
 
+/// Ears that are still working out what was said — a request to Saaras that has not come back —
+/// until whoever is waiting on them is cancelled.
+final class SlowEars: Ears, @unchecked Sendable {
+    let calls = Collected<String>()
+
+    func prepare() async throws -> String { "ready — slow ears" }
+    func begin(_ feedback: EarsFeedback) async throws { calls.add("begin") }
+
+    func finish() async throws -> String {
+        calls.add("finish")
+        try await Task.sleep(nanoseconds: 30_000_000_000)
+        return "far too late"
+    }
+
+    func cancel() { calls.add("cancel") }
+}
+
 /// A speaker that writes what it said, and that it was stopped, into a log shared with whatever
 /// else a test wants to see the order of.
 final class LoggingSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable {
@@ -86,7 +103,7 @@ final class ChainLaneTests: XCTestCase {
         _ replies: [StubHTTP.Reply],
         configuration: SaathiConfiguration? = nil,
         speaker: any Speaker = LoggingSpeaker(),
-        ears: FakeEars = FakeEars(),
+        ears: any Ears = FakeEars(),
         thinks: Bool = true,
         look: @escaping @Sendable (String) async -> String = { _ in "nothing much" }
     ) -> ChainVoiceSession {
@@ -455,6 +472,115 @@ final class ChainLaneTests: XCTestCase {
 
         XCTAssertTrue(speaker.said.isEmpty)
         XCTAssertEqual(speaker.log.all.filter { $0 == "stop" }.count, 2, "once for the typed question, once for the interruption")
+    }
+
+    /// Saaras is a request too, and so is a look. While either is out the turn is still busy, and
+    /// the next one cannot open the microphone until it is not: the island says "listening" and
+    /// the first words are lost. Talking over a turn ends all of it, not only the question to the
+    /// model — and ends it quietly.
+    func testTalkingOverWhileTheEarsAreStillWorkingEndsTheTurnAtOnce() async throws {
+        let ears = SlowEars()
+        let speaker = LoggingSpeaker()
+        let session = makeSession([says("never asked")], speaker: speaker, ears: ears)
+        try await session.start(callbacks: VoiceSessionCallbacks())
+        try await session.beginTurn()
+
+        let ending = Task { try await session.endTurn() }
+        for _ in 0..<400 where !ears.calls.all.contains("finish") { try await Task.sleep(nanoseconds: 5_000_000) }
+        session.interrupt()
+
+        let result = await outcome(of: ending)
+        XCTAssertNotNil(result, "the turn was still waiting on its ears two seconds after being talked over")
+        if case let .failure(error)? = result { XCTFail("being talked over is not a failure: \(error)") }
+        XCTAssertTrue(speaker.said.isEmpty)
+        XCTAssertTrue(StubHTTP.seen.isEmpty)
+    }
+
+    func testTalkingOverDuringALookEndsTheTurnAtOnce() async throws {
+        let speaker = LoggingSpeaker()
+        let looking = Collected<String>()
+        let session = makeSession(
+            [calls("look_at_screen", #"{"question":"this"}"#), says("never said")],
+            speaker: speaker,
+            look: { question in
+                looking.add(question)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                return "far too late"
+            })
+        try await session.start(callbacks: VoiceSessionCallbacks())
+
+        let turn = Task { try await session.sendText("what is this") }
+        for _ in 0..<400 where looking.all.isEmpty { try await Task.sleep(nanoseconds: 5_000_000) }
+        session.interrupt()
+
+        let result = await outcome(of: turn)
+        XCTAssertNotNil(result, "the turn was still looking two seconds after being talked over")
+        if case let .failure(error)? = result { XCTFail("being talked over is not a failure: \(error)") }
+        XCTAssertTrue(speaker.said.isEmpty)
+        XCTAssertEqual(StubHTTP.seen.count, 1, "and the model is not asked what it saw")
+    }
+
+    /// What a dropped turn asked is dropped with it. Left in the conversation, the question nobody
+    /// wanted answered would be answered along with the next one.
+    func testATurnThatWasTalkedOverLeavesNothingBehind() async throws {
+        let session = makeSession([says("Four.")])
+        try await session.start(callbacks: VoiceSessionCallbacks())
+        StubHTTP.hold()
+        let dropped = Task { try await session.sendText("tell me a very long story") }
+        for _ in 0..<400 where StubHTTP.seen.isEmpty { try await Task.sleep(nanoseconds: 5_000_000) }
+        session.interrupt()
+        _ = await outcome(of: dropped)
+        StubHTTP.release()
+
+        try await session.sendText("what is two and two")
+
+        let next = try messages(of: 1)
+        XCTAssertEqual(roles(next), ["system", "user"])
+        XCTAssertEqual(next.last?["content"] as? String, "what is two and two")
+    }
+
+    /// The same for a turn that failed: the question it never got an answer to is not sent again
+    /// behind the next one.
+    func testATurnThatFailedLeavesNothingBehind() async throws {
+        let session = makeSession([.failing(), says("Hello.")])
+        try await session.start(callbacks: VoiceSessionCallbacks())
+        do {
+            try await session.sendText("are you there")
+            XCTFail("there was no network")
+        } catch {}
+
+        try await session.sendText("hello")
+
+        let next = try messages(of: 1)
+        XCTAssertEqual(roles(next), ["system", "user"])
+        XCTAssertEqual(next.last?["content"] as? String, "hello")
+    }
+
+    /// A conversation is not resent whole for ever: each turn would cost more than the last, and
+    /// in the end more than the model takes. What is kept starts at the start of a turn — never
+    /// at a tool's answer to a call that has been cut away, which a server would refuse.
+    func testALongConversationIsTrimmedFromTheFrontAtTheStartOfATurn() async throws {
+        func message(_ role: String, _ text: String) -> [String: Any] { ["role": role, "content": text] }
+        let history = [
+            message("user", "1"), message("assistant", "1"),
+            message("user", "2"), message("assistant", "look"), message("tool", "seen"), message("assistant", "2"),
+            message("user", "3"), message("assistant", "3"),
+        ]
+        XCTAssertEqual(ChainVoiceSession.trimmed(history, keeping: 8).count, 8, "short enough: left alone")
+        let kept = ChainVoiceSession.trimmed(history, keeping: 4)
+        XCTAssertEqual(roles(kept), ["user", "assistant"], "four would begin at a tool's answer; it begins at the next turn instead")
+        XCTAssertEqual(kept.first?["content"] as? String, "3")
+        XCTAssertEqual(ChainVoiceSession.trimmed(history, keeping: 6).first?["content"] as? String, "2")
+
+        // And through a session: many turns on, a request is no longer than the limit and the prompt.
+        let session = makeSession([says("ok")])
+        try await session.start(callbacks: VoiceSessionCallbacks())
+        let turns = ChainVoiceSession.longestHistory / 2 + 5
+        for turn in 1...turns { try await session.sendText("question \(turn)") }
+        let last = try messages(of: turns - 1)
+        XCTAssertLessThanOrEqual(last.count, ChainVoiceSession.longestHistory + 1)
+        XCTAssertEqual(roles(last).prefix(2), ["system", "user"])
+        XCTAssertEqual(last.last?["content"] as? String, "question \(turns)")
     }
 
     /// An interruption stops what is being said, there and then.

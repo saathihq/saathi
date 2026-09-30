@@ -70,6 +70,11 @@ final class StubHTTP: URLProtocol {
         script.withLock { $0.holding = true }
     }
 
+    /// Requests are answered again. One that was taken while holding stays unanswered.
+    static func release() {
+        script.withLock { $0.holding = false }
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func stopLoading() {}
@@ -107,6 +112,19 @@ final class StubHTTP: URLProtocol {
         client?.urlProtocol(self, didLoad: reply.body)
         client?.urlProtocolDidFinishLoading(self)
     }
+}
+
+/// Whether `task` finishes within `seconds`, and how. For work that has to end when it is
+/// interrupted: a test that simply awaited it would hang, rather than fail, if it did not.
+func outcome<Success: Sendable>(
+    of task: Task<Success, any Error>, within seconds: Double = 2
+) async -> Result<Success, any Error>? {
+    let finished = Collected<Result<Success, any Error>>()
+    Task { finished.add(await task.result) }
+    for _ in 0..<Int(seconds * 200) where finished.all.isEmpty {
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
+    return finished.all.first
 }
 
 /// Collects what callbacks were handed, from whichever thread they arrive on.
