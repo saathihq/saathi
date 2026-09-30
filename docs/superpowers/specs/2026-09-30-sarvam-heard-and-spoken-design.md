@@ -67,6 +67,10 @@ streaming sockets as well. Neither is a duplex conversation socket, which is wha
 
 - `sarvamKey` — a vendor field like the other two. `credential(for: .sarvam)` reads it first and
   the legacy `apiKey` after.
+- The legacy `apiKey` is the key of the provider the file names, and of no other. It used to be
+  handed to every vendor that asked. The review of this branch found what that meant once the
+  chain lane could look at the screen: a config with `provider: sarvam` and a shared key posted
+  the screenshot, and the Sarvam key, to Anthropic.
 - `speech` — whose ears and mouth a chain-lane turn uses: `device` or `sarvam` (`SpeechEngine`).
   Unset is `device`. The realtime lane carries its own speech and does not read it.
 - `resolvedSpeech`, generated for both clients, so the reports agree on what unset means.
@@ -118,7 +122,7 @@ the language in Settings is not one Sarvam speaks.
   key, and this Mac.
 - A switch under Voice, **Hear and speak through Sarvam**, wherever it could be switched: a Sarvam
   key is saved and a turn is three steps. Its second line is the whole of what it means: "Your
-  voice leaves this Mac as audio, to Sarvam". It is how Claude, or a model on this Mac, gets
+  voice, and what is said back, go to Sarvam". It is how Claude, or a model on this Mac, gets
   Sarvam's ears — and how Sarvam goes back to only thinking.
 - Gujarati and Punjabi join the language list.
 - The note under the keys says what each stored key is for. It said "Anthropic key saved. Nothing

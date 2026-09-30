@@ -92,10 +92,11 @@ each step only makes sense once the one before it works.
 
 ```bash
 cd macos/Saathi
-# With the key on the clipboard, so it is never typed into the shell's history:
-printf '{ "sarvamKey": "%s", "language": "ml" }\n' "$(pbpaste)" > /tmp/sarvam-try.json
-SAATHI_CONFIG=/tmp/sarvam-try.json swift run saathi sarvam --play
-rm /tmp/sarvam-try.json
+# With the key on the clipboard, so it is never typed into the shell's history, and in a file
+# only you can read:
+(umask 077; printf '{ "sarvamKey": "%s", "language": "ml" }\n' "$(pbpaste)" > ~/.saathi/sarvam-try.json)
+SAATHI_CONFIG=~/.saathi/sarvam-try.json swift run saathi sarvam --play
+rm ~/.saathi/sarvam-try.json
 ```
 
 - [ ] `key         accepted`. *If it says "Sarvam answered NNN. That is not about your key", tell
@@ -108,7 +109,10 @@ rm /tmp/sarvam-try.json
       causes are `reasoning_effort: null` or the tool list; the message will say which field.*
 - [ ] Any FAILED line reads as a sentence, not as JSON.
 
-**Then the app** (`open macos/Saathi/dist/Saathi.app`; quit any running Saathi first).
+**Then the app.** `macos/Saathi/dist/Saathi.app` must be the 0.9.0 build from this branch: if
+Setup has no Sarvam row, it is an older one. To build it again:
+`cd macos/Saathi && scripts/release.sh --no-notarize`. Quit any running Saathi, then
+`open macos/Saathi/dist/Saathi.app`.
 
 - [ ] Setup shows three key rows: OpenAI, **Sarvam — Indian languages, heard and spoken**, Anthropic.
 - [ ] Type nonsense into the Sarvam row and press Save: "Sarvam did not accept that key." *(This
