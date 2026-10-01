@@ -81,6 +81,32 @@ public struct ScreenCapture: Sendable {
         /// Where the pointer was when the frame was taken, in global top-left-origin coordinates,
         /// so Accessibility is asked about the same spot the close-up is centred on.
         public let pointer: CGPoint
+        /// Which display the frame is, and at what scale, so a pixel in it is a point on it.
+        public let geometry: Geometry
+    }
+
+    /// The captured display in screen points, and the frame's size in pixels — 2× the points on
+    /// a Retina display, 1× on most external ones. What turns the eye's answer, given in the
+    /// frame's pixels, into a place on the screen.
+    public struct Geometry: Equatable, Sendable {
+        /// The display, in the global top-left-origin points `CGDisplayBounds` uses.
+        public let region: CGRect
+        public let pixelSize: CGSize
+
+        public init(region: CGRect, pixelSize: CGSize) {
+            self.region = region
+            self.pixelSize = pixelSize
+        }
+
+        var scale: CGFloat { pixelSize.width > 0 ? region.width / pixelSize.width : 1 }
+
+        public func point(ofPixel pixel: CGPoint) -> CGPoint {
+            CGPoint(x: region.minX + pixel.x * scale, y: region.minY + pixel.y * scale)
+        }
+
+        public func rect(ofPixels pixels: CGRect) -> CGRect {
+            CGRect(origin: point(ofPixel: pixels.origin), size: CGSize(width: pixels.width * scale, height: pixels.height * scale))
+        }
     }
 
     /// The two regions of one look, in the global top-left-origin coordinates that `CGDisplayBounds`,
@@ -153,7 +179,19 @@ public struct ScreenCapture: Sendable {
         return Frames(
             display: data,
             closeUp: try Self.crop(data, from: regions.display, to: regions.closeUp),
-            pointer: pointer)
+            pointer: pointer,
+            geometry: Geometry(region: regions.display, pixelSize: try Self.pixelSize(of: data)))
+    }
+
+    /// The frame's size in pixels, from its header.
+    static func pixelSize(of png: Data) throws -> CGSize {
+        guard let source = CGImageSourceCreateWithData(png as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat else {
+            throw ScreenSightError.captureFailed("the captured frame could not be read")
+        }
+        return CGSize(width: width, height: height)
     }
 
     /// The close-up, cut from the frame rather than captured again: a second capture a moment
@@ -241,7 +279,24 @@ public struct ScreenSight: Sendable {
     /// It settles *which* thing is meant — the one question pixels answer badly, since forty rows
     /// of a list look alike and a 20-pixel arrow does not survive downscaling — and the pictures
     /// answer everything else.
-    static func systemPrompt(question: String, grounding: PointerContext? = nil, selection: String? = nil) -> String {
+    static func systemPrompt(
+        question: String, grounding: PointerContext? = nil, selection: String? = nil, pixelSize: CGSize? = nil
+    ) -> String {
+        // Where the thing is, for the buddy to fly to. Asked for in the first picture's own
+        // pixels, with its size stated, because an eye that is not told the size guesses one.
+        let pointing = pixelSize.map {
+            """
+
+
+            The first picture is \(Int($0.width))×\(Int($0.height)) pixels, origin top-left. End \
+            your answer with one tag saying where the thing your answer is about is in that \
+            picture: [POINT:x,y:visible text] — x and y in its pixels, at the centre of the thing, \
+            and visible text exactly what the thing itself shows (a link reading "arXiv" is arXiv, \
+            whatever it leads to), or nothing after the second colon for an icon or a button with \
+            no text. [POINT:none] if your answer points at nothing on the screen. Never mention \
+            the tag, the pixels or the pictures in the words before it.
+            """
+        } ?? ""
         let selected = selection.map {
             """
 
@@ -270,10 +325,61 @@ public struct ScreenSight: Sendable {
         Say what the thing actually is and where it is, in words someone who cannot see the screen \
         can act on — "the folder under your pointer is called Saathi Signing, on the right of the \
         desktop" rather than "a blue folder icon". If what they asked about is not on the screen, \
-        say so plainly rather than describing something else.\(grounded)\(selected)
+        say so plainly rather than describing something else.\(grounded)\(selected)\(pointing)
 
         Their question: \(question)
         """
+    }
+
+    /// The eye's answer, taken apart: the words to speak, and where it put the thing, if it put
+    /// it anywhere on the picture.
+    struct Reading: Equatable {
+        let answer: String
+        let pixel: CGPoint?
+        let visibleText: String?
+    }
+
+    static func read(_ reply: String, pixelSize: CGSize) -> Reading {
+        let tag = try! NSRegularExpression(pattern: #"\[POINT:\s*(?:none|(\d+)\s*,\s*(\d+)\s*(?::([^\]]*))?)\s*\]"#, options: .caseInsensitive)
+        let whole = NSRange(reply.startIndex..., in: reply)
+        var pixel: CGPoint?
+        var visibleText: String?
+        if let match = tag.firstMatch(in: reply, range: whole),
+           let xRange = Range(match.range(at: 1), in: reply), let yRange = Range(match.range(at: 2), in: reply),
+           let x = Double(reply[xRange]), let y = Double(reply[yRange]),
+           x >= 0, y >= 0, x <= pixelSize.width, y <= pixelSize.height {
+            pixel = CGPoint(x: x, y: y)
+            if let textRange = Range(match.range(at: 3), in: reply) {
+                let text = reply[textRange].trimmingCharacters(in: .whitespacesAndNewlines)
+                visibleText = text.isEmpty ? nil : text
+            }
+        }
+        let words = tag.stringByReplacingMatches(in: reply, range: whole, withTemplate: "")
+        return Reading(answer: tidied(words), pixel: pixel, visibleText: visibleText)
+    }
+
+    /// Where the buddy goes: the text the eye named, on the frame it looked at; failing that, the
+    /// control Accessibility knows by that caption; failing that, the eye's own point. Each says
+    /// how, for the log, so a buddy that lands in the wrong place can be traced.
+    static func settle(
+        eye: CGPoint, visibleText: String?, question: String,
+        lines: [ScreenTextLine], controls: [AccessibleElement], radius: CGFloat, margin: CGFloat
+    ) -> ScreenTarget {
+        if let text = visibleText, !text.isEmpty {
+            if let match = ScreenTextLocator.locate(text, near: eye, in: lines, maxDistance: radius, ambiguityMargin: margin) {
+                return ScreenTarget(
+                    point: match.center, visibleText: text,
+                    how: "the text \"\(match.text)\" on the frame, \(Int(match.distance)) pt from where the eye put it")
+            }
+            if let control = AccessibleElementLocator.bestMatch(
+                hint: text, userRequest: question, near: eye, in: controls, maxDistance: radius, ambiguityMargin: margin) {
+                let inside = control.containerTitles.first.map { " in \"\($0.prefix(30))\"" } ?? ""
+                return ScreenTarget(
+                    point: control.center, visibleText: text,
+                    how: "Accessibility: \(control.role) \"\(control.title.prefix(40))\"\(inside)")
+            }
+        }
+        return ScreenTarget(point: eye, visibleText: visibleText, how: "the eye alone")
     }
 
     /// Set by the shell: hides (true) and shows again (false) Saathi's own windows that would
@@ -282,16 +388,17 @@ public struct ScreenSight: Sendable {
 
     /// `look`, with a failure turned into a sentence for the model to repeat. "I need Screen
     /// Recording permission" is a useful thing to be told; silence is not.
-    public func answer(_ question: String) async -> String {
+    public func answer(_ question: String) async -> ScreenLook {
         do {
             return try await look(question: question)
         } catch {
-            return "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
+            return ScreenLook(answer: "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)")
         }
     }
 
-    /// Captures the screen and answers `question` about it.
-    public func look(question: String) async throws -> String {
+    /// Captures the screen and answers `question` about it — and says where on the screen the
+    /// answer is about, when it is about somewhere.
+    public func look(question: String) async throws -> ScreenLook {
         guard let eye = Self.eye(for: configuration) else { throw ScreenSightError.noVisionKey }
         // Saathi's own pointer follows the mouse, so it sits exactly where "this" is looked for:
         // asked about a highlighted word, the vision model described the red triangle on top of
@@ -312,14 +419,28 @@ public struct ScreenSight: Sendable {
         let system = Self.systemPrompt(
             question: question,
             grounding: PointerGrounding.context(at: frames.pointer),
-            selection: PointerGrounding.selectedText())
+            selection: PointerGrounding.selectedText(),
+            pixelSize: frames.geometry.pixelSize)
+        // Read for text while the eye is looking, so the snap costs no wait of its own.
+        async let text = ScreenTextRecognizer.recognize(png: frames.display, geometry: frames.geometry)
 
+        let reply: String
         switch eye {
         case let .anthropic(model):
-            return try await askAnthropic(model: model, pictures: pictures, system: system, question: question)
+            reply = try await askAnthropic(model: model, pictures: pictures, system: system, question: question)
         case let .openai(model):
-            return try await askOpenAI(model: model, pictures: pictures, system: system, question: question)
+            reply = try await askOpenAI(model: model, pictures: pictures, system: system, question: question)
         }
+        let reading = Self.read(reply, pixelSize: frames.geometry.pixelSize)
+        guard let pixel = reading.pixel else { return ScreenLook(answer: reading.answer) }
+
+        let lines = (try? await text) ?? []
+        let width = frames.geometry.region.width
+        let target = Self.settle(
+            eye: frames.geometry.point(ofPixel: pixel), visibleText: reading.visibleText, question: question,
+            lines: lines, controls: AccessibleElementLocator.controlsInFrontWindow(),
+            radius: width * 0.3, margin: width * 0.1)
+        return ScreenLook(answer: reading.answer, target: target)
     }
 
     private func askAnthropic(model: String, pictures: [String], system: String, question: String) async throws -> String {
@@ -346,8 +467,7 @@ public struct ScreenSight: Sendable {
               let content = json["content"] as? [[String: Any]] else {
             throw ScreenSightError.refused("Anthropic's answer could not be read.")
         }
-        let text = content.compactMap { $0["text"] as? String }.joined(separator: " ")
-        return Self.tidied(text)
+        return content.compactMap { $0["text"] as? String }.joined(separator: " ")
     }
 
     private func askOpenAI(model: String, pictures: [String], system: String, question: String) async throws -> String {
@@ -374,7 +494,7 @@ public struct ScreenSight: Sendable {
               let text = message["content"] as? String else {
             throw ScreenSightError.refused("OpenAI's answer could not be read.")
         }
-        return Self.tidied(text)
+        return text
     }
 
     /// A non-2xx is reported without the response body: a vision request carries an image of the
@@ -391,7 +511,8 @@ public struct ScreenSight: Sendable {
     }
 
     static func tidied(_ text: String) -> String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
+        text.replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -31,6 +31,24 @@ public final class CompanionPanel: NSPanel {
     /// buddy from one that is being re-placed sixty times a second where it already is.
     private(set) var moves = 0
 
+    /// Where a look said the thing is, while the buddy is sitting on it rather than beside the
+    /// pointer. In the panel's own coordinates, y up from the bottom of the main display.
+    private struct Pointing {
+        let spot: CGPoint
+        /// Where the pointer was when the look pointed — as the last step saw it, which in the
+        /// app is where it is. Moving it is how the person takes the buddy back; a nudge is not.
+        var pointerThen: CGPoint?
+        var held: TimeInterval = 0
+    }
+    private var pointing: Pointing?
+
+    /// How long the buddy waits on a spot before coming back by itself, and how far the pointer
+    /// has to move to bring it back sooner.
+    public static let pointingHold: TimeInterval = 8
+    public static let pointingLetGo: CGFloat = 40
+
+    public var isPointing: Bool { pointing != nil }
+
     public private(set) var isShowing = false
 
     public init() {
@@ -103,6 +121,19 @@ public final class CompanionPanel: NSPanel {
         }
     }
 
+    /// Flies the buddy to where a look said the thing is, and leaves it there — the person can
+    /// see what is being talked about — until they move the pointer, or a while has passed.
+    ///
+    /// The spot arrives in the global top-left-origin coordinates a look is made in; the panel is
+    /// placed in AppKit's, which go up from the bottom of the main display.
+    public func point(at target: ScreenTarget) {
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        let spot = CGPoint(x: target.point.x, y: height - target.point.y)
+        pointing = Pointing(spot: spot, pointerThen: lastPointer)
+        buddy.glowRadius = 14
+        lastPointer = nil
+    }
+
     /// One frame of following. Internal so tests can drive it without a timer.
     ///
     /// Moving a window is not free — it goes to the window server and redraws — and the buddy is
@@ -110,6 +141,26 @@ public final class CompanionPanel: NSPanel {
     /// pointer that the ease has already caught up with costs nothing at all, and an ease whose
     /// remaining fraction of a point rounds to the origin the panel is already at is not written.
     func step(pointer: CGPoint, dt: TimeInterval) {
+        if var pointing {
+            pointing.held += dt
+            let then = pointing.pointerThen ?? pointer
+            pointing.pointerThen = then
+            let moved = hypot(pointer.x - then.x, pointer.y - then.y)
+            if moved >= Self.pointingLetGo || pointing.held >= Self.pointingHold {
+                self.pointing = nil
+                buddy.glowRadius = 8
+                lastPointer = nil
+            } else {
+                self.pointing = pointing
+                follower.aim(at: pointing.spot, dt: dt)
+                let origin = Self.integral(follower.origin(forPanelOf: frame.size))
+                if origin != frame.origin {
+                    moves += 1
+                    setFrameOrigin(origin)
+                }
+                return
+            }
+        }
         if pointer == lastPointer, remainingDistance(to: pointer) < Self.settledDistance { return }
         lastPointer = pointer
         follower.follow(pointer, dt: dt)

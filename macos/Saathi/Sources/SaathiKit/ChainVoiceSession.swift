@@ -35,7 +35,7 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
     private let speaker: any Speaker
     let ears: any Ears
     private let urlSession: URLSession
-    private let look: @Sendable (String) async -> String
+    private let look: @Sendable (String) async -> ScreenLook
     /// False for a session that only listens: a turn ends with the transcript and nothing is sent
     /// to any model. First run uses it — "can I hear you?" and "what should I call you?" are
     /// answered by what was heard, and must work before a model has been chosen at all.
@@ -77,7 +77,7 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
         ears: (any Ears)? = nil,
         urlSession: URLSession = URLSession(configuration: .default),
         thinks: Bool = true,
-        look: (@Sendable (String) async -> String)? = nil
+        look: (@Sendable (String) async -> ScreenLook)? = nil
     ) {
         self.configuration = configuration
         self.speaker = speaker
@@ -245,8 +245,9 @@ public final class ChainVoiceSession: VoiceSession, @unchecked Sendable {
                     callbacks.onStatus?("looking at the screen…")
                     let seen = await look(question)
                     guard isCurrent(epoch) else { return }
-                    callbacks.onScreenLook?(question, seen)
-                    round.append(Self.toolResult(call.id, seen))
+                    callbacks.onScreenLook?(question, seen.answer)
+                    if let target = seen.target { callbacks.onPointAt?(target) }
+                    round.append(Self.toolResult(call.id, seen.answer))
                     owesAnAnswer = true
                     continue
                 }

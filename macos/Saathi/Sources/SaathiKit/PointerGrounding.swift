@@ -234,13 +234,13 @@ public enum PointerGrounding {
         return captions
     }
 
-    private static func copyValue(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+    static func copyValue(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value
     }
 
-    private static func copyElement(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
+    static func copyElement(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
         guard let value = copyValue(element, attribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }
@@ -277,12 +277,23 @@ public enum PointerGrounding {
         return collapsed.count > 600 ? String(collapsed.prefix(600)) + "…" : collapsed
     }
 
-    private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {
+    static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {
         guard let string = copyValue(element, attribute) as? String, !string.isEmpty else { return nil }
         return string
     }
 
-    private static func copyChildren(_ element: AXUIElement) -> [AXUIElement] {
+    static func copyChildren(_ element: AXUIElement) -> [AXUIElement] {
         (copyValue(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+    }
+
+    /// The element's frame in screen points, top-left origin, as Accessibility reports it.
+    static func copyFrame(_ element: AXUIElement) -> CGRect? {
+        guard let positionValue = copyValue(element, kAXPositionAttribute),
+              let sizeValue = copyValue(element, kAXSizeAttribute) else { return nil }
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else { return nil }
+        return CGRect(origin: position, size: size)
     }
 }

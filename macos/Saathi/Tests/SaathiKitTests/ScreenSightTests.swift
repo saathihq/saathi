@@ -59,6 +59,17 @@ final class ScreenSightTests: XCTestCase {
         XCTAssertEqual(regions.display, external)
     }
 
+    /// The eye is asked where the thing is, in the first picture's own pixels, and told that
+    /// picture's size — an eye that is not told the size guesses one.
+    func testThePromptAsksWhereTheThingIsInThePicturesOwnPixels() {
+        let prompt = ScreenSight.systemPrompt(question: "which button", pixelSize: CGSize(width: 2880, height: 1800))
+        XCTAssertTrue(prompt.contains("2880×1800 pixels"), prompt)
+        XCTAssertTrue(prompt.contains("[POINT:x,y:visible text]"), prompt)
+        XCTAssertTrue(prompt.contains("[POINT:none]"), prompt)
+        XCTAssertTrue(prompt.hasSuffix("which button"))
+        XCTAssertFalse(ScreenSight.systemPrompt(question: "q").contains("POINT"), "not asked for when there is no picture to point into")
+    }
+
     func testThePromptSaysWhatTheSecondPictureIs() {
         let prompt = ScreenSight.systemPrompt(question: "how do I play this song")
         XCTAssertTrue(prompt.contains("close-up"), prompt)
@@ -70,8 +81,9 @@ final class ScreenSightTests: XCTestCase {
     /// Recording permission" is a useful thing to be told, and silence is not. With no key to look
     /// with, nothing is captured at all.
     func testAFailedLookIsASentenceForTheModelToRepeat() async {
-        let answer = await ScreenSight(configuration: .init(provider: .local)).answer("what is this?")
-        XCTAssertEqual(answer, "could not look: seeing the screen needs an OpenAI or Anthropic key. Add one in Setup.")
+        let look = await ScreenSight(configuration: .init(provider: .local)).answer("what is this?")
+        XCTAssertEqual(look.answer, "could not look: seeing the screen needs an OpenAI or Anthropic key. Add one in Setup.")
+        XCTAssertNil(look.target)
     }
 
     func testTheEyeIsAnthropicFirstThenOpenAI() {

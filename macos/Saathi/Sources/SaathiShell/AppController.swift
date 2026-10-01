@@ -99,6 +99,13 @@ public final class AppController {
             onScreenLook: { [weak self] question, answer in
                 self?.conversation.append(.look(question: question, answer: answer))
             },
+            // The buddy flies to what the look was about, and the log says how the spot was found.
+            onPointAt: { [weak self] target in
+                guard let self else { return }
+                self.companion.point(at: target)
+                let text = target.visibleText.map { " \"\($0)\"" } ?? ""
+                self.conversation.append(.action("pointed at (\(Int(target.point.x)), \(Int(target.point.y)))\(text) — \(target.how)"))
+            },
             // Only first run draws these; the rest of the app has the face for that.
             // And only while a turn is open: the tap goes on firing for a moment after the turn is
             // closed, and a late buffer would leave the bars standing over a closed microphone.

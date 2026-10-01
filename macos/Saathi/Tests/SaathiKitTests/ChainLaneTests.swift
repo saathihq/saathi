@@ -84,6 +84,7 @@ final class ChainLaneTests: XCTestCase {
         let actions = Collected<SaathiAction>()
         let statuses = Collected<String>()
         let looks = Collected<String>()
+        let points = Collected<ScreenTarget>()
         let levels = Collected<Float>()
         let partials = Collected<String>()
 
@@ -94,6 +95,7 @@ final class ChainLaneTests: XCTestCase {
                 onAction: { self.actions.add($0) },
                 onStatus: { self.statuses.add($0) },
                 onScreenLook: { question, answer in self.looks.add("\(question) → \(answer)") },
+                onPointAt: { self.points.add($0) },
                 onInputLevel: { self.levels.add($0) },
                 onPartialTranscript: { self.partials.add($0) })
         }
@@ -105,7 +107,7 @@ final class ChainLaneTests: XCTestCase {
         speaker: any Speaker = LoggingSpeaker(),
         ears: any Ears = FakeEars(),
         thinks: Bool = true,
-        look: @escaping @Sendable (String) async -> String = { _ in "nothing much" }
+        look: @escaping @Sendable (String) async -> ScreenLook = { _ in ScreenLook(answer: "nothing much") }
     ) -> ChainVoiceSession {
         ChainVoiceSession(
             configuration: configuration ?? sarvam, speaker: speaker, ears: ears,
@@ -317,7 +319,7 @@ final class ChainLaneTests: XCTestCase {
             speaker: speaker,
             look: { question in
                 asked.add(question)
-                return "a folder called Saathi"
+                return ScreenLook(answer: "a folder called Saathi")
             })
         try await session.start(callbacks: heard.callbacks)
 
@@ -334,6 +336,22 @@ final class ChainLaneTests: XCTestCase {
         XCTAssertEqual(second[3]["content"] as? String, "a folder called Saathi")
     }
 
+    /// A look that is about somewhere on the screen says where, and the buddy is told before the
+    /// model says what it saw: the words and the pointer arrive together.
+    func testWhereALookPointsReachesWhoeverMovesTheBuddy() async throws {
+        let heard = Heard()
+        let target = ScreenTarget(point: CGPoint(x: 118, y: 42), visibleText: nil, how: "the eye alone")
+        let session = makeSession(
+            [calls("look_at_screen", #"{"question":"which button"}"#), says("The green one.")],
+            look: { _ in ScreenLook(answer: "The green button at the top left.", target: target) })
+        try await session.start(callbacks: heard.callbacks)
+        try await session.sendText("which button makes this full screen")
+        XCTAssertEqual(heard.points.all, [target])
+        XCTAssertEqual(heard.looks.all, ["which button → The green button at the top left."], "the tag never reaches the model")
+        let second = try messages(of: 1)
+        XCTAssertEqual(second[3]["content"] as? String, "The green button at the top left.")
+    }
+
     /// "Let me see" belongs in front of the pause, not after it.
     func testWordsThatComeWithALookAreSaidBeforeIt() async throws {
         let log = Collected<String>()
@@ -342,7 +360,7 @@ final class ChainLaneTests: XCTestCase {
             speaker: LoggingSpeaker(log: log),
             look: { _ in
                 log.add("look")
-                return "a folder"
+                return ScreenLook(answer: "a folder")
             })
         try await session.start(callbacks: VoiceSessionCallbacks())
         try await session.sendText("what is this")
@@ -505,7 +523,7 @@ final class ChainLaneTests: XCTestCase {
             look: { question in
                 looking.add(question)
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
-                return "far too late"
+                return ScreenLook(answer: "far too late")
             })
         try await session.start(callbacks: VoiceSessionCallbacks())
 

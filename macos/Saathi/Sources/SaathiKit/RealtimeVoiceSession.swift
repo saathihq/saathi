@@ -812,8 +812,10 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
                 defer { self.state.endLook() }
                 // A look that failed comes back as the reason, so the model can say something
                 // true about it. See `ScreenSight.answer`.
-                let answer = await ScreenSight(configuration: self.configuration).answer(question)
+                let seen = await ScreenSight(configuration: self.configuration).answer(question)
+                let answer = seen.answer
                 self.state.callbacks.onScreenLook?(question, answer)
+                if let target = seen.target { self.state.callbacks.onPointAt?(target) }
                 try? self.send([
                     "type": "conversation.item.create",
                     "item": ["type": "function_call_output", "call_id": callId, "output": answer],

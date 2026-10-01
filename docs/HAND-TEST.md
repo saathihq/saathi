@@ -135,6 +135,12 @@ Setup has no Sarvam row, it is an older one. To build it again:
 - [ ] Pointer on something, "what is this?" (in Malayalam or English): it says "looking" on the
       island and then names the thing. *Needs an OpenAI or Anthropic key as well; with only a Sarvam
       key it should say that seeing the screen needs one.*
+- [ ] "Which button makes this terminal full screen?" — the buddy flies to the green button as the
+      answer is spoken, glows a little wider, and stays until you move the mouse (or eight seconds).
+      Try a link or a button with a caption too: it should land on the text itself.
+      `~/.saathi/conversation.log` has a "pointed at (x, y) — …" line saying how the spot was found:
+      by the text on the frame, by Accessibility, or by the eye alone. *The eye alone can be
+      tens of points off; the other two should be exact.*
 - [ ] Language → Français. The note under the keys says Sarvam does not hear or speak French, and
       holding the keys says why rather than listening.
 - [ ] Turn the switch **off**: the sentence becomes "I will listen on this Mac and think with

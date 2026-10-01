@@ -50,6 +50,7 @@ private final class FakeSession: VoiceSession, @unchecked Sendable {
     func stop() async { note("stop") }
 
     func emit(_ action: SaathiAction) { callbacks.withLock { $0 }?.onAction?(action) }
+    func point(_ target: ScreenTarget) { callbacks.withLock { $0 }?.onPointAt?(target) }
     private func note(_ what: String) { log.withLock { $0.append("\(name).\(what)") } }
 }
 
@@ -256,5 +257,35 @@ final class VoiceConductorInterruptionTests: XCTestCase {
         voice.keysEnded()
         await voice.settle()
         XCTAssertEqual(log.withLock { $0 }.filter { $0 == "s.interrupt" }.count, 1)
+    }
+}
+
+// MARK: - Where a look points
+
+@MainActor
+final class VoiceConductorPointingTests: XCTestCase {
+
+    /// A session that says where a look points is heard by whoever moves the buddy.
+    func testWhereALookPointsReachesTheShell() async {
+        let log = OSAllocatedUnfairLock(initialState: [String]())
+        let pointed = OSAllocatedUnfairLock(initialState: [ScreenTarget]())
+        var session: FakeSession?
+        let voice = VoiceConductor(
+            makeSession: { _ in
+                let made = FakeSession("s", log: log)
+                session = made
+                return made
+            },
+            perform: { _ in },
+            stopSpeaking: {},
+            onEvent: { _ in },
+            onPointAt: { target in pointed.withLock { $0.append(target) } })
+        voice.start(with: SaathiConfiguration(provider: .local))
+        await voice.settle()
+
+        let target = ScreenTarget(point: CGPoint(x: 118, y: 42), visibleText: nil, how: "the eye alone")
+        session?.point(target)
+        for _ in 0..<100 where pointed.withLock({ $0.isEmpty }) { await Task.yield() }
+        XCTAssertEqual(pointed.withLock { $0 }, [target])
     }
 }

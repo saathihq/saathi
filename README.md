@@ -137,6 +137,13 @@ On this lane a turn can be talked over — hold the keys and whatever Saathi was
 the answer it was waiting for is dropped — and "what is this?" is answered by looking: the model
 asks to see the screen, is told what is there, and then says so.
 
+A look also points. The eye says where on the frame the thing it describes is, Saathi snaps that
+to the real control — the text on the frame, read back with Vision; the front window's
+Accessibility tree for a caption that appears more than once; the eye's own point for an icon —
+and the pointer buddy flies there and waits until you move the mouse. "Which button makes this
+full screen?" is answered in words and with the buddy on the green button, on every lane and in
+every language. The locating is OpenClicky's, carried over at last.
+
 ### Sarvam, heard and spoken
 
 The on-device promise has a cost, and it falls on exactly the people Saathi starts with. Measured on

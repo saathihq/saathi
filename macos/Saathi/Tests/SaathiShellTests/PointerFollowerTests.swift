@@ -33,6 +33,17 @@ final class PointerFollowerTests: XCTestCase {
         XCTAssertEqual(follower.offset.dy, -25)
     }
 
+    /// Pointing is the one time the buddy goes somewhere other than beside the pointer: straight
+    /// at the spot, with no offset, so the spot is what it sits on.
+    func testAimingGoesToTheSpotItselfWithNoOffset() {
+        var follower = PointerFollower(start: .zero)
+        let spot = CGPoint(x: 300, y: 200)
+        for _ in 0..<600 { _ = follower.aim(at: spot, dt: 1.0 / 60) }
+        XCTAssertEqual(follower.position.x, spot.x, accuracy: 0.01)
+        XCTAssertEqual(follower.position.y, spot.y, accuracy: 0.01)
+        XCTAssertEqual(follower.aim(at: spot, dt: 0), follower.position, "no time, no movement")
+    }
+
     func testThePanelOriginCentresThePanelOnThePosition() {
         var follower = PointerFollower(start: CGPoint(x: 100, y: 100))
         // The pointer that parks the buddy on (100, 100) is 35 pt to its left and 25 pt above it.

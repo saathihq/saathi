@@ -33,6 +33,17 @@ public struct PointerFollower: Equatable {
         return position
     }
 
+    /// Eases to `spot` itself, with no offset: pointing is the one time the buddy goes somewhere
+    /// other than beside the pointer, and then the spot is what it should sit on.
+    @discardableResult
+    public mutating func aim(at spot: CGPoint, dt: TimeInterval) -> CGPoint {
+        guard dt > 0 else { return position }
+        let k = 1 - exp(-dt / response)
+        position.x += (spot.x - position.x) * k
+        position.y += (spot.y - position.y) * k
+        return position
+    }
+
     /// The panel's bottom-left so the buddy is centred on the position.
     public func origin(forPanelOf size: CGSize) -> CGPoint {
         CGPoint(x: position.x - size.width / 2, y: position.y - size.height / 2)
