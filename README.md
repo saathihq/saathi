@@ -54,9 +54,12 @@ nothing from anybody:
 | `hosted` | none — we hold them | yes | yes, to Saathi's backend |
 
 `sarvam` is [Sarvam AI](https://sarvam.ai) — Indian-built models with real
-Indic-language coverage, which matters given where Saathi starts. It is
-OpenAI-shaped (`https://api.sarvam.ai/v1`, `Authorization: Bearer`), so it shares
-the same client path as the others.
+Indic-language coverage, which matters given where Saathi starts. Its chat
+endpoint is OpenAI-shaped (`https://api.sarvam.ai/v1`, `Authorization: Bearer`),
+so the thinking shares a client path with everyone else's. Its speech is the part
+nobody else has: it hears and speaks ten Indian languages, nine of which this Mac
+cannot hear at all. Saathi can use it for both — see
+[Sarvam, heard and spoken](#sarvam-heard-and-spoken).
 
 `local` talks to an OpenAI-compatible server on your own machine — Ollama, LM
 Studio, llama.cpp. With nothing configured at all, that is what you get:
@@ -83,8 +86,12 @@ your machine and goes straight to that provider; Saathi's servers are not in the
 path:
 
 ```json
-{ "provider": "sarvam", "apiKey": "…" }
+{ "provider": "sarvam", "sarvamKey": "…" }
 ```
+
+Each vendor has a field of its own — `openaiKey`, `sarvamKey`, `anthropicKey` — so
+one file can hold all three. Pasting a key into Setup, in the app, writes the same
+thing. (The older shared `apiKey` is still read.)
 
 How a key is presented is data, not code: each provider row carries the header
 name and prefix it needs (`Authorization: Bearer …` for most, `x-api-key` for
@@ -105,6 +112,7 @@ spoken turn over one connection, so the lane is a **column in the provider table
 |---|---|---|---|
 | `local` *(default)* | `chain` | on-device | never leaves |
 | `anthropic`, `sarvam` | `chain` | on-device | never leaves — only the transcript is sent |
+| any of those three, with `"speech": "sarvam"` | `chain` | Sarvam | leaves as audio, to Sarvam |
 | `openai`, `hosted` | `realtime` | over the connection | leaves as audio |
 
 ```bash
@@ -124,6 +132,55 @@ also makes a promise the realtime lane cannot: both ends run on-device, so with 
 `anthropic` doing the thinking, **your voice never leaves the machine — only the transcript does.**
 `saathi voice` states which of those you are getting, and both clients are tested to say the same
 thing about it.
+
+On this lane a turn can be talked over — hold the keys and whatever Saathi was saying stops, and
+the answer it was waiting for is dropped — and "what is this?" is answered by looking: the model
+asks to see the screen, is told what is there, and then says so.
+
+### Sarvam, heard and spoken
+
+The on-device promise has a cost, and it falls on exactly the people Saathi starts with. Measured on
+the Mac this was written on (macOS 26): Apple's recogniser works on-device for English; it exists
+for Hindi but only by sending audio to Apple, which Saathi will not do; and for Tamil, Telugu,
+Bengali, Marathi, Kannada, Malayalam, Gujarati, Punjabi and Odia there is no recogniser at all. Five
+of those have no system voice either. A chain lane that can only be spoken to in English is not
+much of a lane for someone in Kochi.
+
+So the chain lane's ears and mouth can be Sarvam's instead:
+
+```json
+{ "provider": "sarvam", "sarvamKey": "…", "speech": "sarvam", "language": "ml" }
+```
+
+Saaras hears the turn, Sarvam-105B thinks, Bulbul speaks the answer. `speech` is separate from
+`provider` on purpose, because it changes where your voice goes: with it your audio is sent to
+Sarvam, and without it — which is what `"provider": "sarvam"` alone has always meant, and still
+means — only the words are. Nothing turns it on for you except asking. Pasting a Sarvam key into
+Setup is asking: the sentence under the key says your voice will leave as audio while the key is
+still in the field, before anything is saved, and there is a switch beside the language to turn it
+off again. It works in front of any chain-lane model, so `"provider": "anthropic"` or a local model
+with `"speech": "sarvam"` is Claude, or Ollama, with Sarvam's ears.
+
+```bash
+saathi sarvam          # is the key accepted, can Bulbul speak, can Saaras hear it, does the model answer
+saathi sarvam --play   # ...and play what Bulbul said
+```
+
+Four lines, one for each thing Saathi asks of Sarvam, each saying what came back or exactly what
+refused. It needs no microphone: what Saaras is asked to hear is what Bulbul has just said.
+
+`saathi sarvam` has passed all four lines against the live service, in Malayalam, Hindi, Tamil and
+English (2026-09-30): the key check, Bulbul, Saaras hearing Bulbul back, and Sarvam-105B answering
+with the tools attached. What has not yet been tried is the app itself with Sarvam's speech — the
+microphone, the player, and a held turn — which is the hand test in `docs/HAND-TEST.md`.
+
+The languages are the eleven Bulbul speaks: Bengali, English, Gujarati, Hindi, Kannada, Malayalam,
+Marathi, Odia, Punjabi, Tamil and Telugu. Any other language with `speech: sarvam` is refused out
+loud rather than quietly listened to on the Mac. The voice is `shubh`; `"voice": "ishita"` changes
+it. The model is `sarvam-105b`, asked to answer without reasoning first, since a reply is a sentence
+or two; `"model": "sarvam-105b-conversations"` tries the conversational variant. It is one request per
+step, not Sarvam's streaming sockets, so nothing appears while you talk and a reply starts once all
+of it has been synthesised. Looking at the screen still needs an OpenAI or Anthropic key.
 
 The audio engine and the realtime protocol handling were carried over from OpenClicky rather than
 rewritten, because they were the parts that had already been paid for: echo cancellation configured
@@ -184,7 +241,7 @@ npm install
 npm run generate        # rewrite the generated contract for all three targets
 npm run check:contract  # fail if what is checked in is stale (CI runs this on every PR)
 npm test                # backend             (64 tests)
-npm run test:mac        # swift test          (about 390, silent: see below)
+npm run test:mac        # swift test          (about 630, silent: see below)
 npm run test:win        # dotnet test
 bash scripts/check-parity.sh   # run both clients and diff them
 ```
@@ -200,10 +257,15 @@ cd windows && dotnet run --project src/Saathi.Cli -- demo
 
 Both print the same four lines. The macOS one speaks them unless you add `--quiet`.
 
-`swift test` is silent and touches no audio hardware by default. The three tests that speak through
-the real synthesiser or build real `AVAudioEngine`s are opt-in — `SAATHI_AUDIO_TESTS=1 swift test` —
-because a test run in the background should not take the sound out of whatever else the machine is
-doing, and with a Bluetooth headset connecting mid-run they crashed inside AVFAudio.
+`swift test` is silent and touches no audio hardware by default. The five tests that speak through
+the real synthesiser, build real `AVAudioEngine`s or play through the real audio output are opt-in —
+`SAATHI_AUDIO_TESTS=1 swift test` — because a test run in the background should not take the sound
+out of whatever else the machine is doing, and with a Bluetooth headset connecting mid-run they
+crashed inside AVFAudio.
+
+Building the macOS client needs Xcode 26 or later: Dictate uses Apple's `SpeechAnalyzer`, which is in
+the macOS 26 SDK and no earlier one. The app that comes out still runs on macOS 13. CI builds and
+tests on `macos-26` for the same reason.
 
 ### Building and signing it yourself
 
@@ -425,9 +487,13 @@ The skeleton this README was first written around has been built on. What exists
 - **A macOS app, not only a CLI.** A menu-bar item, an island that hangs from the notch and opens
   under the pointer (Home, Setup and Agents tabs), an orange pointer buddy, and hold
   control + option to talk, in any app. `scripts/release.sh` builds, signs and notarizes it.
-- **Keys in the app.** Paste an OpenAI or Anthropic key in Setup; it is validated, stored in
+- **Keys in the app.** Paste an OpenAI, Sarvam or Anthropic key in Setup; it is validated, stored in
   `~/.saathi/shell.json` at 0600, and Saathi reconfigures itself without a relaunch. The sentence
-  under the fields says where your voice will go, and is the same code that decides it.
+  under the fields says where your voice will go, and is the same code that decides it. Where it
+  thinks is a picker once there is more than one place it could.
+- **Sarvam, end to end — on paper.** Saaras for the ears, Sarvam-105B for the thinking, Bulbul for
+  the mouth, in ten Indian languages and English, with `saathi sarvam` to check all three. Written
+  from Sarvam's reference and tested against it; not yet run against a real key, and not yet heard.
 - **Four actions**, not three: `say`, `show_step`, `open_url`, and `look_at_screen` — one frame of
   the pointer's display plus a close-up around the pointer, sent to a vision model only when a turn
   asks about something visible, with what macOS Accessibility says is under the pointer alongside.
@@ -466,6 +532,14 @@ question:
   no-op'd. It must land with whatever first writes a real token.
 - **A doing lane.** Saathi talks, shows steps, opens links and looks. It does not yet do work in
   other apps; the Agents tab says so rather than showing an empty grid.
+- **Sarvam against a real key**, and then its streaming sockets: words as you say them, a reply
+  that starts before all of it is synthesised, and hands-free on the chain lane. Odia is heard and
+  spoken (`"language": "or"`) but is not in the language picker, because the realtime lane's
+  transcriber does not list it.
+- **Claude as the thinker, tried.** `provider: anthropic` now reaches Anthropic's OpenAI-compatible
+  endpoint — it used to post to a path that is a 404 — but no Anthropic key has been put through it.
+  The same fix is what lets the default `local` mode reach Ollama, which has not been tried on this
+  branch either.
 - **Billing.** Accounts have a plan label and an allowance, not a price. India is the first market
   and the payment rail is an open decision.
 - **The website** (`saathi-site`, a separate repository) needs to say what now exists.

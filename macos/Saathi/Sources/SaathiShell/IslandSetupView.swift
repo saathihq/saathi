@@ -6,7 +6,7 @@
 //  of titled sections, each a rounded card of rows, with one row idiom (icon, title, value) and
 //  three variants of it (a switch, a tappable row with a chevron, a key field).
 //
-//  The two keys are rows here rather than a screen of their own. They were a panel with two big
+//  The keys are rows here rather than a screen of their own. They were a panel with two big
 //  fields and a Save button, which is a different kind of surface from everything else Saathi shows
 //  about itself — and it meant the one place that says where your voice goes was somewhere you had
 //  to leave the settings to find.
@@ -28,13 +28,11 @@ struct IslandSetupView: View {
 
     /// Held here rather than in the model: a key being typed is not application state, and keeping
     /// it out of the observable object means it is never published to anything else.
-    @State private var openAIKey = ""
-    @State private var anthropicKey = ""
+    @State private var keys = VendorKeys()
     /// Save is the only button: it checks whatever was typed and saves it if the vendor accepts it.
     /// Not while a check is in flight — its verdict is about to decide.
     private func canSave(_ kind: ProviderKind) -> Bool {
-        let field = kind == .openai ? openAIKey : anthropicKey
-        return !state(of: kind).isBusy && !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !model.keyStates[kind].isBusy && !keys[kind].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var home: String { NSHomeDirectory() }
@@ -56,7 +54,7 @@ struct IslandSetupView: View {
         // The fields are view-local and start empty every time this is built — the island
         // collapsing tears it down — so a "works" left over from before is about a key no longer
         // in any field.
-        .onAppear { actions.onKeyFieldsEmpty(openAIKey, anthropicKey) }
+        .onAppear { actions.onKeyFields(keys, nil) }
     }
 
     // MARK: - Keys
@@ -69,15 +67,19 @@ struct IslandSetupView: View {
                 systemImage: "key.fill",
                 title: "OpenAI",
                 detail: "voice and thinking",
-                text: $openAIKey,
-                state: model.openAIKeyState,
+                text: $keys.openAI,
                 kind: .openai)
+            keyRow(
+                systemImage: "globe.asia.australia",
+                title: "Sarvam",
+                detail: "Indian languages, heard and spoken",
+                text: $keys.sarvam,
+                kind: .sarvam)
             keyRow(
                 systemImage: "key",
                 title: "Anthropic",
                 detail: "looking at the screen",
-                text: $anthropicKey,
-                state: model.anthropicKeyState,
+                text: $keys.anthropic,
                 kind: .anthropic)
 
             // The sentence under the fields is the save it promises: what Saathi will become if
@@ -85,8 +87,8 @@ struct IslandSetupView: View {
             if !model.planExplanation.isEmpty {
                 noteRow(model.planExplanation, emphasised: true)
             }
-            if !model.unusedKeyNote.isEmpty {
-                noteRow(model.unusedKeyNote, emphasised: false)
+            if !model.keysNote.isEmpty {
+                noteRow(model.keysNote, emphasised: false)
             }
 
         }
@@ -131,10 +133,34 @@ struct IslandSetupView: View {
         section("VOICE") {
             // The language row is a setting in the same sense the rest are: something Saathi would
             // otherwise guess, and guessed wrong loudly enough to be reported.
-            pickerRow(systemImage: "character.bubble", title: "Language", detail: "what it answers in")
+            pickerRow(
+                systemImage: "character.bubble",
+                title: "Language",
+                detail: model.sarvamSpeechOn ? "what it hears and answers in" : "what it answers in",
+                selection: Binding(get: { model.language }, set: { actions.onLanguage($0) }),
+                options: IslandLanguage.all.map { ($0.tag, $0.title) })
+            // Only where it could be switched: a Sarvam key is saved, and a turn is three steps.
+            // The detail is the whole of what turning it on means.
+            if model.sarvamSpeechAvailable {
+                toggleRow(
+                    systemImage: "ear",
+                    title: "Hear and speak through Sarvam",
+                    detail: "Your voice, and what is said back, go to Sarvam",
+                    isOn: Binding(get: { model.sarvamSpeechOn }, set: { actions.onSarvamSpeech($0) }))
+            }
             settingRow(systemImage: "waveform", title: "Voice", value: model.voiceTitle.isEmpty ? "—" : model.voiceTitle)
             settingRow(systemImage: "arrow.left.arrow.right", title: "A turn", value: model.laneTitle)
-            settingRow(systemImage: "brain", title: "Where it thinks", value: model.providerTitle)
+            // A picker once there is more than one place it could think; a line of text until then.
+            if model.providerChoices.count > 1 {
+                pickerRow(
+                    systemImage: "brain",
+                    title: "Where it thinks",
+                    detail: model.providerTitle,
+                    selection: Binding(get: { model.provider }, set: { actions.onChooseProvider($0) }),
+                    options: model.providerChoices.map { ($0.kind, $0.title) })
+            } else {
+                settingRow(systemImage: "brain", title: "Where it thinks", value: model.providerTitle)
+            }
             settingRow(systemImage: "lock.shield", title: "Your voice", value: model.privacyLine)
             settingRow(systemImage: "keyboard", title: "Talk shortcut", value: "hold ⌃ control + ⌥ option")
         }
@@ -279,8 +305,14 @@ struct IslandSetupView: View {
         .pointerCursor()
     }
 
-    /// The language picker, wearing the row idiom so it does not read as a stray control.
-    private func pickerRow(systemImage: String, title: String, detail: String) -> some View {
+    /// A picker, wearing the row idiom so it does not read as a stray control.
+    private func pickerRow<Tag: Hashable>(
+        systemImage: String,
+        title: String,
+        detail: String,
+        selection: Binding<Tag>,
+        options: [(tag: Tag, title: String)]
+    ) -> some View {
         HStack {
             Image(systemName: systemImage).font(.system(size: 12)).foregroundColor(Color.white.opacity(0.6)).frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
@@ -288,9 +320,9 @@ struct IslandSetupView: View {
                 Text(detail).font(.system(size: 10)).foregroundColor(Color.white.opacity(0.5))
             }
             Spacer()
-            Picker("", selection: Binding(get: { model.language }, set: { actions.onLanguage($0) })) {
-                ForEach(IslandLanguage.all) { language in
-                    Text(language.title).tag(language.tag)
+            Picker("", selection: selection) {
+                ForEach(options.indices, id: \.self) { index in
+                    Text(options[index].title).tag(options[index].tag)
                 }
             }
             .labelsHidden()
@@ -312,12 +344,12 @@ struct IslandSetupView: View {
         title: String,
         detail: String,
         text: Binding<String>,
-        state: KeyFieldState,
         kind: ProviderKind
     ) -> some View {
+        let state = model.keyStates[kind]
         let save = {
             guard canSave(kind) else { return }
-            actions.onSaveKeys(openAIKey, anthropicKey)
+            actions.onSaveKeys(keys)
         }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -334,15 +366,11 @@ struct IslandSetupView: View {
                     .padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.10)))
                     .onSubmit(save)
-                    .onChange(of: text.wrappedValue) { value in
-                        // Typing invalidates an earlier verdict: a green tick next to a key that has
-                        // since been edited is the panel lying about what it checked. Emptying the
-                        // field puts back the verdict the key on disk earns.
-                        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            actions.onKeyFieldsEmpty(openAIKey, anthropicKey)
-                        } else {
-                            setState(kind, .editing)
-                        }
+                    .onChange(of: text.wrappedValue) { _ in
+                        // Every change is reported, with every field: typing invalidates an earlier
+                        // verdict, emptying a field puts back the one the key on disk earns, and
+                        // either changes what the sentence below has to say.
+                        actions.onKeyFields(keys, kind)
                     }
 
                 Button(action: save) {
@@ -379,14 +407,6 @@ struct IslandSetupView: View {
         }
     }
 
-    private func state(of kind: ProviderKind) -> KeyFieldState {
-        switch kind {
-        case .openai: return model.openAIKeyState
-        case .anthropic: return model.anthropicKeyState
-        default: return .empty
-        }
-    }
-
     private func noteRow(_ text: String, emphasised: Bool) -> some View {
         HStack(alignment: .top) {
             Image(systemName: emphasised ? "arrow.turn.down.right" : "info.circle")
@@ -405,14 +425,6 @@ struct IslandSetupView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-    }
-
-    private func setState(_ kind: ProviderKind, _ state: KeyFieldState) {
-        switch kind {
-        case .openai: model.openAIKeyState = state
-        case .anthropic: model.anthropicKeyState = state
-        default: break
-        }
     }
 
     @ViewBuilder

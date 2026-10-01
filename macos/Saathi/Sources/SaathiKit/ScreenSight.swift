@@ -280,6 +280,16 @@ public struct ScreenSight: Sendable {
     /// otherwise be in the picture. Nil in tests and the CLI, where there are none.
     @MainActor public static var concealOwnWindows: ((Bool) -> Void)?
 
+    /// `look`, with a failure turned into a sentence for the model to repeat. "I need Screen
+    /// Recording permission" is a useful thing to be told; silence is not.
+    public func answer(_ question: String) async -> String {
+        do {
+            return try await look(question: question)
+        } catch {
+            return "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
+        }
+    }
+
     /// Captures the screen and answers `question` about it.
     public func look(question: String) async throws -> String {
         guard let eye = Self.eye(for: configuration) else { throw ScreenSightError.noVisionKey }

@@ -14,6 +14,10 @@
 //  the machine — only the transcript does. That is a materially different promise from the realtime
 //  lane, and it is the reason this report exists separately from ProviderReport.
 //
+//  The one exception is asked for by name: `speech: sarvam` hands the chain lane's ears and mouth
+//  to Sarvam, and then the audio does leave — whoever is doing the thinking. This is where that
+//  is said.
+//
 //  Windows has no voice implementation yet: this reports the lane the contract assigns, which is
 //  real and checkable, and the WPF shell will implement it behind the same contract. Reporting a
 //  lane the platform cannot yet run is deliberate — it is what makes the gap visible rather than
@@ -39,10 +43,10 @@ public static class VoiceLaneReport
             $"  {LaneSummary(row.Voice)}",
             "",
             $"  lane       {row.Voice.ToString().ToLowerInvariant()}",
-            $"  speech in  {SpeechEnd(row)}",
+            $"  speech in  {SpeechEnd(configuration)}",
             $"  thinking   {model} @ {configuration.ResolvedProviderBaseUrl}",
-            $"  speech out {SpeechEnd(row)}",
-            $"  your voice {VoicePrivacy(row)}",
+            $"  speech out {SpeechEnd(configuration)}",
+            $"  your voice {VoicePrivacy(configuration)}",
             $"  turn       {TurnShape(row.Voice)}",
         };
         return string.Join("\n", lines);
@@ -55,16 +59,27 @@ public static class VoiceLaneReport
         _ => "Speech in, think, speech out as three separate steps. Slower, and it works with any model.",
     };
 
-    /// <summary>In the chain lane both ends are on-device, whoever the provider is. That is not a
-    /// fallback — it is the reason the chain lane is worth having at all.</summary>
-    private static string SpeechEnd(SaathiProvider row) =>
-        row.Voice == VoiceLane.Realtime
-            ? $"{row.Kind.ToString().ToLowerInvariant()}, over the open connection"
-            : "on this machine";
+    /// <summary>Whether a turn is heard and spoken by Sarvam. Only ever on the chain lane: the
+    /// realtime lane carries its own speech over its own connection and does not read Speech.</summary>
+    internal static bool SarvamSpeechIsOn(SaathiConfiguration configuration) =>
+        configuration.ProviderRow.Voice == VoiceLane.Chain && configuration.ResolvedSpeech == SpeechEngine.Sarvam;
 
-    private static string VoicePrivacy(SaathiProvider row)
+    /// <summary>Where speech is heard, and where it is made: the same place, on either lane. In
+    /// the chain lane that is this machine, whoever the provider is — not a fallback, but the
+    /// reason the chain lane is worth having at all — unless Sarvam's ears and mouth were asked
+    /// for.</summary>
+    private static string SpeechEnd(SaathiConfiguration configuration)
     {
+        var row = configuration.ProviderRow;
+        if (row.Voice == VoiceLane.Realtime) return $"{row.Kind.ToString().ToLowerInvariant()}, over the open connection";
+        return SarvamSpeechIsOn(configuration) ? "sarvam, over the network" : "on this machine";
+    }
+
+    private static string VoicePrivacy(SaathiConfiguration configuration)
+    {
+        var row = configuration.ProviderRow;
         if (row.Voice == VoiceLane.Realtime) return "leaves this machine as audio";
+        if (SarvamSpeechIsOn(configuration)) return "leaves this machine as audio, to Sarvam";
         if (row.SendsDataOffMachine) return "stays on this machine — only the transcript is sent";
         return "stays on this machine";
     }

@@ -299,8 +299,15 @@ public struct OnboardingModel: Equatable, Sendable {
         guard step == .finished else { return }
         configuration.onboarded = true
         switch providerChoice {
-        case .hosted: configuration.provider = .hosted
-        case .local: configuration.provider = .local
+        // A choice made here is made on a card that has just said where the voice goes, and
+        // neither card says Sarvam. Whatever had asked for Sarvam's ears before — a switch, a line
+        // in the file — does not survive it: "Everything stays on this Mac" has to be true.
+        case .hosted:
+            configuration.provider = .hosted
+            configuration.speech = nil
+        case .local:
+            configuration.provider = .local
+            configuration.speech = nil
         // Setup decides the provider from the keys that validate, as it does today.
         case .ownKey, .none: break
         }

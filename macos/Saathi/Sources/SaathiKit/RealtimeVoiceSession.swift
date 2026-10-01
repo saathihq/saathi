@@ -679,15 +679,8 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
     static let keepsLastTurn = ProcessInfo.processInfo.environment["SAATHI_KEEP_LAST_TURN"] == "1"
 
     static func writeLastTurn(_ pcm16: Data) {
-        let rate = UInt32(VoiceAudioEngine.sampleRate)
-        var header = Data()
-        func put<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { header.append(contentsOf: $0) } }
-        header.append(contentsOf: Array("RIFF".utf8)); put(UInt32(36 + pcm16.count))
-        header.append(contentsOf: Array("WAVEfmt ".utf8)); put(UInt32(16)); put(UInt16(1)); put(UInt16(1))
-        put(rate); put(rate * 2); put(UInt16(2)); put(UInt16(16))
-        header.append(contentsOf: Array("data".utf8)); put(UInt32(pcm16.count))
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".saathi/last-turn.wav")
-        try? (header + pcm16).write(to: url, options: .atomic)
+        try? WaveFile.wrap(pcm16: pcm16, sampleRate: Int(VoiceAudioEngine.sampleRate)).write(to: url, options: .atomic)
     }
 
     private func notConnected() -> VoiceError {
@@ -817,14 +810,9 @@ public final class RealtimeVoiceSession: NSObject, VoiceSession, SharedMicrophon
             Task { [weak self] in
                 guard let self else { return }
                 defer { self.state.endLook() }
-                let answer: String
-                do {
-                    answer = try await ScreenSight(configuration: self.configuration).look(question: question)
-                } catch {
-                    // The model is told what went wrong so it can say something true — "I need
-                    // Screen Recording permission" is a useful sentence; silence is not.
-                    answer = "could not look: \((error as? ScreenSightError)?.description ?? error.localizedDescription)"
-                }
+                // A look that failed comes back as the reason, so the model can say something
+                // true about it. See `ScreenSight.answer`.
+                let answer = await ScreenSight(configuration: self.configuration).answer(question)
                 self.state.callbacks.onScreenLook?(question, answer)
                 try? self.send([
                     "type": "conversation.item.create",

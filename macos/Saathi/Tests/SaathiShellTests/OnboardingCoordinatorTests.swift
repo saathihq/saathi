@@ -526,8 +526,8 @@ final class OnboardingEntryTests: XCTestCase {
     /// must not be read out by a Tamil synthesiser; the pace they asked for still applies at once.
     func testFirstRunIsReadByAnEnglishVoiceWhateverLanguageWasChosen() {
         let chosen = SaathiConfiguration(language: "ta-IN", pace: .slow)
-        XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: true), SpeechSettings(language: "en-US", pace: .slow))
-        XCTAssertEqual(AppController.speechSettings(for: chosen, scripted: false), SpeechSettings(language: "ta-IN", pace: .slow))
+        XCTAssertEqual(CompanionVoice.deviceSettings(for: chosen, scripted: true), SpeechSettings(language: "en-US", pace: .slow))
+        XCTAssertEqual(CompanionVoice.deviceSettings(for: chosen, scripted: false), SpeechSettings(language: "ta-IN", pace: .slow))
     }
 
     /// Quit halfway through: a colour and a name are on disk, `onboarded` is not. It comes back.
