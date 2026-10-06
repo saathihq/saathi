@@ -59,11 +59,31 @@ final class ScreenSightTests: XCTestCase {
         XCTAssertEqual(regions.display, external)
     }
 
+    /// The eye is asked where the thing is, in the first picture's own pixels, and told that
+    /// picture's size — an eye that is not told the size guesses one.
+    func testThePromptAsksWhereTheThingIsInThePicturesOwnPixels() {
+        let prompt = ScreenSight.systemPrompt(question: "which button", pixelSize: CGSize(width: 2880, height: 1800))
+        XCTAssertTrue(prompt.contains("2880×1800 pixels"), prompt)
+        XCTAssertTrue(prompt.contains("[POINT:x,y:visible text]"), prompt)
+        XCTAssertTrue(prompt.contains("[POINT:none]"), prompt)
+        XCTAssertTrue(prompt.hasSuffix("which button"))
+        XCTAssertFalse(ScreenSight.systemPrompt(question: "q").contains("POINT"), "not asked for when there is no picture to point into")
+    }
+
     func testThePromptSaysWhatTheSecondPictureIs() {
         let prompt = ScreenSight.systemPrompt(question: "how do I play this song")
         XCTAssertTrue(prompt.contains("close-up"), prompt)
         XCTAssertTrue(prompt.contains("pointer"), prompt)
         XCTAssertTrue(prompt.hasSuffix("how do I play this song"))
+    }
+
+    /// Both lanes hand a failed look back to the model as words it can repeat: "I need Screen
+    /// Recording permission" is a useful thing to be told, and silence is not. With no key to look
+    /// with, nothing is captured at all.
+    func testAFailedLookIsASentenceForTheModelToRepeat() async {
+        let look = await ScreenSight(configuration: .init(provider: .local)).answer("what is this?")
+        XCTAssertEqual(look.answer, "could not look: seeing the screen needs an OpenAI or Anthropic key. Add one in Setup.")
+        XCTAssertNil(look.target)
     }
 
     func testTheEyeIsAnthropicFirstThenOpenAI() {
@@ -72,6 +92,17 @@ final class ScreenSightTests: XCTestCase {
             ScreenSight.eye(for: .init(provider: .openai, openaiKey: "sk-o", anthropicKey: "sk-a")),
             .anthropic(model: "claude-haiku-4-5-20251001"))
         XCTAssertNil(ScreenSight.eye(for: .init(provider: .local)))
+    }
+
+    /// A shared key is the named provider's and nobody else's. A Sarvam key is not something to
+    /// show Anthropic, with a picture of the screen attached — which is what asking for a look did.
+    func testALegacyKeyIsOnlyAnEyeForTheProviderItWasWrittenFor() {
+        XCTAssertNil(ScreenSight.eye(for: .init(provider: .sarvam, apiKey: "sk-sarvam")))
+        XCTAssertNil(ScreenSight.eye(for: .init(apiKey: "sk-whose")))
+        XCTAssertEqual(ScreenSight.eye(for: .init(provider: .openai, apiKey: "sk-o")), .openai(model: "gpt-4o-mini"))
+        XCTAssertEqual(
+            ScreenSight.eye(for: .init(provider: .anthropic, apiKey: "sk-a")),
+            .anthropic(model: "claude-haiku-4-5-20251001"))
     }
 
     /// What Accessibility says is under the pointer settles which thing "this" is; without it the

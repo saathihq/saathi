@@ -21,13 +21,19 @@ private final class FakeSession: VoiceSession, @unchecked Sendable {
     let name: String
     let log: OSAllocatedUnfairLock<[String]>
     let endDelay: UInt64
+    /// Off unless a test is about interruptions, so every other test's log reads as it always did.
+    let notesInterruptions: Bool
     private let callbacks = OSAllocatedUnfairLock<VoiceSessionCallbacks?>(initialState: nil)
 
-    init(_ name: String, log: OSAllocatedUnfairLock<[String]>, speaksForItself: Bool = false, endDelay: UInt64 = 0) {
+    init(
+        _ name: String, log: OSAllocatedUnfairLock<[String]>, speaksForItself: Bool = false,
+        endDelay: UInt64 = 0, notesInterruptions: Bool = false
+    ) {
         self.name = name
         self.log = log
         self.speaksForItself = speaksForItself
         self.endDelay = endDelay
+        self.notesInterruptions = notesInterruptions
     }
 
     func start(callbacks: VoiceSessionCallbacks) async throws {
@@ -40,9 +46,11 @@ private final class FakeSession: VoiceSession, @unchecked Sendable {
         note("end")
     }
     func sendText(_ text: String) async throws { note("text:\(text)") }
+    func interrupt() { if notesInterruptions { note("interrupt") } }
     func stop() async { note("stop") }
 
     func emit(_ action: SaathiAction) { callbacks.withLock { $0 }?.onAction?(action) }
+    func point(_ target: ScreenTarget) { callbacks.withLock { $0 }?.onPointAt?(target) }
     private func note(_ what: String) { log.withLock { $0.append("\(name).\(what)") } }
 }
 
@@ -200,5 +208,84 @@ final class VoiceConductorTests: XCTestCase {
         await voice.settle()
         XCTAssertEqual(events, [.keysHeld, .keysReleased])
         XCTAssertEqual(log.withLock { $0 }.sorted(), ["s.begin", "s.end", "s.start"])
+    }
+}
+
+// MARK: - Talking over it
+
+@MainActor
+final class VoiceConductorInterruptionTests: XCTestCase {
+
+    private let log = OSAllocatedUnfairLock(initialState: [String]())
+
+    private func conductor() -> VoiceConductor {
+        let log = self.log
+        return VoiceConductor(
+            makeSession: { _ in FakeSession("s", log: log, notesInterruptions: true) },
+            perform: { _ in },
+            stopSpeaking: {},
+            onEvent: { _ in })
+    }
+
+    /// Holding the keys while Saathi is talking, or thinking, stops it — before the turn opens,
+    /// not after the answer nobody wanted has been said.
+    func testOpeningATurnInterruptsWhateverWasUnderWay() async {
+        let voice = conductor()
+        voice.start(with: SaathiConfiguration(provider: .local))
+        await voice.settle()
+
+        voice.keysBegan()
+        voice.keysEnded()
+        await voice.settle()
+        XCTAssertEqual(log.withLock { $0 }, ["s.start", "s.interrupt", "s.begin", "s.end"])
+
+        log.withLock { $0.removeAll() }
+        voice.toggleTalk()
+        voice.toggleTalk()
+        await voice.settle()
+        XCTAssertEqual(log.withLock { $0 }, ["s.interrupt", "s.begin", "s.end"], "the menu's Talk does the same")
+    }
+
+    /// A second key-down while the turn is already open is not a second interruption.
+    func testATurnAlreadyOpenIsNotInterruptedAgain() async {
+        let voice = conductor()
+        voice.start(with: SaathiConfiguration(provider: .local))
+        await voice.settle()
+
+        voice.keysBegan()
+        voice.keysBegan()
+        voice.keysEnded()
+        await voice.settle()
+        XCTAssertEqual(log.withLock { $0 }.filter { $0 == "s.interrupt" }.count, 1)
+    }
+}
+
+// MARK: - Where a look points
+
+@MainActor
+final class VoiceConductorPointingTests: XCTestCase {
+
+    /// A session that says where a look points is heard by whoever moves the buddy.
+    func testWhereALookPointsReachesTheShell() async {
+        let log = OSAllocatedUnfairLock(initialState: [String]())
+        let pointed = OSAllocatedUnfairLock(initialState: [ScreenTarget]())
+        var session: FakeSession?
+        let voice = VoiceConductor(
+            makeSession: { _ in
+                let made = FakeSession("s", log: log)
+                session = made
+                return made
+            },
+            perform: { _ in },
+            stopSpeaking: {},
+            onEvent: { _ in },
+            onPointAt: { target in pointed.withLock { $0.append(target) } })
+        voice.start(with: SaathiConfiguration(provider: .local))
+        await voice.settle()
+
+        let target = ScreenTarget(point: CGPoint(x: 118, y: 42), visibleText: nil, how: "the eye alone")
+        session?.point(target)
+        for _ in 0..<100 where pointed.withLock({ $0.isEmpty }) { await Task.yield() }
+        XCTAssertEqual(pointed.withLock { $0 }, [target])
     }
 }

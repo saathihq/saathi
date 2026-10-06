@@ -59,6 +59,46 @@ final class PanelTests: XCTestCase {
         XCTAssertGreaterThan(panel.moves, moves, "and it follows again the moment the pointer does")
     }
 
+    /// "Which button?" — the eye says where, and the buddy flies there and stays, so the
+    /// person can see the thing being talked about. The spot comes in the eye's coordinates,
+    /// which have their origin at the top left; the panel's have it at the bottom.
+    func testTheBuddyFliesToWhatSaathiPointsAtAndWaitsThere() throws {
+        let primary = try XCTUnwrap(NSScreen.screens.first, "needs a display")
+        let panel = CompanionPanel()
+        let pointer = CGPoint(x: primary.frame.midX, y: primary.frame.midY)
+        for _ in 0..<120 { panel.step(pointer: pointer, dt: 1.0 / 60) }
+
+        let spot = CGPoint(x: 118, y: 42)   // top-left origin, as a look reports it
+        panel.point(at: ScreenTarget(point: spot, how: "a test"))
+        for _ in 0..<120 { panel.step(pointer: pointer, dt: 1.0 / 60) }
+
+        XCTAssertTrue(panel.isPointing)
+        XCTAssertEqual(panel.frame.midX, 118, accuracy: 1)
+        XCTAssertEqual(panel.frame.midY, primary.frame.height - 42, accuracy: 1, "flipped into the panel's own coordinates")
+    }
+
+    /// It comes back the moment the person moves the pointer — the buddy is theirs, not a
+    /// marker — or after a while on its own.
+    func testTheBuddyComesBackWhenThePointerMovesOrAfterAWhile() throws {
+        let primary = try XCTUnwrap(NSScreen.screens.first, "needs a display")
+        let pointer = CGPoint(x: primary.frame.midX, y: primary.frame.midY)
+
+        let moved = CompanionPanel()
+        moved.point(at: ScreenTarget(point: CGPoint(x: 118, y: 42), how: "a test"))
+        for _ in 0..<30 { moved.step(pointer: pointer, dt: 1.0 / 60) }
+        XCTAssertTrue(moved.isPointing)
+        moved.step(pointer: CGPoint(x: pointer.x + 10, y: pointer.y), dt: 1.0 / 60)
+        XCTAssertTrue(moved.isPointing, "a nudge is not leaving")
+        for _ in 0..<60 { moved.step(pointer: CGPoint(x: pointer.x + 80, y: pointer.y), dt: 1.0 / 60) }
+        XCTAssertFalse(moved.isPointing)
+        XCTAssertEqual(moved.frame.midX, pointer.x + 80 + 35, accuracy: 1, "beside the pointer again")
+
+        let waited = CompanionPanel()
+        waited.point(at: ScreenTarget(point: CGPoint(x: 118, y: 42), how: "a test"))
+        for _ in 0..<Int(CompanionPanel.pointingHold * 60) + 5 { waited.step(pointer: pointer, dt: 1.0 / 60) }
+        XCTAssertFalse(waited.isPointing)
+    }
+
     func testTheBuddyIsASixteenPointOrangeTriangleWithAGlow() {
         let panel = CompanionPanel()
         XCTAssertEqual(PointerBuddyView.triangleSide, 16)

@@ -49,6 +49,16 @@ public sealed class ActionPerformer(ISpeaker speaker, IUrlOpener urlOpener)
                 await urlOpener.OpenAsync(Validated(open.Url), cancellationToken).ConfigureAwait(false);
                 break;
 
+            case LookAtScreenAction:
+                // Answered where the model can hear the answer, not here. Every other action is
+                // something Saathi does and then narrates; looking is something it finds out, and
+                // the finding has to go back to the model as the tool call's output. Reaching here
+                // means an action list was performed without a voice session, and doing nothing
+                // would look like a screen that could not be read.
+                throw new ActionException(
+                    "look_at_screen is answered by the voice session, which hands the answer back to "
+                    + "the model; it is not performed like an action.");
+
             default:
                 // Unreachable while every action in the contract is handled above. If the schema
                 // gains one and this switch is not updated, failing loudly here is the point.

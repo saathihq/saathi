@@ -67,6 +67,39 @@ final class VoiceLaneTests: XCTestCase {
         XCTAssertFalse(report.contains("only the transcript is sent"), "nothing is sent in local mode")
     }
 
+    /// With Sarvam's speech the voice does leave, and the report says so and says to whom.
+    func testSarvamsSpeechSaysTheVoiceLeavesAndWhereTo() {
+        let heardAndSpoken = SaathiConfiguration(provider: .sarvam, sarvamKey: "x", speech: .sarvam)
+        let report = VoiceLaneReport.describe(heardAndSpoken)
+        XCTAssertTrue(report.contains("lane       chain"))
+        XCTAssertTrue(report.contains("speech in  sarvam, over the network"))
+        XCTAssertTrue(report.contains("speech out sarvam, over the network"))
+        XCTAssertTrue(report.contains("your voice leaves this machine as audio, to Sarvam"))
+        XCTAssertFalse(report.contains("stays on this machine"))
+    }
+
+    /// A local model with Sarvam's ears: the thinking stays, the voice does not, and neither
+    /// report may say otherwise. The provider report says which is which, because two lines above
+    /// its privacy line the local row's own summary has just said nothing leaves the device.
+    func testALocalModelWithSarvamsEarsIsNotReportedAsStayingOnTheMachine() {
+        let mixed = SaathiConfiguration(sarvamKey: "x", speech: .sarvam)
+        XCTAssertTrue(VoiceLaneReport.describe(mixed).contains("your voice leaves this machine as audio, to Sarvam"))
+        XCTAssertTrue(ProviderReport.describe(mixed).hasSuffix(
+            "privacy    the thinking stays on this machine; your voice and what is said back go to Sarvam"),
+            "Bulbul is sent every reply to speak it: that leaves too, and the report has to say so")
+        XCTAssertTrue(ProviderReport.describe(SaathiConfiguration()).hasSuffix("privacy    stays on this machine"))
+        let sarvam = SaathiConfiguration(provider: .sarvam, sarvamKey: "x", speech: .sarvam)
+        XCTAssertTrue(ProviderReport.describe(sarvam).hasSuffix("privacy    leaves this machine"), "all of it does")
+    }
+
+    /// The realtime lane carries its own speech; `speech` is not read there and changes nothing.
+    func testSpeechIsNotReadOnTheRealtimeLane() {
+        let plain = SaathiConfiguration(provider: .openai, openaiKey: "x")
+        let withSpeech = SaathiConfiguration(provider: .openai, openaiKey: "x", speech: .sarvam)
+        XCTAssertEqual(VoiceLaneReport.describe(plain), VoiceLaneReport.describe(withSpeech))
+        XCTAssertEqual(ProviderReport.describe(plain), ProviderReport.describe(withSpeech))
+    }
+
     /// Same input, same bytes — this is what `scripts/check-parity.sh` diffs against the C# client.
     func testTheReportIsDeterministic() {
         let configuration = SaathiConfiguration(provider: .anthropic, apiKey: "x")
@@ -111,6 +144,36 @@ final class VoiceSessionFactoryTests: XCTestCase {
         XCTAssertThrowsError(
             try VoiceSessionFactory.make(
                 configuration: SaathiConfiguration(provider: .hosted), speaker: PrintingSpeaker()))
+    }
+
+    /// Sarvam's ears are asked for, not assumed: `provider: sarvam` on its own still listens here.
+    func testSarvamsSpeechGetsSarvamsEarsAndNothingElseDoes() throws {
+        let sarvam = try VoiceSessionFactory.make(
+            configuration: SaathiConfiguration(provider: .sarvam, sarvamKey: "k", speech: .sarvam, language: "ml"),
+            speaker: PrintingSpeaker())
+        XCTAssertTrue((sarvam as? ChainVoiceSession)?.ears is SarvamEars)
+
+        let claude = try VoiceSessionFactory.make(
+            configuration: SaathiConfiguration(provider: .anthropic, anthropicKey: "a", sarvamKey: "k", speech: .sarvam),
+            speaker: PrintingSpeaker())
+        XCTAssertTrue((claude as? ChainVoiceSession)?.ears is SarvamEars, "whoever does the thinking")
+
+        let onDevice = try VoiceSessionFactory.make(
+            configuration: SaathiConfiguration(provider: .sarvam, sarvamKey: "k"), speaker: PrintingSpeaker())
+        XCTAssertTrue((onDevice as? ChainVoiceSession)?.ears is DeviceEars)
+    }
+
+    /// No silent fallback, for speech as for everything else: what was asked for cannot be had, so
+    /// the session says why instead of quietly listening on this Mac.
+    func testSarvamsSpeechThatCannotBeHadIsRefusedNotWorkedAround() {
+        let noKey = SaathiConfiguration(speech: .sarvam)
+        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: noKey, speaker: PrintingSpeaker())) { error in
+            XCTAssertTrue(error.localizedDescription.contains("needs a Sarvam key"), error.localizedDescription)
+        }
+        let french = SaathiConfiguration(provider: .sarvam, sarvamKey: "k", speech: .sarvam, language: "fr")
+        XCTAssertThrowsError(try VoiceSessionFactory.make(configuration: french, speaker: PrintingSpeaker())) { error in
+            XCTAssertTrue(error.localizedDescription.contains("French is not one of them"), error.localizedDescription)
+        }
     }
 }
 
@@ -694,5 +757,50 @@ final class SharedFramesTests: XCTestCase {
         XCTAssertEqual(Array(UnsafeBufferPointer(start: buffer.int16ChannelData![0], count: 4)), samples)
         XCTAssertEqual(SharedFrames.peak(buffer), 1, accuracy: 0.0001)
         XCTAssertNil(SharedFrames.buffer(Data()), "no bytes, no buffer")
+    }
+}
+
+// MARK: - Which recogniser the on-device ears ask for
+
+final class DeviceEarsTests: XCTestCase {
+
+    private let supported = ["en-US", "en-GB", "en-IN", "fr-CA", "fr-FR", "hi-IN", "de-DE", "pt-BR"]
+
+    /// It used to be the Mac's own language whatever Settings said: someone who chose French on an
+    /// English Mac was heard as English words and answered in French.
+    func testTheEarsAskForTheLanguageOfSettingsNotTheMacsOwn() {
+        XCTAssertEqual(DeviceEars.choice(language: "hi", machine: "en_US", supported: supported), .locale("hi-IN"))
+        XCTAssertEqual(DeviceEars.choice(language: "de-DE", machine: "en-US", supported: supported), .locale("de-DE"))
+        XCTAssertEqual(
+            DeviceEars.choice(language: "fr", machine: "en_US", supported: supported), .locale("fr-FR"),
+            "a bare language gets its usual region, not the first in the alphabet")
+        XCTAssertEqual(DeviceEars.choice(language: "fr-CA", machine: "en_US", supported: supported), .locale("fr-CA"))
+        XCTAssertEqual(
+            DeviceEars.choice(language: "pt", machine: "en_US", supported: supported), .locale("pt-BR"),
+            "with no usual region on offer, whichever there is")
+    }
+
+    /// The Mac's own recogniser when it speaks the language: it knows which English its owner means.
+    func testTheMacsOwnRecogniserIsKeptForItsOwnLanguage() {
+        XCTAssertEqual(DeviceEars.choice(language: "en", machine: "en_US", supported: supported), .own)
+        XCTAssertEqual(DeviceEars.choice(language: "en-IN", machine: "en_GB", supported: supported), .own)
+    }
+
+    func testALanguageThisMacHasNoRecogniserForIsNone() {
+        for language in ["ml", "ta-IN", "or"] {
+            XCTAssertEqual(DeviceEars.choice(language: language, machine: "en_US", supported: supported), .none, language)
+        }
+    }
+
+    /// The Mac's own recogniser standing in is what this lane always did. It is said now, and the
+    /// way out is named where there is one: Sarvam hears ten Indian languages this Mac cannot.
+    func testSettlingForTheMacsOwnRecogniserIsSaidAndSoIsWhoCouldHear() {
+        XCTAssertEqual(
+            DeviceEars.settledFor("en-US", insteadOf: "ml"),
+            "ready — on-device speech recognition (en-US). This Mac cannot hear Malayalam on its own. "
+                + "Sarvam can hear it: add a Sarvam key, or turn its speech on, in Setup.")
+        XCTAssertEqual(
+            DeviceEars.settledFor("en-US", insteadOf: "sw"),
+            "ready — on-device speech recognition (en-US). This Mac cannot hear Swahili on its own.")
     }
 }

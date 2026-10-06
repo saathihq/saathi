@@ -30,7 +30,7 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
     private let settings = OSAllocatedUnfairLock(initialState: SpeechSettings())
     /// Asked for once. The list only changes when someone downloads a voice in System Settings,
     /// and a relaunch picking that up is a fair price for not enumerating voices every sentence.
-    private static let installedVoiceLanguages = AVSpeechSynthesisVoice.speechVoices().map(\.language)
+    public static let installedVoiceLanguages = AVSpeechSynthesisVoice.speechVoices().map(\.language)
 
     public init(settings: SpeechSettings = SpeechSettings()) {
         self.settings.withLock { $0 = settings }
@@ -91,7 +91,7 @@ public final class SystemSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable
 /// Wraps any speaker and reports when speech starts and stops, so the companion's face can follow
 /// its own voice without the speaker protocol knowing about faces. Stop is reported on every exit,
 /// including cancellation.
-public final class ObservedSpeaker: Speaker, @unchecked Sendable {
+public final class ObservedSpeaker: Speaker, StoppableSpeaker, @unchecked Sendable {
     private let inner: any Speaker
     private let onSpeakingChanged: @Sendable (Bool) -> Void
 
@@ -252,14 +252,21 @@ public struct SpeechSettings: Equatable, Sendable {
         return available.filter(isSameLanguage).sorted().first ?? fallbackLanguage
     }
 
+    /// Whether this Mac can read a language aloud at all, rather than falling back to an English
+    /// voice reading another script.
+    public static func hasVoice(for language: String, available: [String]) -> Bool {
+        let code = language.split(separator: "-").first.map { $0.lowercased() } ?? language.lowercased()
+        return available.contains { $0.lowercased() == code || $0.lowercased().hasPrefix(code + "-") }
+    }
+
     /// The language a line is actually *in*, between the one Saathi was told to speak and English.
     ///
     /// Saathi has sentences of its own that are written in English — "I did not catch that", the
     /// (i) explanation, the whole of first run — and a Tamil synthesiser reading them is the same
     /// noise as an English one reading Tamil. Rather than teach every caller to say which language
     /// its string is in, the speaker looks: only ever a choice between the wanted language and
-    /// English, so a French sentence is never mistaken for Italian, and a line too short to tell
-    /// ("OK") stays in the wanted language.
+    /// English, so a French sentence is never mistaken for Italian, and a line with nothing to
+    /// tell a language by ("42") stays in the wanted language.
     public static func spokenLanguage(of text: String, wanted: String?) -> String? {
         guard let wanted = wanted?.trimmingCharacters(in: .whitespaces), !wanted.isEmpty else { return wanted }
         let code = wanted.split(separator: "-").first.map { $0.lowercased() } ?? wanted.lowercased()

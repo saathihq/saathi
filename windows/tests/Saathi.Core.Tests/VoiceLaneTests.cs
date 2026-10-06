@@ -71,6 +71,34 @@ public class VoiceLaneTests
         Assert.DoesNotContain("only the transcript is sent", report);
     }
 
+    /// <summary>With Sarvam's speech the voice does leave, and the report says so and to whom.</summary>
+    [Fact]
+    public void SarvamsSpeechSaysTheVoiceLeavesAndWhereTo()
+    {
+        var report = VoiceLaneReport.Describe(new SaathiConfiguration
+        {
+            Provider = ProviderKind.Sarvam, SarvamKey = "x", Speech = SpeechEngine.Sarvam,
+        });
+        Assert.Contains("lane       chain", report, StringComparison.Ordinal);
+        Assert.Contains("speech in  sarvam, over the network", report, StringComparison.Ordinal);
+        Assert.Contains("speech out sarvam, over the network", report, StringComparison.Ordinal);
+        Assert.Contains("your voice leaves this machine as audio, to Sarvam", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("stays on this machine", report, StringComparison.Ordinal);
+    }
+
+    /// <summary>The realtime lane carries its own speech; Speech is not read there.</summary>
+    [Fact]
+    public void SpeechIsNotReadOnTheRealtimeLane()
+    {
+        var plain = new SaathiConfiguration { Provider = ProviderKind.Openai, OpenaiKey = "x" };
+        var withSpeech = new SaathiConfiguration
+        {
+            Provider = ProviderKind.Openai, OpenaiKey = "x", Speech = SpeechEngine.Sarvam,
+        };
+        Assert.Equal(VoiceLaneReport.Describe(plain), VoiceLaneReport.Describe(withSpeech));
+        Assert.Equal(ProviderReport.Describe(plain), ProviderReport.Describe(withSpeech));
+    }
+
     /// <summary>Same input, same bytes — what check-parity.sh diffs against the macOS client.</summary>
     [Fact]
     public void TheReportIsDeterministic()

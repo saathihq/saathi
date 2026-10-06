@@ -19,7 +19,10 @@ public final class AppController {
     var configuration: SaathiConfiguration
     let data: MascotData
     private let color: MascotColor
-    private let validator = KeyValidator()
+    let validator = KeyValidator()
+    /// Which of Setup's key fields have text in them right now. Which, not what: a key being typed
+    /// stays in the view. See `AppController+Setup.swift`.
+    var typedKeyFields: Set<ProviderKind> = []
     private var machine: CompanionStateMachine
     private var shown: CompanionState = .idle
 
@@ -27,8 +30,9 @@ public final class AppController {
     let notch: NotchPanel?
     let menu: MenuBarController
 
-    /// The voice underneath `speaker`, kept so its language and pace can follow the configuration.
-    private let systemSpeaker: SystemSpeaker
+    /// The voice underneath `speaker` — this Mac's, or Sarvam's when the configuration asks for
+    /// it — kept so it can follow the configuration as that changes.
+    private let companionVoice: CompanionVoice
     var speaker: ObservedSpeaker!
     private var performer: ActionPerformer!
     /// The voice session's whole life — start, turns, reconfigure, quit. See `VoiceConductor`.
@@ -70,9 +74,14 @@ public final class AppController {
         }
         menu = MenuBarController(icon: MenuBarIcon.image(data: data), installStatusItem: true)
 
-        systemSpeaker = SystemSpeaker(settings: SpeechSettings(configuration))
-        speaker = ObservedSpeaker(systemSpeaker) { [weak self] speaking in
+        companionVoice = CompanionVoice(configuration: configuration)
+        speaker = ObservedSpeaker(companionVoice) { [weak self] speaking in
             Task { @MainActor in self?.handle(.speakingChanged(speaking)) }
+        }
+        // When Sarvam cannot speak a line this Mac's voice takes it; this is the island and the
+        // log being told why the voice changed.
+        companionVoice.reportFailures { [weak self] message in
+            Task { @MainActor in self?.handle(.failure(message)) }
         }
         performer = ActionPerformer(speaker: speaker, urlOpener: SystemUrlOpener())
         let speaker = self.speaker!
@@ -89,6 +98,13 @@ public final class AppController {
             onEvent: { [weak self] in self?.handle($0) },
             onScreenLook: { [weak self] question, answer in
                 self?.conversation.append(.look(question: question, answer: answer))
+            },
+            // The buddy flies to what the look was about, and the log says how the spot was found.
+            onPointAt: { [weak self] target in
+                guard let self else { return }
+                self.companion.point(at: target)
+                let text = target.visibleText.map { " \"\($0)\"" } ?? ""
+                self.conversation.append(.action("pointed at (\(Int(target.point.x)), \(Int(target.point.y)))\(text) — \(target.how)"))
             },
             // Only first run draws these; the rest of the app has the face for that.
             // And only while a turn is open: the tap goes on firing for a moment after the turn is
@@ -209,17 +225,11 @@ public final class AppController {
         ticker = timer
     }
 
-    /// `scripted` is first run: its lines are written in English, so they are read by an English
-    /// voice whatever language was just chosen — a Tamil synthesiser reading English sentences is
-    /// the same noise as the reverse. The pace still follows at once.
+    /// `scripted` is first run: its lines are written in English, so they are read by this Mac's
+    /// English voice whatever language — and whoever's voice — was just chosen. The pace still
+    /// follows at once. See `CompanionVoice.deviceSettings`.
     func applySpeechSettings(scripted: Bool = false) {
-        systemSpeaker.apply(Self.speechSettings(for: configuration, scripted: scripted))
-    }
-
-    static func speechSettings(for configuration: SaathiConfiguration, scripted: Bool) -> SpeechSettings {
-        var settings = SpeechSettings(configuration)
-        if scripted { settings.language = "en-US" }
-        return settings
+        companionVoice.apply(configuration, scripted: scripted)
     }
 
     // MARK: voice
@@ -232,7 +242,7 @@ public final class AppController {
         handsFree = false
         notch?.model.isAlwaysListening = false
         configuration = updated
-        systemSpeaker.apply(SpeechSettings(updated))
+        companionVoice.apply(updated)
         applyConfigurationToIsland()
     }
 
@@ -240,23 +250,7 @@ public final class AppController {
     /// every reconfigure, so the Home tab can never describe a provider that is no longer in use.
     func applyConfigurationToIsland() {
         guard let notch else { return }
-        notch.model.providerTitle = Self.providerTitle(for: configuration)
-        notch.model.privacyLine = Self.privacyLine(for: configuration)
-        notch.model.voiceTitle = configuration.resolvedVoice.isEmpty ? "—" : configuration.resolvedVoice
-        notch.model.laneTitle = configuration.providerRow.voice == .realtime
-            ? "one connection"
-            : "three steps"
-
-        // The status pill in the menu-bar band, and the Backend rows on Setup. Two different
-        // questions: the pill says where Saathi is connected on the lane in use, the rows say
-        // whether the hosted backend is set up — which off the hosted lane it need not be.
-        let pill = Self.connectionPill(for: configuration)
-        notch.model.connectionTitle = pill.title
-        notch.model.isConnectionConfigured = pill.isConfigured
-        let token = (configuration.token ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        notch.model.usesBackend = configuration.providerRow.requiresToken
-        notch.model.isBackendConfigured = !token.isEmpty
-        notch.model.backendTitle = Self.backendTitle(for: configuration)
+        Self.describe(configuration, on: notch.model)
 
         // Neither integration exists in Saathi yet, so both draw in their real "not configured"
         // state. They are a list rather than two hand-written tiles so that wiring one up later is
@@ -269,6 +263,10 @@ public final class AppController {
             let launched = configuration
             notch.model.skills = SkillLibraryStore(configuration: { [weak self] in self?.configuration ?? launched })
         }
+
+        // Last, and every time: what a Save would do depends on the file, and the file is what
+        // has just changed.
+        refreshPlanExplanation()
     }
 
     // MARK: hold to talk
@@ -468,19 +466,14 @@ public final class AppController {
     /// one place that opens the provider alert.
     private func wireNotch() {
         guard let notch else { return }
-        applyConfigurationToIsland()
         notch.model.companionVisible = true
         notch.model.tab = Self.openingTab(for: configuration)
-        notch.model.language = configuration.resolvedLanguage
-        // Seed both verdicts from what is already on disk — otherwise every launch shows `.empty`
-        // regardless of what is stored, and the `isValid && !effectiveKey.isEmpty` gate never sees
-        // a stored key as valid. Only for a vendor the config actually names; see `seededKeyStates`.
-        let seeded = Self.seededKeyStates(for: configuration)
-        notch.model.openAIKeyState = seeded.openAI
-        notch.model.anthropicKeyState = seeded.anthropic
-        if notch.model.tab == .setup {
-            refreshPlanExplanation()
-        }
+        // The verdicts are seeded from what is already on disk — otherwise every launch shows
+        // `.empty` regardless of what is stored, and a stored key never counts as one. Only for a
+        // vendor the config actually names; see `seededKeyStates`. Before the island is filled in,
+        // because the sentence under the fields is drawn from them.
+        notch.model.keyStates = Self.seededKeyStates(for: configuration)
+        applyConfigurationToIsland()
 
         var actions = IslandActions()
         actions.onTalk = menu.onTalk
@@ -541,155 +534,9 @@ public final class AppController {
             // `AppRelauncher.relaunch` is itself `@MainActor`.
             Task { await AppRelauncher.relaunch(bundleURL: Bundle.main.bundleURL) }
         }
-        // Both fields arrive, not just the one being checked: the verdict that lands changes the
-        // plan, and the plan is decided by both keys at once. See `setupDecision`.
-        actions.onCheckKey = { [weak self] kind, openAIField, anthropicField in
-            guard let self, let notch = self.notch else { return }
-            let key: String
-            switch kind {
-            case .openai:
-                key = openAIField
-                notch.model.openAIKeyState = .checking
-            case .anthropic:
-                key = anthropicField
-                notch.model.anthropicKeyState = .checking
-            default: return
-            }
-            Task {
-                let result = await self.validator.check(kind, key: key)
-                await MainActor.run {
-                    switch kind {
-                    case .openai: notch.model.openAIKeyState = .checked(result)
-                    case .anthropic: notch.model.anthropicKeyState = .checked(result)
-                    default: return
-                    }
-                    self.refreshPlanExplanation(
-                        openAIField: openAIField, anthropicField: anthropicField)
-                }
-            }
-        }
-
-        actions.onKeyFieldsEmpty = { [weak self] openAIField, anthropicField in
-            guard let self, let notch = self.notch else { return }
-            let seeded = Self.seededKeyStates(for: self.configuration)
-            notch.model.openAIKeyState = Self.verdict(
-                notch.model.openAIKeyState, forField: openAIField, seeded: seeded.openAI)
-            notch.model.anthropicKeyState = Self.verdict(
-                notch.model.anthropicKeyState, forField: anthropicField, seeded: seeded.anthropic)
-            self.refreshPlanExplanation(openAIField: openAIField, anthropicField: anthropicField)
-        }
-
-        actions.onLanguage = { [weak self] tag in
-            guard let self, let notch = self.notch else { return }
-            notch.model.language = tag
-            var updated = self.configuration
-            updated.language = tag.isEmpty ? nil : tag
-            do {
-                try ConfigurationStore.save(updated, to: ConfigurationStore.defaultPath())
-            } catch {
-                self.handle(.failure("could not save the language: \(error.localizedDescription)"))
-                return
-            }
-            // The language is baked into the session's instructions, so it only takes effect on a
-            // fresh session — the same reconfigure a saved key goes through.
-            Task { await self.reconfigure(updated) }
-        }
-
-        actions.onSaveKeys = { [weak self] openAIKey, anthropicKey in
-            guard let self, let notch = self.notch else { return }
-            // Refused coherently rather than half-applied: without this a second Save during an
-            // in-flight reconfigure could still write the file, flip the fields to `.saved` and
-            // switch to Home, only to have the reconfigure it raced drop on the floor — leaving
-            // disk naming one provider and the island showing another until relaunch.
-            guard !self.voice.isReconfiguring else {
-                self.voice.reportReconfiguring()
-                return
-            }
-
-            // A key typed but never Checked is checked here, and saved only if the vendor accepts
-            // it. Save used to stay disabled until Check had been pressed, and a disabled Save
-            // looks like a Save that worked — the old key stayed on disk and the voice kept
-            // failing with nothing on screen saying why.
-            let unchecked = Self.keysNeedingCheck(
-                openAIField: openAIKey, anthropicField: anthropicKey,
-                openAIState: notch.model.openAIKeyState, anthropicState: notch.model.anthropicKeyState)
-            if !unchecked.isEmpty {
-                for kind in unchecked {
-                    if kind == .openai { notch.model.openAIKeyState = .checking }
-                    else { notch.model.anthropicKeyState = .checking }
-                }
-                Task {
-                    var allValid = true
-                    for kind in unchecked {
-                        let result = await self.validator.check(kind, key: kind == .openai ? openAIKey : anthropicKey)
-                        if result != .valid { allValid = false }
-                        if kind == .openai { notch.model.openAIKeyState = .checked(result) }
-                        else { notch.model.anthropicKeyState = .checked(result) }
-                    }
-                    self.refreshPlanExplanation(openAIField: openAIKey, anthropicField: anthropicKey)
-                    // Every typed key now carries a verdict, so this second pass saves or, with a
-                    // rejection on show under its row, does nothing.
-                    if allValid { notch.actions.onSaveKeys(openAIKey, anthropicKey) }
-                }
-                return
-            }
-
-            // The same call the sentence under the fields is drawn from, with the same inputs, so
-            // what was promised there is what is written here.
-            let decision = Self.setupDecision(
-                openAIField: openAIKey,
-                anthropicField: anthropicKey,
-                openAIState: notch.model.openAIKeyState,
-                anthropicState: notch.model.anthropicKeyState,
-                configuration: self.configuration)
-            let plan = decision.plan
-            let updated = plan.applied(
-                to: self.configuration,
-                openAIKey: decision.openAIKey,
-                anthropicKey: decision.anthropicKey)
-
-            do {
-                try ConfigurationStore.save(updated, to: ConfigurationStore.defaultPath())
-            } catch {
-                self.handle(.failure("could not save your keys: \(error.localizedDescription)"))
-                return
-            }
-
-            // Saved keys come back only as their last four characters; the full key is never put
-            // back into a field. Masked from the effective key, not the field, so a retained
-            // stored key still shows its real suffix instead of the empty field's generic mask.
-            if plan.provider == .openai || plan.storedButUnused.contains(.openai) {
-                notch.model.openAIKeyState = .saved(masked: IslandModel.masked(decision.openAIKey))
-            }
-            if plan.provider == .anthropic || plan.storedButUnused.contains(.anthropic) {
-                notch.model.anthropicKeyState = .saved(masked: IslandModel.masked(decision.anthropicKey))
-            }
-            notch.model.planExplanation = plan.explanation
-            notch.model.unusedKeyNote = Self.unusedKeyNote(for: plan)
-            notch.model.tab = .home
-
-            Task { await self.reconfigure(updated) }
-        }
+        // Keys, the picker, the switch and the language: `AppController+Setup.swift`.
+        wireSetup(into: &actions)
 
         notch.actions = actions
-    }
-
-    /// The plan changes as each check lands, so the sentence under the fields follows it rather than
-    /// appearing only after a save. Someone should be able to see what they are about to get.
-    ///
-    /// `openAIField`/`anthropicField` are the live text of *both* fields, as the panel holds them
-    /// right now — not just the one that changed. Empty means the field really is empty, and then
-    /// the key on disk stands in. Both default to empty for the one call that has no panel behind it
-    /// yet: the seed from `wireNotch`, before the Setup view has been built.
-    private func refreshPlanExplanation(openAIField: String = "", anthropicField: String = "") {
-        guard let notch else { return }
-        let decision = Self.setupDecision(
-            openAIField: openAIField,
-            anthropicField: anthropicField,
-            openAIState: notch.model.openAIKeyState,
-            anthropicState: notch.model.anthropicKeyState,
-            configuration: configuration)
-        notch.model.planExplanation = decision.plan.explanation
-        notch.model.unusedKeyNote = Self.unusedKeyNote(for: decision.plan)
     }
 }

@@ -1,8 +1,8 @@
 // Generated from contract/schema/saathi.json by contract/generate.mjs. Do not edit.
 // Run `npm run generate -w contract` after changing the schema.
-// Contract version 0.8.0.
+// Contract version 0.9.0.
 
-export const CONTRACT_VERSION = "0.8.0";
+export const CONTRACT_VERSION = "0.9.0";
 export const DEFAULT_BASE_URL = "https://api.saathi.dev";
 
 /** `~/.saathi/shell.json`. */
@@ -13,16 +13,20 @@ export type SaathiConfiguration = {
   providerBaseUrl?: string;
   /** Overrides the provider's default model. */
   model?: string;
-  /** Deprecated: use openaiKey or anthropicKey. Still read when no vendor-specific key is set, so existing configs keep working. */
+  /** Deprecated: use openaiKey, sarvamKey or anthropicKey. Still read — as the key of the provider this file names, and of no other — when that provider has no key of its own, so existing configs keep working. */
   apiKey?: string;
   /** Your own OpenAI key. Used for the realtime voice lane and for thinking. Never sent to Saathi's servers. */
   openaiKey?: string;
-  /** Your own Anthropic key. Stored for a lane that does not exist yet; nothing calls it today. */
+  /** Your own Anthropic key. Looks at the screen when a turn asks about something on it, and thinks when nothing else can. Never sent to Saathi's servers. */
   anthropicKey?: string;
+  /** Your own Sarvam AI key. Thinks with Sarvam, and hears and speaks with it when speech is sarvam. Never sent to Saathi's servers. */
+  sarvamKey?: string;
   /** Overrides the realtime voice model. Distinct from model, which is what does the thinking. */
   voiceModel?: string;
-  /** The realtime voice's name. Defaults to the provider row's. */
+  /** The voice's name: the realtime voice on the realtime lane, Sarvam's speaker when speech is sarvam. Defaults to the provider's. */
   voice?: string;
+  /** Whose ears and mouth a chain-lane turn uses. Unset means this machine's. The realtime lane carries its own speech and does not read this. */
+  speech?: SpeechEngine;
   /** The language Saathi speaks, as a BCP-47 tag ("en", "hi", "ta", "ko"). Unset means follow this machine's language rather than let the model guess. */
   language?: string;
   /** Overrides the hosted backend URL. Only used in hosted mode. */
@@ -86,6 +90,10 @@ export const PACE_CASES: readonly Pace[] = ["slow", "normal"] as const;
 /** How a provider carries a spoken turn. Not a quality setting — a statement of what the provider can actually do, which is why it is a column in the provider table rather than a preference. */
 export type VoiceLane = "realtime" | "chain";
 export const VOICELANE_CASES: readonly VoiceLane[] = ["realtime", "chain"] as const;
+
+/** Where speech becomes text and text becomes speech on the chain lane. With device the learner's voice never leaves the machine. With sarvam it is sent to Sarvam as audio — the only way to be heard in most Indian languages, and never done unless asked for. */
+export type SpeechEngine = "device" | "sarvam";
+export const SPEECHENGINE_CASES: readonly SpeechEngine[] = ["device", "sarvam"] as const;
 
 /** Speak a line to the learner. The companion narrates; this is the primary action. */
 export type SayAction = {

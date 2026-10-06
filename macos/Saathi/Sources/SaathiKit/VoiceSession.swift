@@ -29,6 +29,8 @@ public struct VoiceSessionCallbacks: Sendable {
     /// A screen look finished: what the model asked the eyes, and what they answered — or why they
     /// could not look. The answer goes back to the model either way; this is so it can be kept.
     public var onScreenLook: (@Sendable (_ question: String, _ answer: String) -> Void)?
+    /// A look's answer is about somewhere on the screen. For the buddy to fly there.
+    public var onPointAt: (@Sendable (ScreenTarget) -> Void)?
     /// How loud the microphone is right now, 0…1, about twenty times a second while a turn is open.
     /// For showing someone they are being heard; nothing is decided from it.
     public var onInputLevel: (@Sendable (Float) -> Void)?
@@ -42,6 +44,7 @@ public struct VoiceSessionCallbacks: Sendable {
         onAction: (@Sendable (SaathiAction) -> Void)? = nil,
         onStatus: (@Sendable (String) -> Void)? = nil,
         onScreenLook: (@Sendable (String, String) -> Void)? = nil,
+        onPointAt: (@Sendable (ScreenTarget) -> Void)? = nil,
         onInputLevel: (@Sendable (Float) -> Void)? = nil,
         onPartialTranscript: (@Sendable (String) -> Void)? = nil
     ) {
@@ -50,6 +53,7 @@ public struct VoiceSessionCallbacks: Sendable {
         self.onAction = onAction
         self.onStatus = onStatus
         self.onScreenLook = onScreenLook
+        self.onPointAt = onPointAt
         self.onInputLevel = onInputLevel
         self.onPartialTranscript = onPartialTranscript
     }
@@ -74,6 +78,9 @@ public protocol VoiceSession: AnyObject, Sendable {
     func sendText(_ text: String) async throws
     /// Hands-free: listen without the keys held, and answer whenever the learner stops talking.
     func setHandsFree(_ on: Bool) async throws
+    /// The learner has started talking over Saathi. Whatever is being said stops, and an answer
+    /// still on its way is dropped rather than spoken over them. Called before a turn opens.
+    func interrupt()
     func stop() async
 }
 
@@ -94,6 +101,10 @@ extension VoiceSession {
         throw VoiceError.notConfigured(
             "Hands-free needs OpenAI's realtime voice. Add an OpenAI key in Settings to use it.")
     }
+
+    /// Nothing to do on the realtime lane: opening a turn there already flushes what is playing
+    /// and cancels the response in flight.
+    public func interrupt() {}
 }
 
 /// Builds the session the configuration calls for. The only place that maps a lane to a class.
@@ -122,7 +133,15 @@ public enum VoiceSessionFactory {
         case .realtime:
             return RealtimeVoiceSession(configuration: configuration, engine: engine)
         case .chain:
-            return ChainVoiceSession(configuration: configuration, speaker: speaker)
+            guard SarvamSpeech.isOn(configuration) else {
+                return ChainVoiceSession(configuration: configuration, speaker: speaker)
+            }
+            // Asked for, and had — or refused, with the reason. Never on-device ears in their
+            // place: that would be the voice going somewhere other than where the report says.
+            let sarvam = try SarvamSpeech.settings(for: configuration)
+            return ChainVoiceSession(
+                configuration: configuration, speaker: speaker,
+                ears: SarvamEars(client: SarvamClient(key: sarvam.key), language: sarvam.language))
         }
     }
 }

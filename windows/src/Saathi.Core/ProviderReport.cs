@@ -32,10 +32,23 @@ public static class ProviderReport
             $"  model      {(string.IsNullOrEmpty(configuration.ResolvedModel) ? "chosen by the backend" : configuration.ResolvedModel)}",
             $"  your key   {KeyLine(row, configuration)}",
             $"  account    {TokenLine(row, configuration)}",
-            $"  privacy    {(row.SendsDataOffMachine ? "leaves this machine" : "stays on this machine")}",
+            $"  privacy    {Privacy(configuration)}",
         };
 
         return string.Join("\n", lines);
+    }
+
+    /// <summary>The thinking leaves for every provider but local. With Sarvam's ears and mouth the
+    /// voice leaves too, and so does every reply, which Bulbul is sent in order to speak it. In
+    /// front of a model on this machine those are the only things that do, and that is said in so
+    /// many words: two lines up, the local row's own summary has just said nothing leaves the
+    /// device.</summary>
+    private static string Privacy(SaathiConfiguration configuration)
+    {
+        if (configuration.ProviderRow.SendsDataOffMachine) return "leaves this machine";
+        if (VoiceLaneReport.SarvamSpeechIsOn(configuration))
+            return "the thinking stays on this machine; your voice and what is said back go to Sarvam";
+        return "stays on this machine";
     }
 
     /// <summary>The wire spelling, so the two clients agree on how a mode is named.</summary>
@@ -44,7 +57,9 @@ public static class ProviderReport
     private static string KeyLine(SaathiProvider row, SaathiConfiguration configuration)
     {
         if (!row.RequiresKey) return "not needed";
-        var present = !string.IsNullOrWhiteSpace(configuration.ApiKey);
+        // The vendor's own field first, then the legacy shared one — the same question the macOS
+        // report asks. Reading ApiKey alone called a key in its vendor field MISSING.
+        var present = configuration.Credential(row.Kind) is not null;
         // Never the key itself, and never a prefix of it: a logged prefix is still a logged secret.
         return present ? "set" : "MISSING — this mode cannot run without it";
     }
